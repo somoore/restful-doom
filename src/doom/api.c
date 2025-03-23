@@ -17,6 +17,9 @@
 
 
 extern api_obj_description_t api_descriptors[];
+int keys_down[NUMKEYS];
+int target_angle;
+
 char path[100];
 char hud_message[512];
 
@@ -45,17 +48,30 @@ void API_Init(int port)
         fprintf(stderr, "Error: SDLNet_Init: %s\n", SDLNet_GetError());
         exit(EXIT_FAILURE);
     }
-    if (SDLNet_ResolveHost(&ip, NULL, port) < 0)
-    {
-        fprintf(stderr, "Error: SDLNet_ResolveHost: %s\n", SDLNet_GetError());
-        exit(EXIT_FAILURE);
+    // Use the port passed as parameter
+    printf("Attempting to bind to API port %d\n", port);
+    memset(&ip, 0, sizeof(ip));
+    ip.host = INADDR_ANY;
+    ip.port = SDL_SwapBE16(port);
+    printf("Host: %u, Port: %u\n", ip.host, ip.port);
+    printf("Binding to 0.0.0.0:%d\n", port);
+    
+    // Release any existing socket first
+    if (server_sd) {
+        SDLNet_TCP_Close(server_sd);
+        server_sd = NULL;
     }
-
-    if (!(server_sd = SDLNet_TCP_Open(&ip)))
+    
+    server_sd = SDLNet_TCP_Open(&ip);
+    if (server_sd == NULL)
     {
         fprintf(stderr, "Error: SDLNet_TCP_Open: %s\n", SDLNet_GetError());
-        exit(EXIT_FAILURE);
+        perror("Socket error");
+        // Don't exit, just report the error
+        printf("Failed to bind to port %d, API functionality will not be available\n", port);
+        return;
     }
+    printf("Socket opened successfully on port %d\n", port);
     if (!(set = SDLNet_AllocSocketSet(10)))
     {
         fprintf(stderr, "Error: SDLNet_AllocSocketSet: %s\n", SDLNet_GetError());
@@ -74,26 +90,40 @@ void API_RunIO()
 {
     TCPsocket csd;
     int recv_len = 0;
-    char buffer[1024];
+    char buffer[2048] = {0};  // Larger buffer, zero-initialized
     IPaddress *remote_ip;
     const char *ip_str;
+    api_request_t request = {0};  // Zero-initialize the request
+    api_response_t response;
 
+    // Accept new connections
     if ((csd = SDLNet_TCP_Accept(server_sd)))
     {
+        if (client_sd) {
+            // Clean up any existing connection first
+            SDLNet_TCP_DelSocket(set, client_sd);
+            SDLNet_TCP_Close(client_sd);
+        }
         client_sd = csd;
-        SDLNet_TCP_AddSocket(set, client_sd);
+        if (SDLNet_TCP_AddSocket(set, client_sd) == -1) {
+            printf("Error adding socket to set: %s\n", SDLNet_GetError());
+            SDLNet_TCP_Close(client_sd);
+            client_sd = NULL;
+            return;
+        }
     }
 
-    if (SDLNet_CheckSockets(set, 0) > 0)
+    // Handle existing connection
+    if (client_sd && SDLNet_CheckSockets(set, 0) > 0)
     {
-        recv_len = SDLNet_TCP_Recv(client_sd, buffer, 1024);
+        recv_len = SDLNet_TCP_Recv(client_sd, buffer, sizeof(buffer) - 1);
         if (recv_len > 0)
         {
-            api_request_t request;
-            api_response_t response;
+            buffer[recv_len] = '\0';  // Ensure null termination
+            
             if (API_ParseRequest(buffer, recv_len, &request)) {
                 char msg[512];
-                snprintf(msg, 512, "%s %s", request.method, request.full_path);
+                snprintf(msg, sizeof(msg), "%s %s", request.method, request.full_path);
                 API_SetHUDMessage(msg);
                 response = API_RouteRequest(request);
             }
@@ -102,15 +132,31 @@ void API_RunIO()
                 response = API_CreateErrorResponse(400, "invalid request");
             }
 
+            // Send response and log
             API_SendResponse(response);
-
-            // access log
             remote_ip = SDLNet_TCP_GetPeerAddress(client_sd);
-            ip_str = SDLNet_ResolveIP(remote_ip);
-            printf("access_log: %s - - - \"%s %s\" %d\n", ip_str, request.method, request.full_path, response.status_code);
+            if (remote_ip) {
+                ip_str = SDLNet_ResolveIP(remote_ip);
+                if (ip_str) {
+                    printf("access_log: %s - - - \"%s %s\" %d\n", 
+                           ip_str, 
+                           request.method ? request.method : "-", 
+                           request.full_path ? request.full_path : "-", 
+                           response.status_code);
+                }
+            }
 
+            // Clean up connection
             SDLNet_TCP_DelSocket(set, client_sd);
             SDLNet_TCP_Close(client_sd);
+            client_sd = NULL;
+        }
+        else if (recv_len <= 0)
+        {
+            // Connection closed or error
+            SDLNet_TCP_DelSocket(set, client_sd);
+            SDLNet_TCP_Close(client_sd);
+            client_sd = NULL;
         }
     }
 
@@ -149,6 +195,91 @@ boolean API_ParseRequest(char *buffer, int buffer_len, api_request_t *request)
 }
 
 
+// Helper function to read a file into a buffer
+char* read_file(const char* filepath, size_t* size) {
+    FILE* file = fopen(filepath, "rb");
+    if (!file) {
+        printf("Failed to open file: %s\n", filepath);
+        return NULL;
+    }
+    
+    fseek(file, 0, SEEK_END);
+    long fileSize = ftell(file);
+    fseek(file, 0, SEEK_SET);
+    
+    if (fileSize <= 0) {
+        fclose(file);
+        printf("File is empty: %s\n", filepath);
+        return NULL;
+    }
+    
+    char* buffer = (char*)malloc(fileSize + 1);
+    if (!buffer) {
+        fclose(file);
+        printf("Memory allocation failed for file: %s\n", filepath);
+        return NULL;
+    }
+    
+    size_t bytesRead = fread(buffer, 1, fileSize, file);
+    fclose(file);
+    
+    if (bytesRead != fileSize) {
+        free(buffer);
+        printf("Failed to read entire file: %s\n", filepath);
+        return NULL;
+    }
+    
+    buffer[fileSize] = '\0';
+    *size = fileSize;
+    return buffer;
+}
+
+// Function to determine content type based on file extension
+const char* get_content_type(const char* filepath) {
+    const char* ext = strrchr(filepath, '.');
+    if (!ext) {
+        return "text/plain";
+    }
+    
+    if (strcasecmp(ext, ".html") == 0) {
+        return "text/html";
+    } else if (strcasecmp(ext, ".css") == 0) {
+        return "text/css";
+    } else if (strcasecmp(ext, ".js") == 0) {
+        return "application/javascript";
+    } else if (strcasecmp(ext, ".png") == 0) {
+        return "image/png";
+    } else if (strcasecmp(ext, ".jpg") == 0 || strcasecmp(ext, ".jpeg") == 0) {
+        return "image/jpeg";
+    } else if (strcasecmp(ext, ".gif") == 0) {
+        return "image/gif";
+    } else {
+        return "text/plain";
+    }
+}
+
+// Function to send a static file response
+void API_SendFileResponse(const char* filepath, const char* content_type) {
+    char buffer[1024];
+    size_t fileSize;
+    char* fileContent = read_file(filepath, &fileSize);
+    
+    if (!fileContent) {
+        printf("File not found or couldn't be read: %s\n", filepath);
+        sprintf(buffer, "HTTP/1.0 404\r\nConnection: close\r\nContent-Type: text/plain\r\n\r\nFile not found: %s\r\n", filepath);
+        SDLNet_TCP_Send(client_sd, buffer, strlen(buffer));
+        return;
+    }
+    
+    printf("Serving file: %s (%zu bytes)\n", filepath, fileSize);
+    sprintf(buffer, "HTTP/1.0 200\r\nConnection: close\r\nContent-Type: %s\r\nContent-Length: %zu\r\n\r\n", 
+            content_type, fileSize);
+    SDLNet_TCP_Send(client_sd, buffer, strlen(buffer));
+    SDLNet_TCP_Send(client_sd, fileContent, fileSize);
+    
+    free(fileContent);
+}
+
 // ----
 //  Route an http path + method to a controller action
 // ----
@@ -164,6 +295,68 @@ api_response_t API_RouteRequest(api_request_t req)
     char *method = req.method;
     char *path = req.url.path;
     cJSON *json = cJSON_Parse(req.body);
+    char filepath[512];
+    
+    // Check if this is a request for a static file
+    if (strcmp(method, "GET") == 0) {
+        // Handle root path redirect to play-doom.html
+        if (strcmp(path, "") == 0 || strcmp(path, "/") == 0) {
+            sprintf(filepath, "/app/www/play-doom.html");
+            API_SendFileResponse(filepath, "text/html");
+            // Return a special code to indicate we've already handled the response
+            return (api_response_t) { 0, NULL };
+        }
+        
+        // Check if this is a request for a static file with extension
+        if (strstr(path, ".html") || strstr(path, ".css") || strstr(path, ".js") ||
+            strstr(path, ".png") || strstr(path, ".jpg") || strstr(path, ".gif")) {
+            
+            // Security check - prevent directory traversal
+            if (strstr(path, "..")) {
+                return API_CreateErrorResponse(403, "Forbidden");
+            }
+            
+            // Strip leading slash if present
+            const char* file_path = path;
+            if (path[0] == '/') {
+                file_path = path + 1;
+            }
+            
+            // Try to serve from /app/www/ first
+            sprintf(filepath, "/app/www/%s", file_path);
+            printf("Looking for static file: %s\n", filepath);
+            
+            // Check if file exists
+            FILE* test = fopen(filepath, "rb");
+            if (test) {
+                fclose(test);
+                API_SendFileResponse(filepath, get_content_type(filepath));
+                // Return a special code to indicate we've already handled the response
+                return (api_response_t) { 0, NULL };
+            }
+            
+            // If file not found in /app/www/, try /usr/share/doom-web/
+            sprintf(filepath, "/usr/share/doom-web/%s", file_path);
+            printf("Looking for static file in alternate location: %s\n", filepath);
+            test = fopen(filepath, "rb");
+            if (test) {
+                fclose(test);
+                API_SendFileResponse(filepath, get_content_type(filepath));
+                // Return a special code to indicate we've already handled the response
+                return (api_response_t) { 0, NULL };
+            }
+        }
+    }
+    
+    // Handle OPTIONS requests for CORS preflight
+    if (strcmp(method, "OPTIONS") == 0) {
+        cJSON *root = cJSON_CreateObject();
+        cJSON_AddStringToObject(root, "status", "ok");
+        api_response_t response;
+        response.status_code = 200;
+        response.json = root;
+        return response;
+    }
     
     if (strcmp(path, "api/message") == 0)
     {
@@ -245,7 +438,7 @@ api_response_t API_RouteRequest(api_request_t req)
         }
         return API_CreateErrorResponse(405, "Method not allowed");
     }
-    else if (strcmp(path, "api/world/objects") == 0)
+    else if (strcmp(path, "api/things") == 0 || strcmp(path, "api/world/objects") == 0)
     {
         if (strcmp(method, "POST") == 0) 
         {
@@ -348,8 +541,14 @@ api_response_t API_RouteRequest(api_request_t req)
 void API_SendResponse(api_response_t resp) {
     char buffer[255];
     int len;
+    
+    // Special case for status_code 0 means we already sent the response
+    // (used for file serving)
+    if (resp.status_code == 0) {
+        return;
+    }
 
-    sprintf(buffer, "HTTP/1.0 %d\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nContent-Type:application/json\r\n\r\n", resp.status_code);
+    sprintf(buffer, "HTTP/1.0 %d\r\nConnection: close\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nContent-Type:application/json\r\n\r\n", resp.status_code);
     len = strlen(buffer);
     if (SDLNet_TCP_Send(client_sd, (void *)buffer, len) < len) {
         printf("failed to send all bytes\n");
@@ -461,6 +660,13 @@ cJSON* DescribeMObj(mobj_t *obj)
     cJSON *pos;
     cJSON *flags;
     cJSON *root = cJSON_CreateObject();
+    
+    if (obj == NULL) {
+        cJSON_AddNumberToObject(root, "id", 0);
+        cJSON_AddStringToObject(root, "error", "Object not initialized");
+        return root;
+    }
+    
     cJSON_AddNumberToObject(root, "id", obj->id);
     cJSON_AddItemToObject(root, "position", pos = cJSON_CreateObject());
     cJSON_AddNumberToObject(pos, "x", API_FixedToFloat(obj->x));

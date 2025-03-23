@@ -184,7 +184,20 @@ cJSON* getPlayer(int playernum)
     cJSON *ammo;
 
     player = &players[playernum];
+    
+    if (player == NULL || playernum < 0 || playernum >= MAXPLAYERS) {
+        root = cJSON_CreateObject();
+        cJSON_AddStringToObject(root, "error", "Invalid player number");
+        return root;
+    }
+    
     root = DescribeMObj(player->mo);
+    if (root == NULL) {
+        root = cJSON_CreateObject();
+        cJSON_AddStringToObject(root, "error", "Failed to create player object");
+        return root;
+    }
+    
     cJSON_AddStringToObject(root, "colour", player_names[playernum]);
     cJSON_AddNumberToObject(root, "armor", player->armorpoints);
     cJSON_AddNumberToObject(root, "kills", player->killcount);

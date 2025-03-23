@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RESTful DOOM - Combined View</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background-color: #1a1a1a;
+            color: #33ff33;
+            padding: 20px;
+            margin: 0;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        .row {
+            display: flex;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        .panel {
+            background-color: #2a2a2a;
+            border: 2px solid #33ff33;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 10px;
+            box-shadow: 0 0 10px rgba(51, 255, 51, 0.3);
+            flex: 1;
+            min-width: 300px;
+        }
+        h1, h2 {
+            color: #ff6600;
+            margin-top: 0;
+        }
+        .doom-view {
+            flex: 2;
+            height: 480px;
+            min-height: 480px;
+        }
+        .api-view {
+            flex: 1;
+            height: 480px;
+        }
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: 2px solid #33ff33;
+            border-radius: 5px;
+        }
+        .controls {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        button {
+            background-color: #ff6600;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #ff8533;
+        }
+    </style>
+</head>
+<body>
+    <h1>RESTful DOOM - Combined View</h1>
+    
+    <div class="controls">
+        <button onclick="refreshFrames()">Refresh All</button>
+    </div>
+    
+    <div class="container">
+        <div class="row">
+            <div class="panel doom-view">
+                <h2>DOOM Game View (VNC)</h2>
+                <iframe id="vnc-frame" src="http://127.0.0.1:6080/vnc.html?autoconnect=true&password=password"></iframe>
+            </div>
+            
+            <div class="panel api-view">
+                <h2>API Visualizer</h2>
+                <iframe id="api-frame" src="doom-ui.html"></iframe>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        function refreshFrames() {
+            document.getElementById('vnc-frame').src = document.getElementById('vnc-frame').src;
+            document.getElementById('api-frame').src = document.getElementById('api-frame').src;
+        }
+    </script>
+</body>
+</html>

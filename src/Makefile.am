@@ -1,20 +1,16 @@
 
-SUBDIRS = doom setup
+SUBDIRS = doom
 
 execgamesdir = ${exec_prefix}/games
 
 execgames_PROGRAMS = @PROGRAM_PREFIX@doom
 
-noinst_PROGRAMS = @PROGRAM_PREFIX@setup
 
-SETUP_BINARIES = @PROGRAM_PREFIX@doom-setup$(EXEEXT)
-
-execgames_SCRIPTS = $(SETUP_BINARIES)
 
 AM_CFLAGS = -I$(top_srcdir)/textscreen            \
             -I$(top_srcdir)/opl                   \
             -I$(top_srcdir)/pcsound               \
-            @SDLMIXER_CFLAGS@ @SDLNET_CFLAGS@    
+            @SDLMIXER_CFLAGS@ @SDLNET_CFLAGS@
 
 AM_LDFLAGS = 
 
@@ -55,7 +51,6 @@ d_mode.c             d_mode.h              \
                      d_ticcmd.h            \
 deh_str.c            deh_str.h             \
 i_cdmus.c            i_cdmus.h             \
-i_endoom.c           i_endoom.h            \
 i_input.c            i_input.h             \
 i_joystick.c         i_joystick.h          \
                      i_swap.h              \
@@ -100,7 +95,6 @@ net_client.c         net_client.h          \
 net_common.c         net_common.h          \
 net_dedicated.c      net_dedicated.h       \
 net_defs.h                                 \
-net_gui.c            net_gui.h             \
 net_io.c             net_io.h              \
 net_loop.c           net_loop.h            \
 net_packet.c         net_packet.h          \
@@ -122,6 +116,7 @@ i_pcsound.c                                \
 i_sdlsound.c                               \
 i_sdlmusic.c                               \
 i_oplmusic.c                               \
+i_endoom.c                                 \
 midifile.c           midifile.h            \
 mus2mid.c            mus2mid.h
 
@@ -140,7 +135,7 @@ EXTRA_LIBS =                                               \
                $(top_builddir)/textscreen/libtextscreen.a  \
                $(top_builddir)/pcsound/libpcsound.a        \
                $(top_builddir)/opl/libopl.a                \
-               @LDFLAGS@                                   \
+               @LDFLAGS@\
                @SDL_LIBS@                                  \
                @SDLMIXER_LIBS@                             \
                @SDLNET_LIBS@

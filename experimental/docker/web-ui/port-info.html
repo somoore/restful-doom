@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>RESTful DOOM Microservices</title>
+  <style>
+    body { font-family: Arial, sans-serif; background-color: #333; color: #fff; padding: 20px; }
+    .container { max-width: 800px; margin: 0 auto; background-color: #444; padding: 20px; border-radius: 5px; }
+    h1 { color: #ff6600; }
+    .port-info { margin-bottom: 20px; padding: 10px; background-color: #555; border-radius: 3px; }
+    .port-number { font-weight: bold; color: #33ff33; }
+    a { color: #33ccff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .button { display: inline-block; background-color: #ff6600; color: white; padding: 8px 16px; 
+             border-radius: 4px; margin: 10px 5px 10px 0; text-decoration: none; }
+    .button:hover { background-color: #ff8800; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>RESTful DOOM Microservices</h1>
+    <div class="port-info">
+      <h2>API Endpoints</h2>
+      <p>API Base URL: <span class="port-number">http://127.0.0.1:8000</span></p>
+      <p>Available Endpoints:</p>
+      <ul>
+        <li><a href="http://127.0.0.1:8000/api/player" target="_blank">Player Information</a></li>
+        <li><a href="http://127.0.0.1:8000/api/world/objects" target="_blank">World Objects</a></li>
+        <li><a href="http://127.0.0.1:8000/api/things" target="_blank">Things (alias for world/objects)</a></li>
+        <li><a href="http://127.0.0.1:8000/docs.html" target="_blank">API Documentation</a></li>
+      </ul>
+      
+      <h2>User Interfaces</h2>
+      <p><a href="/play-doom.html" class="button">Launch Page</a></p>
+      <p><a href="/doom-dashboard.html" class="button">Dashboard</a></p>
+      
+      <h2>VNC Access</h2>
+      <p>Direct VNC: <span class="port-number">127.0.0.1:</span> (password: password)</p>
+      <p>Web VNC: <a href="http://127.0.0.1:6080/vnc.html?autoconnect=true&view_only=0" target="_blank" class="button">Launch Web VNC</a></p>
+    </div>
+    <p>These services are now running in separate containers for improved stability.</p>
+  </div>
+</body>
+</html>

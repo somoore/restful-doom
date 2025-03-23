@@ -12,8 +12,8 @@
 #define NUMKEYS   256
 #define NUMDESCRIPTIONS 125
 
-int keys_down[NUMKEYS];
-int target_angle;
+extern int keys_down[NUMKEYS];
+extern int target_angle;
 
 void API_Init(int port);
 void API_RunIO();

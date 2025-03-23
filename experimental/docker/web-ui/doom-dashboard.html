@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RESTful DOOM Dashboard</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background-color: #1a1a1a;
+            color: #33ff33;
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+        }
+        .controls-panel {
+            background-color: #2a2a2a;
+            padding: 20px;
+            margin: 20px;
+            border-radius: 5px;
+            border: 2px solid #33ff33;
+            box-shadow: 0 0 10px rgba(51, 255, 51, 0.3);
+        }
+        .status {
+            padding: 10px;
+            text-align: center;
+            background-color: #333;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        #response {
+            max-height: 200px;
+            overflow-y: auto;
+            background-color: #000;
+            color: #33ff33;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            text-align: left;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .warning-box {
+            background-color: #3a2a00;
+            border: 1px solid #ff6600;
+            color: #ff9933;
+            padding: 10px;
+            margin: 10px 0 20px 0;
+            border-radius: 5px;
+            text-align: left;
+        }
+        .warning-box pre {
+            background-color: #000;
+            padding: 10px;
+            border-radius: 3px;
+            overflow-x: auto;
+            color: #33ff33;
+        }
+        .header {
+            background-color: #2a2a2a;
+            border-bottom: 2px solid #33ff33;
+            padding: 15px;
+            text-align: center;
+            box-shadow: 0 0 10px rgba(51, 255, 51, 0.3);
+        }
+        h1, h2 {
+            color: #ff6600;
+            margin: 0;
+        }
+        .subtitle {
+            font-size: 16px;
+            margin-top: 5px;
+        }
+        .dashboard {
+            display: flex;
+            flex-wrap: wrap;
+            padding: 15px;
+        }
+        .panel {
+            flex: 1;
+            min-width: 400px;
+            margin: 10px;
+            background-color: #2a2a2a;
+            border: 2px solid #33ff33;
+            border-radius: 5px;
+            overflow: hidden;
+            box-shadow: 0 0 10px rgba(51, 255, 51, 0.3);
+        }
+        .panel-header {
+            background-color: #333;
+            padding: 10px;
+            border-bottom: 1px solid #33ff33;
+        }
+        .panel-content {
+            height: 600px;
+        }
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        .controls {
+            display: flex;
+            justify-content: center;
+            padding: 15px;
+            flex-wrap: wrap;
+        }
+        .button {
+            background-color: #ff6600;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 16px;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .button:hover {
+            background-color: #ff8533;
+        }
+        .footer {
+            text-align: center;
+            padding: 20px;
+            font-size: 14px;
+            border-top: 1px solid #33ff33;
+            margin-top: 20px;
+        }
+        @media (max-width: 900px) {
+            .panel {
+                min-width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>RESTful DOOM Dashboard</h1>
+        <div class="subtitle">Control and view the game through both VNC and API</div>
+    </div>
+    
+    <div class="controls">
+        <button class="button" onclick="refreshFrames()">Refresh All Views</button>
+        <a class="button" href="play-doom.html" target="_blank">Open DOOM in Browser (Recommended)</a>
+        <a class="button" href="/api/world" target="_blank">View Raw API</a>
+    </div>
+    
+    <div style="text-align: center; margin: 10px;" class="controls-panel">
+        <h2 style="color: #ff6600;">Direct Controls</h2>
+        <div class="warning-box">
+            <p>⚠️ <strong>Note:</strong> The RESTful DOOM API is currently unstable and may crash the container when accessing certain endpoints.</p>
+            <p>If the container crashes, you'll need to restart it with:</p>
+            <pre>docker run -d --rm -p 8000:8000 -p 5900:5900 -p 6080:6080 --name doom-vnc restful-doom:vnc</pre>
+        </div>
+        <div>
+            <button class="button" onclick="safeCommand('POST', '/api/player/actions', {type:'forward', amount:10}, this)">Forward</button>
+            <button class="button" onclick="safeCommand('POST', '/api/player/actions', {type:'backward', amount:10}, this)">Backward</button>
+            <button class="button" onclick="safeCommand('POST', '/api/player/actions', {type:'turn-left', amount:10}, this)">Turn Left</button>
+            <button class="button" onclick="safeCommand('POST', '/api/player/actions', {type:'turn-right', amount:10}, this)">Turn Right</button>
+            <button class="button" onclick="safeCommand('POST', '/api/player/actions', {type:'use'}, this)">Use Door</button>
+            <button class="button" onclick="safeCommand('POST', '/api/player/actions', {type:'shoot'}, this)">Fire</button>
+        </div>
+        <div class="status">API Status: <span id="api-status">Not Connected</span></div>
+        <div id="response">Response will appear here</div>
+    </div>
+    
+    <div style="text-align: center; background-color: #333; padding: 10px; margin: 5px 20px; border-radius: 5px;">
+        <p style="color: #ff6600;"><strong>⚠️ Keyboard Input Notice:</strong> For proper keyboard input, open VNC in a new tab using the button above.</p>
+        <p>Click inside the VNC display area, then press <strong>F8</strong> to access the noVNC menu and verify "Enable keyboard" is checked.</p>
+    </div>
+    
+    <div class="dashboard">
+        <div class="panel">
+            <div class="panel-header">
+                <h2>DOOM Game (VNC)</h2>
+            </div>
+            <div class="panel-content">
+                <iframe id="vnc-frame" src="http://127.0.0.1:6080/vnc.html?autoconnect=true&view_only=0"></iframe>
+            </div>
+        </div>
+        
+        <div class="panel">
+            <div class="panel-header">
+                <h2>API Interface</h2>
+            </div>
+            <div class="panel-content">
+                <iframe id="api-frame" src="doom-ui.html"></iframe>
+            </div>
+        </div>
+    </div>
+    
+    <div class="footer">
+        <p>RESTful DOOM with VNC and API Integration | Use F8 in the VNC viewer for keyboard options</p>
+        <p>DOOM Controls: Arrow keys to move, Ctrl to fire, Alt to strafe, Spacebar to open doors</p>
+        <p>Custom WAD support: See <a href="README-VNC.md" style="color: #33ff33;">README-VNC.md</a> for using your own WAD files</p>
+        <p>API endpoints: 
+            <a href="/api/world" style="color: #33ff33;">World</a> | 
+            <a href="/api/player" style="color: #33ff33;">Player</a> | 
+            <a href="/api/world/objects" style="color: #33ff33;">Objects</a> | 
+            <a href="/api/controls" style="color: #33ff33;">Controls</a>
+        </p>
+    </div>
+    
+    <script>
+        const API_BASE = '';  // Empty base URL, we'll add /api to each request
+        
+        // Check API connectivity on page load
+        window.onload = function() {
+            checkAPIStatus();
+        };
+        
+        function checkAPIStatus() {
+            document.getElementById('api-status').textContent = 'Checking connection...';
+            document.getElementById('api-status').style.color = '#ff9900';
+            
+            fetch('/api/world')
+                .then(response => {
+                    if (response.ok) {
+                        document.getElementById('api-status').textContent = 'Connected';
+                        document.getElementById('api-status').style.color = '#33ff33';
+                        return response.json();
+                    } else {
+                        throw new Error(`Network response was not ok: ${response.status}`);
+                    }
+                })
+                .then(data => {
+                    document.getElementById('response').textContent = 'API Response:\n' + JSON.stringify(data, null, 2);
+                })
+                .catch(error => {
+                    document.getElementById('api-status').textContent = 'Not Connected';
+                    document.getElementById('api-status').style.color = '#ff3333';
+                    document.getElementById('response').textContent = 'Error connecting to API: ' + error.message + '\n\nMake sure your RESTful DOOM server is running on port 8000.';
+                });
+        }
+        
+        function refreshFrames() {
+            document.getElementById('vnc-frame').src = document.getElementById('vnc-frame').src;
+            document.getElementById('api-frame').src = document.getElementById('api-frame').src;
+            checkAPIStatus();
+        }
+        
+        // Safer version that avoids buggy endpoints
+        function safeCommand(method, endpoint, data, buttonElement) {
+            // Show what we're sending for debugging
+            const requestInfo = `${method} ${endpoint}\n${JSON.stringify(data, null, 2)}`;
+            document.getElementById('response').textContent = 'Sending request: \n' + requestInfo;
+            document.getElementById('api-status').textContent = 'Sending command...';
+            document.getElementById('api-status').style.color = '#ff9900';
+            
+            // Flash the button as immediate feedback
+            buttonElement.style.backgroundColor = '#ff9900';
+            
+            // Use a timeout to avoid blocking the UI
+            setTimeout(() => {
+                fetch(endpoint, {  // Endpoint already includes /api/
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data),
+                    // Add a timeout to prevent hanging requests
+                    signal: AbortSignal.timeout(3000)
+                })
+                .then(response => {
+                    document.getElementById('response').textContent += `\n\nReceived response with status: ${response.status}`;
+                    if (!response.ok) {
+                        throw new Error(`Network response was not ok: ${response.status}`);
+                    }
+                    return response.json().catch(e => {
+                        // Handle case where response is not JSON
+                        document.getElementById('response').textContent += '\n\nResponse is not JSON or is empty';
+                        return {};
+                    });
+                })
+                .then(data => {
+                    console.log('Command sent successfully:', data);
+                    // Update status and response
+                    document.getElementById('api-status').textContent = 'Connected';
+                    document.getElementById('api-status').style.color = '#33ff33';
+                    document.getElementById('response').textContent += '\n\nResponse: ' + JSON.stringify(data, null, 2);
+                    
+                    // Flash the button as feedback
+                    buttonElement.style.backgroundColor = '#33ff33';
+                    setTimeout(() => {
+                        buttonElement.style.backgroundColor = '#ff6600';
+                    }, 200);
+                })
+                .catch(error => {
+                    console.error('Error sending command:', error);
+                    document.getElementById('api-status').textContent = 'Error';
+                    document.getElementById('api-status').style.color = '#ff3333';
+                    document.getElementById('response').textContent += '\n\nError: ' + error.message + '\n\nThe RESTful DOOM API may have crashed. Try checking if the API is running with a simple GET request:';
+                    document.getElementById('response').textContent += '\n\ncurl -v http://doom-game:8000/api/world';
+                    buttonElement.style.backgroundColor = '#ff3333';
+                    setTimeout(() => {
+                        buttonElement.style.backgroundColor = '#ff6600';
+                    }, 200);
+                });
+            }, 100);
+        }
+        
+        function sendCommand(method, endpoint, data, buttonElement) {
+            // Maintain backward compatibility
+            safeCommand(method, endpoint, data, buttonElement);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Open VNC Viewer</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background-color: #1a1a1a;
+            color: #33ff33;
+            text-align: center;
+            padding: 50px;
+        }
+        h1 {
+            color: #ff6600;
+        }
+        .button {
+            display: inline-block;
+            background-color: #ff6600;
+            color: #000;
+            font-weight: bold;
+            padding: 15px 30px;
+            margin: 20px;
+            border-radius: 5px;
+            text-decoration: none;
+            font-size: 18px;
+        }
+        .button:hover {
+            background-color: #ff8533;
+        }
+        p {
+            margin: 20px;
+            font-size: 16px;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>RESTful DOOM VNC Viewer</h1>
+    
+    <p>Click the button below to open the VNC viewer in a new tab. This will allow you to see and interact with the DOOM game running in the Docker container.</p>
+    
+    <a class="button" href="http://127.0.0.1:6080/vnc.html?autoconnect=true&password=password" target="_blank">Open VNC Viewer</a>
+    
+    <p>If the connection fails, make sure that:</p>
+    <p>1. The Docker container is running<br>
+       2. Port 6080 is exposed and not blocked<br>
+       3. Try refreshing the VNC viewer page a few times if it doesn't connect immediately</p>
+</body>
+</html>

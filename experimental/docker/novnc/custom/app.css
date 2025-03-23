@@ -1,0 +1,36 @@
+/* Custom styling for noVNC to fix aspect ratio issues */
+
+/* Ensure the canvas maintains aspect ratio and fits in viewport */
+canvas.noVNC_canvas {
+    aspect-ratio: 4/3;
+    max-height: 90vh !important;
+    width: auto !important;
+    height: auto !important;
+    margin: 0 auto;
+    display: block !important;
+}
+
+/* Ensure container respects the canvas size */
+div.noVNC_canvas_container {
+    width: auto !important;
+    height: auto !important;
+    margin: 0 auto;
+}
+
+/* Fix screen position */
+div#noVNC_screen {
+    position: static !important;
+    width: auto !important;
+    height: auto !important;
+    margin: 0 auto;
+}
+
+/* Set proper dimensions for viewport */
+div#noVNC_container {
+    width: 100% !important;
+    height: auto !important;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}

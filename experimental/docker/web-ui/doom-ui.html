@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RESTful DOOM Visualizer</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background-color: #1a1a1a;
+            color: #33ff33;
+            padding: 20px;
+            margin: 0;
+        }
+        .container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        .panel {
+            background-color: #2a2a2a;
+            border: 2px solid #33ff33;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 0 10px rgba(51, 255, 51, 0.3);
+            flex: 1;
+            min-width: 300px;
+        }
+        h1, h2 {
+            color: #ff6600;
+            margin-top: 0;
+        }
+        pre {
+            background-color: #000;
+            color: #33ff33;
+            padding: 10px;
+            border-radius: 5px;
+            overflow: auto;
+            max-height: 300px;
+        }
+        button {
+            background-color: #ff6600;
+            color: #000;
+            border: none;
+            padding: 8px 16px;
+            margin: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background-color: #ff8533;
+        }
+        .status {
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .error {
+            color: #ff3333;
+        }
+        .map-view {
+            position: relative;
+            width: 100%;
+            height: 400px;
+            background-color: #000;
+            border: 2px solid #33ff33;
+            margin-top: 20px;
+            overflow: hidden;
+        }
+        .player {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background-color: #33ff33;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+        .player:after {
+            content: '';
+            position: absolute;
+            width: 0;
+            height: 0;
+            border-left: a5px solid transparent;
+            border-right: 5px solid transparent;
+            border-bottom: 10px solid #33ff33;
+            transform-origin: bottom center;
+        }
+        .thing {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background-color: red;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
+        .health-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #333;
+            margin-top: 5px;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .health-fill {
+            height: 100%;
+            background-color: #33ff33;
+            transition: width 0.3s;
+        }
+        .armor-fill {
+            height: 100%;
+            background-color: #3333ff;
+            transition: width 0.3s;
+        }
+        .weapon-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 10px;
+        }
+        .weapon {
+            padding: 5px 10px;
+            background-color: #333;
+            border-radius: 3px;
+        }
+        .weapon.active {
+            background-color: #ff6600;
+            color: #000;
+        }
+        #log {
+            height: 100px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>RESTful DOOM Visualizer</h1>
+    <div class="status" id="status">Connecting to DOOM API...</div>
+    
+    <div class="container">
+        <div class="panel">
+            <h2>World Info</h2>
+            <pre id="world-info">Loading...</pre>
+            <button onclick="fetchEndpoint('/api/world')">Refresh World</button>
+        </div>
+        
+        <div class="panel">
+            <h2>Player Info</h2>
+            <pre id="player-info">Loading...</pre>
+            <div>
+                <h3>Health</h3>
+                <div class="health-bar">
+                    <div class="health-fill" id="health-bar" style="width: 0%"></div>
+                </div>
+                <h3>Armor</h3>
+                <div class="health-bar">
+                    <div class="armor-fill" id="armor-bar" style="width: 0%"></div>
+                </div>
+                <h3>Weapons</h3>
+                <div class="weapon-list" id="weapon-list"></div>
+            </div>
+            <button onclick="fetchEndpoint('/api/player')">Refresh Player</button>
+        </div>
+        
+        <div class="panel">
+            <h2>Objects</h2>
+            <pre id="things-info">Loading...</pre>
+            <button onclick="fetchEndpoint('/api/world/objects')">Refresh Objects</button>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h2>Basic Controls</h2>
+        <button onclick="sendCommand('POST', '/api/player/actions', {type:'forward', amount:10})">Forward</button>
+        <button onclick="sendCommand('POST', '/api/player/actions', {type:'backward', amount:10})">Backward</button>
+        <button onclick="sendCommand('POST', '/api/player/actions', {type:'turn-left', amount:10})">Turn Left</button>
+        <button onclick="sendCommand('POST', '/api/player/actions', {type:'turn-right', amount:10})">Turn Right</button>
+        <button onclick="sendCommand('POST', '/api/player/actions', {type:'use'})">Use</button>
+        <button onclick="sendCommand('POST', '/api/player/actions', {type:'shoot'})">Fire</button>
+    </div>
+
+    <div class="panel">
+        <h2>Map View (Simple Visualization)</h2>
+        <div class="map-view" id="map-view">
+            <div class="player" id="player-marker"></div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h2>API Response Log</h2>
+        <pre id="log"></pre>
+    </div>
+
+    <script>
+        const API_BASE = '';  // Empty base URL, we'll add /api to each request
+        let playerData = null;
+        let worldData = null;
+        let thingsData = null;
+        let pollInterval = null;
+
+        // Initialize by fetching data
+        window.onload = () => {
+            fetchEndpoint('/api/world');
+            fetchEndpoint('/api/player');
+            fetchEndpoint('/api/world/objects');
+            
+            // Start polling for updates with a slower rate and staggered requests
+            pollInterval = setInterval(() => {
+                fetchEndpoint('/api/player', false);
+                setTimeout(() => fetchEndpoint('/api/world/objects', false), 2000);
+            }, 4000); // Poll every 4 seconds
+        };
+
+        function fetchEndpoint(endpoint, logOutput = true) {
+            fetch(endpoint)  // Endpoint already includes /api/
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Network response was not ok: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (logOutput) {
+                        logMessage(`Fetched ${endpoint}: ${JSON.stringify(data, null, 2).substring(0, 100)}...`);
+                    }
+                    updateUI(endpoint, data);
+                })
+                .catch(error => {
+                    document.getElementById('status').innerHTML = `<span class="error">Error: ${error.message}</span>`;
+                    console.error('Fetch error:', error);
+                });
+        }
+
+        function sendCommand(method, endpoint, data) {
+            // Log the data we're sending for debugging
+            logMessage(`Sending command: ${method} ${endpoint} with data: ${JSON.stringify(data)}`);
+            
+            fetch(API_BASE + endpoint, {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data),
+                credentials: 'same-origin'
+            })
+                .then(response => {
+                    logMessage(`Received response with status: ${response.status}`);
+                    if (!response.ok) {
+                        throw new Error(`Network response was not ok: ${response.status}`);
+                    }
+                    return response.json().catch(e => {
+                        // Handle case where response is not JSON
+                        logMessage('Response is not JSON or is empty', true);
+                        return {};
+                    });
+                })
+                .then(data => {
+                    logMessage(`Command result: ${JSON.stringify(data)}`);
+                    // Refresh player data after command
+                    fetchEndpoint('/api/player');
+                })
+                .catch(error => {
+                    logMessage(`Error sending command: ${error.message}`, true);
+                    console.error('Command error:', error);
+                    // Update the status to show the error
+                    document.getElementById('status').textContent = 'API Error: ' + error.message;
+                    document.getElementById('status').style.color = '#ff3333';
+                });
+        }
+
+        function updateUI(endpoint, data) {
+            // Set connection status to connected
+            document.getElementById('status').textContent = 'Connected to DOOM API';
+            
+            if (endpoint === '/api/world') {
+                worldData = data;
+                document.getElementById('world-info').textContent = JSON.stringify(data, null, 2);
+            } 
+            else if (endpoint === '/api/player') {
+                playerData = data;
+                document.getElementById('player-info').textContent = JSON.stringify(data, null, 2);
+                
+                // Update health bar
+                const healthPercent = Math.max(0, Math.min(100, data.health));
+                document.getElementById('health-bar').style.width = `${healthPercent}%`;
+                
+                // Update armor bar
+                const armorPercent = Math.max(0, Math.min(100, data.armor));
+                document.getElementById('armor-bar').style.width = `${armorPercent}%`;
+                
+                // Update weapons list
+                const weaponList = document.getElementById('weapon-list');
+                weaponList.innerHTML = '';
+                
+                if (data.weapons) {
+                    Object.keys(data.weapons).forEach(weapon => {
+                        if (data.weapons[weapon]) {
+                            const weaponElem = document.createElement('div');
+                            weaponElem.classList.add('weapon');
+                            if (getWeaponIndex(weapon) === data.weapon) {
+                                weaponElem.classList.add('active');
+                            }
+                            weaponElem.textContent = weapon;
+                            weaponList.appendChild(weaponElem);
+                        }
+                    });
+                }
+                
+                // Update player position on map
+                updatePlayerOnMap();
+            } 
+            else if (endpoint === '/api/world/objects') {
+                thingsData = data;
+                document.getElementById('things-info').textContent = JSON.stringify(data, null, 2);
+                updateThingsOnMap();
+            }
+        }
+
+        function getWeaponIndex(weaponName) {
+            const weapons = ["Handgun", "Shotgun", "Chaingun", "Rocket Launcher", "Plasma Rifle", "BFG", "Chainsaw"];
+            return weapons.indexOf(weaponName);
+        }
+
+        function updatePlayerOnMap() {
+            if (!playerData || !playerData.position) return;
+            
+            const mapView = document.getElementById('map-view');
+            const player = document.getElementById('player-marker');
+            
+            // Scale the coordinates to fit in our map view
+            // This is a very simplified approach - real coordinates would need more complex mapping
+            const mapWidth = mapView.offsetWidth;
+            const mapHeight = mapView.offsetHeight;
+            
+            // Normalize coordinates (this is very approximate without knowing the real map bounds)
+            const x = (playerData.position.x + 2000) / 4000 * mapWidth;
+            const y = (playerData.position.y + 2000) / 4000 * mapHeight;
+            
+            player.style.left = `${x}px`;
+            player.style.top = `${y}px`;
+            
+            // Rotate player marker based on angle
+            const angle = playerData.angle || 0;
+            player.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`;
+        }
+
+        function updateThingsOnMap() {
+            if (!thingsData) return;
+            
+            const mapView = document.getElementById('map-view');
+            
+            // Remove old thing markers
+            document.querySelectorAll('.thing').forEach(el => el.remove());
+            
+            // Add new thing markers
+            if (Array.isArray(thingsData)) {
+                thingsData.forEach(thing => {
+                    if (thing.position) {
+                        const thingMarker = document.createElement('div');
+                        thingMarker.classList.add('thing');
+                        
+                        // Scale the coordinates to fit in our map view
+                        const mapWidth = mapView.offsetWidth;
+                        const mapHeight = mapView.offsetHeight;
+                        
+                        // Normalize coordinates
+                        const x = (thing.position.x + 2000) / 4000 * mapWidth;
+                        const y = (thing.position.y + 2000) / 4000 * mapHeight;
+                        
+                        thingMarker.style.left = `${x}px`;
+                        thingMarker.style.top = `${y}px`;
+                        
+                        // Use different colors for different thing types
+                        if (thing.type && thing.type.toLowerCase().includes('monster')) {
+                            thingMarker.style.backgroundColor = 'red';
+                        } else if (thing.type && thing.type.toLowerCase().includes('item')) {
+                            thingMarker.style.backgroundColor = 'yellow';
+                        }
+                        
+                        mapView.appendChild(thingMarker);
+                    }
+                });
+            }
+        }
+
+        function logMessage(message, isError = false) {
+            const log = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            if (isError) {
+                entry.classList.add('error');
+            }
+            log.appendChild(entry);
+            
+            // Auto-scroll to bottom
+            log.scrollTop = log.scrollHeight;
+            
+            // Limit log entries
+            while (log.children.length > 50) {
+                log.removeChild(log.firstChild);
+            }
+        }
+    </script>
+</body>
+</html>

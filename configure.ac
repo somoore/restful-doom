@@ -1,3 +1,13 @@
+# Allow the required macros
+m4_pattern_allow([AC_SDL_MAIN_WORKAROUND])
+m4_pattern_allow([AC_CHECK_LIB])
+m4_pattern_allow([AC_ARG_WITH])
+m4_pattern_allow([AS_HELP_STRING])
+m4_pattern_allow([AS_IF])
+m4_pattern_allow([AC_MSG_FAILURE])
+m4_pattern_allow([AC_CHECK_HEADERS])
+m4_pattern_allow([AC_CHECK_FUNCS])
+
 AC_INIT(RESTful Doom, 2.2.1, jeff@1amstudios.com, restful-doom)
 
 PACKAGE_SHORTNAME=${PACKAGE_NAME% Doom}
@@ -9,6 +19,7 @@ PACKAGE_URL="http://1amstudios.com/"
 PACKAGE_ISSUES="https://github.com/restful-doom/issues"
 
 AC_CONFIG_AUX_DIR(autotools)
+AM_INIT_AUTOMAKE([1.11 foreign subdir-objects])
 AC_CANONICAL_HOST
 
 orig_CFLAGS="$CFLAGS"
@@ -55,18 +66,13 @@ LDFLAGS="$LDFLAGS $SDL_LIBS"
 # so that its own main, stored in the SDLmain library, can be run first.
 # Unfortunately, this causes problems for autoconf, which builds
 # test programs to probe the system.  All library/header/symbol checks
-# must be run in this block, that performs a workaround for the problem.
-
-AC_SDL_MAIN_WORKAROUND([
-
-    # Check for SDL_mixer.
-
-    AC_CHECK_LIB(SDL2_mixer,Mix_LoadMUS,[
-        SDLMIXER_LIBS="$SDLMIXER_LIBS -lSDL2_mixer"
-    ],[
-        echo "*** Could not find SDL2_mixer.  Please install it."
-        exit -1
-    ])
+# are included below.
+AC_CHECK_LIB(SDL2_mixer,Mix_LoadMUS,[
+    SDLMIXER_LIBS="$SDLMIXER_LIBS -lSDL2_mixer"
+],[
+    echo "*** Could not find SDL2_mixer.  Please install it."
+    exit -1
+])
 
     # Check for SDL_net.
 
@@ -118,7 +124,6 @@ AC_SDL_MAIN_WORKAROUND([
 
     AC_CHECK_LIB(i386, i386_iopl)
     AC_CHECK_LIB(amd64, amd64_iopl)
-])
 
 AC_ARG_WITH([bashcompletiondir],
     AS_HELP_STRING([--with-bashcompletiondir=DIR], [Bash completion directory]),
@@ -141,9 +146,6 @@ AC_CHECK_TOOL(STRIP, strip, )
 AM_CONDITIONAL(HAVE_WINDRES, test "$WINDRES" != "")
 AM_CONDITIONAL(HAVE_PYTHON, $HAVE_PYTHON)
 
-dnl Automake v1.8.0 is required, please upgrade!
-
-AM_INIT_AUTOMAKE([1.8.0 foreign])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
 WINDOWS_RC_VERSION=`echo $PACKAGE_VERSION | sed 's/-.*//; s/\./, /g; s/$/, 0/'`
@@ -187,7 +189,6 @@ Makefile
 opl/Makefile
 opl/examples/Makefile
 pcsound/Makefile
-rpm.spec
 data/Makefile
 src/Makefile
 src/doom/Makefile

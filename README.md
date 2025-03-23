@@ -38,10 +38,31 @@ Run `make` from the src (or root) directory. `src/restful-doom` will be created 
 
 The DOOM engine is open source, but assets (art, maps etc) are not. You'll need to download an appropriate [WAD file](https://en.wikipedia.org/wiki/Doom_WAD) separately.
 
-To run restful-doom on port 6666:
+### Option 1: Using Docker (Recommended)
+
+1. Place your DOOM WAD file in the repository folder (named `DOOM.WAD`)
+2. Run the startup script:
+```bash
+./start-doom.sh
 ```
-src/restful-doom -iwad <path/to/doom1.wad> -apiport 6666 ...
+
+This will:
+- Build the Docker image if needed
+- Start the container with all necessary services
+- Make the game accessible via:
+  - VNC web interface: http://localhost:6080/vnc.html (password: password)
+  - Direct VNC: localhost:5900 (password: password)
+  - Web interface: http://localhost:8000/play-doom.html
+  - API: http://localhost:8000/api/
+
+### Option 2: Running Locally
+
+To run restful-doom directly on your machine:
+```bash
+src/restful-doom -iwad <path/to/doom1.wad> -apiport 8000
 ```
+
+See [README-VNC.md](README-VNC.md) for more details on VNC support and troubleshooting.
 
 ## Thanks!
 [chocolate-doom](https://github.com/chocolate-doom/chocolate-doom) team  

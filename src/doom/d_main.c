@@ -1867,10 +1867,13 @@ void D_DoomMain (void)
     }
 
     p = M_CheckParmWithArgs("-apiport", 1);
-    if (p)
     {
-        int port = atoi(myargv[p+1]);
+        int port = 8000;
+        if (p) {
+            port = atoi(myargv[p+1]);
+        }
         printf ("API_Init: Init RESTful API daemon.\n");
+        printf ("API port: %d\n", port);
         API_Init(port);
     }
 	

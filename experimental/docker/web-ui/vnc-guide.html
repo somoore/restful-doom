@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>RESTful DOOM VNC Guide</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            background-color: #1a1a1a;
+            color: #33ff33;
+            padding: 20px;
+            margin: 0;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1, h2 {
+            color: #ff6600;
+        }
+        .box {
+            background-color: #2a2a2a;
+            border: 2px solid #33ff33;
+            border-radius: 5px;
+            padding: 20px;
+            margin: 20px 0;
+            box-shadow: 0 0 10px rgba(51, 255, 51, 0.3);
+        }
+        code {
+            background-color: #333;
+            padding: 3px 5px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+        ul {
+            list-style-type: square;
+            padding-left: 25px;
+        }
+        li {
+            margin-bottom: 10px;
+        }
+        .api-link {
+            display: inline-block;
+            background-color: #ff6600;
+            color: #000;
+            padding: 10px 15px;
+            margin: 5px;
+            border-radius: 5px;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .api-link:hover {
+            background-color: #ff8533;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>RESTful DOOM with VNC Rendering</h1>
+        
+        <div class="box">
+            <h2>Connection Details</h2>
+            <ul>
+                <li><strong>VNC in Browser:</strong> <a href="play-doom.html" style="color:#33ff33">play-doom.html</a> (recommended for best keyboard input)</li>
+                <li><strong>Native VNC Connection:</strong> 127.0.0.1:5900</li>
+                <li><strong>VNC Password:</strong> password</li>
+                <li><strong>API Endpoint:</strong> http://doom-game:8000</li>
+            </ul>
+        </div>
+        
+        <div class="box">
+            <h2>Play in Browser (Recommended)</h2>
+            <p>Click the button below to play DOOM directly in your browser:</p>
+            <div style="text-align: center; margin: 20px 0;">
+                <a href="play-doom.html" target="_blank" style="display: inline-block; background-color: #ff6600; color: #000; font-weight: bold; padding: 15px 30px; border-radius: 5px; text-decoration: none; font-size: 18px;">Launch DOOM in Browser (Optimized)</a>
+            </div>
+            <p>For the best experience, <strong>click the button above to open in a new tab</strong>. Embedded frames often have keyboard input issues.</p>
+            <p style="color: #ff6600;"><strong>Important:</strong> To use keyboard inputs with noVNC:</p>
+            <ol style="margin-left: 25px;">
+                <li>Open the viewer in a dedicated tab using the button above</li>
+                <li>Click inside the VNC display area to focus it</li>
+                <li>Press <strong>F8</strong> to access the noVNC menu and settings</li>
+                <li>In the noVNC menu, make sure "Enable keyboard" is checked</li>
+            </ol>
+            <p>Default DOOM controls: Arrow keys to move, Ctrl to fire, Alt to strafe, Spacebar to open doors.</p>
+        </div>
+        
+        <div class="box">
+            <h2>Connect with a VNC Client (Alternative)</h2>
+            <p>If you prefer using a dedicated VNC client, here are some options:</p>
+            <ul>
+                <li><strong>Mac:</strong> Use the built-in Screen Sharing app or download <a href="https://www.realvnc.com/en/connect/download/viewer/" style="color:#33ff33">RealVNC Viewer</a></li>
+                <li><strong>Windows:</strong> Download <a href="https://www.realvnc.com/en/connect/download/viewer/" style="color:#33ff33">RealVNC Viewer</a> or <a href="https://www.tightvnc.com/download.php" style="color:#33ff33">TightVNC</a></li>
+                <li><strong>Linux:</strong> Use Remmina, TigerVNC, or any other VNC client</li>
+            </ul>
+            <p>Connect to <code>127.0.0.1:5900</code> and enter the password: <code>password</code></p>
+        </div>
+        
+        <div class="box">
+            <h2>API Access</h2>
+            <p>The RESTful API is available at http://doom-game:8000. You can interact with it using the following endpoints:</p>
+            <div>
+                <a class="api-link" href="http://doom-game:8000/api/world" target="_blank">World Info</a>
+                <a class="api-link" href="http://doom-game:8000/api/player" target="_blank">Player Info</a>
+                <a class="api-link" href="http://doom-game:8000/api/things" target="_blank">Things</a>
+                <a class="api-link" href="http://doom-game:8000/api/controls" target="_blank">Controls</a>
+            </div>
+            <p style="margin-top: 20px;">Check out <a href="doom-ui.html" style="color:#33ff33">the API visualization</a> for a more interactive experience.</p>
+        </div>
+        
+        <div class="box">
+            <h2>Using Custom WAD Files</h2>
+            <p>You can use your own custom DOOM WAD files with this container:</p>
+            <ol>
+                <li>Place your WAD file in the project directory</li>
+                <li>Build with the custom WAD: <code>docker build -t restful-doom:vnc -f Dockerfile.render --build-arg WAD_FILE=your-custom.wad .</code></li>
+                <li>Run as normal: <code>docker run -d --rm -p 8000:8000 -p 5900:5900 -p 6080:6080 --name doom-vnc restful-doom:vnc</code></li>
+            </ol>
+            <p>Compatible with most DOOM, DOOM II, Heretic, Hexen, and other DOOM-engine WAD files.</p>
+        </div>
+        
+        <div class="box">
+            <h2>Troubleshooting</h2>
+            <ul>
+                <li>If the embedded browser VNC doesn't connect or is slow, try using the "Launch DOOM in Browser" button to open in a new tab</li>
+                <li>If you can't connect to VNC (browser or native), ensure the Docker container is running: <code>docker ps</code></li>
+                <li>If the container crashed, check the logs: <code>docker logs doom-vnc</code></li>
+                <li>To restart the container: <code>docker stop doom-vnc && docker run -d --rm -p 8000:8000 -p 5900:5900 -p 6080:6080 --name doom-vnc restful-doom:vnc</code></li>
+                <li>Press F8 in noVNC browser interface to access keyboard shortcuts and other options</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>

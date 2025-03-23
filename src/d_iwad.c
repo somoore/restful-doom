@@ -792,7 +792,8 @@ char *D_FindIWAD(int mask, GameMission_t *mission)
 
         if (result == NULL)
         {
-            I_Error("IWAD file '%s' not found!", iwadfile);
+            fprintf(stderr, "Warning: IWAD file '%s' not found!\n", iwadfile);
+            return NULL;
         }
         
         *mission = IdentifyIWADByName(result, mask);
@@ -909,4 +910,3 @@ char *D_SuggestGameName(GameMission_t mission, GameMode_t mode)
 
     return "Unknown game?";
 }
-

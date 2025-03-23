@@ -1,0 +1,122 @@
+version: '3.8'
+
+services:
+  # X11 Display Container - Virtual framebuffer and window manager
+  x11-server:
+    build:
+      context: ./x11
+      dockerfile: Dockerfile
+    volumes:
+      - x11-socket:/tmp/.X11-unix
+      - /dev/shm:/dev/shm
+    environment:
+      - DISPLAY=:1
+    healthcheck:
+      test: ["CMD-SHELL", "xdpyinfo -display :1 >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    restart: unless-stopped
+    privileged: true
+
+  # DOOM Game Container - Game engine and REST API
+  doom-game:
+    build:
+      context: ../..
+      dockerfile: experimental/docker/doom/Dockerfile
+    volumes:
+      - x11-socket:/tmp/.X11-unix
+      - ../wad:/app/wad:ro
+      - /dev/shm:/dev/shm
+    environment:
+      - DISPLAY=:1
+      - WAD_FILENAME=${WAD_FILENAME:-DOOM.WAD}
+      - API_PORT=8000
+      - SDL_VIDEODRIVER=x11
+      - LIBGL_ALWAYS_SOFTWARE=1
+    depends_on:
+      x11-server:
+        condition: service_healthy
+    ports:
+      - "${HOST_API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/player || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    ipc: host
+
+  # VNC Server Container - Screen sharing service
+  vnc-server:
+    build:
+      context: ./vnc
+      dockerfile: Dockerfile
+    volumes:
+      - x11-socket:/tmp/.X11-unix
+      - /dev/shm:/dev/shm
+    environment:
+      - DISPLAY=:1
+      - VNC_PORT=5900
+    depends_on:
+      - x11-server
+    ports:
+      - "${HOST_VNC_PORT:-5900}:5900"
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f x11vnc || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    restart: unless-stopped
+
+  # noVNC Container - Web-based VNC client
+  novnc:
+    build:
+      context: ./novnc
+      dockerfile: Dockerfile
+    environment:
+      - VNC_HOST=vnc-server
+      - VNC_PORT=5900
+      - NOVNC_PORT=6080
+    depends_on:
+      vnc-server:
+        condition: service_healthy
+    ports:
+      - "${HOST_NOVNC_PORT:-6080}:6080"
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f websockify || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    restart: unless-stopped
+
+  # Web UI Container - Static file web server
+  web-ui:
+    build:
+      context: ./web-ui
+      dockerfile: Dockerfile
+    volumes:
+      - ./web-ui:/usr/share/nginx/html
+    environment:
+      - DOOM_API_HOST=doom-game
+      - DOOM_API_PORT=8000
+      - NOVNC_HOST=127.0.0.1
+      - NOVNC_PORT=6080
+    ports:
+      - "${HOST_WEB_PORT:-8080}:80"
+    depends_on:
+      doom-game:
+        condition: service_healthy
+      novnc:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  x11-socket:
+    driver: local

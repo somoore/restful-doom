@@ -1,0 +1,15 @@
+--- src/doom/api.c	2025-03-21 09:00:00.000000000 -0500
++++ src/doom/api.c.new	2025-03-21 09:00:00.000000000 -0500
+@@ -51,7 +51,11 @@
+         fprintf(stderr, "Error: SDLNet_Init: %s\n", SDLNet_GetError());
+         exit(EXIT_FAILURE);
+     }
+-    if (SDLNet_ResolveHost(&ip, NULL, port) < 0)
++    // Bind to all interfaces (0.0.0.0)
++    ip.host = INADDR_ANY;
++    ip.port = SDL_SwapBE16(port);
++    printf("Binding to 0.0.0.0:%d\n", port);
++    if (0)
+     {
+         fprintf(stderr, "Error: SDLNet_ResolveHost: %s\n", SDLNet_GetError());
+         exit(EXIT_FAILURE);
