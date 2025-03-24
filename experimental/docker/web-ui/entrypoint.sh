@@ -1,6 +1,10 @@
 #!/bin/sh
 set -e
 
+# Apply internet blocking rules first
+echo "Applying internet blocking rules..."
+/block-internet.sh
+
 # Replace environment variables in the static HTML files
 echo "Configuring web UI with environment variables..."
 echo "DOOM API: $DOOM_API_HOST:$DOOM_API_PORT"

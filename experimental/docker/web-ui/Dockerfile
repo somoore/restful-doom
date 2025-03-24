@@ -12,8 +12,10 @@ COPY . /usr/share/nginx/html/
 # Copy our custom nginx configuration with environment variable support
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY entrypoint.sh /entrypoint.sh
+COPY block-internet.sh /block-internet.sh
 
-RUN chmod +x /entrypoint.sh
+RUN chmod +x /entrypoint.sh \
+    && chmod +x /block-internet.sh
 
 # Expose web server port
 EXPOSE 80

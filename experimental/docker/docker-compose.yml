@@ -1,11 +1,22 @@
-version: '3.8'
-
 services:
   # X11 Display Container - Virtual framebuffer and window manager
   x11-server:
+    networks:
+      - doom-internal
     build:
       context: ./x11
       dockerfile: Dockerfile
+    image: docker-x11-server:1.0  # Version pinning
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       - x11-socket:/tmp/.X11-unix
       - /dev/shm:/dev/shm
@@ -16,14 +27,37 @@ services:
       interval: 5s
       timeout: 2s
       retries: 3
-    restart: unless-stopped
+    restart: on-failure:5  # Restart up to 5 times on failure
     privileged: true
 
   # DOOM Game Container - Game engine and REST API
   doom-game:
+    security_opt:
+      - no-new-privileges:true
+    # Add iptables rules to block outbound internet access
+    # while still allowing local DNS and container communication
+    sysctls:
+      - net.ipv4.ip_forward=0
+    cap_drop:
+      - NET_RAW
+      - NET_ADMIN
+    networks:
+      - doom-internal
+      - doom-external  # Needs external for API access
     build:
       context: ../..
       dockerfile: experimental/docker/doom/Dockerfile
+    image: docker-doom-game:1.0  # Version pinning
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'  # Game needs more resources
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       - x11-socket:/tmp/.X11-unix
       - ../wad:/app/wad:ro
@@ -38,21 +72,44 @@ services:
       x11-server:
         condition: service_healthy
     ports:
-      - "${HOST_API_PORT:-8000}:8000"
+      - "127.0.0.1:${HOST_API_PORT:-8000}:8000"
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/api/player || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 10s
-    restart: unless-stopped
+    restart: on-failure:5  # Restart up to 5 times on failure
     ipc: host
 
   # VNC Server Container - Screen sharing service
   vnc-server:
+    security_opt:
+      - no-new-privileges:true
+    # Add iptables rules to block outbound internet access
+    # while still allowing local DNS and container communication
+    sysctls:
+      - net.ipv4.ip_forward=0
+    cap_drop:
+      - NET_RAW
+      - NET_ADMIN
+    networks:
+      - doom-internal
+      - doom-external  # Needs external for VNC access
     build:
       context: ./vnc
       dockerfile: Dockerfile
+    image: docker-vnc-server:1.0  # Version pinning
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       - x11-socket:/tmp/.X11-unix
       - /dev/shm:/dev/shm
@@ -62,19 +119,42 @@ services:
     depends_on:
       - x11-server
     ports:
-      - "${HOST_VNC_PORT:-5900}:5900"
+      - "127.0.0.1:${HOST_VNC_PORT:-5900}:5900"
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f x11vnc || exit 1"]
       interval: 5s
       timeout: 2s
       retries: 3
-    restart: unless-stopped
+    restart: on-failure:5  # Restart up to 5 times on failure
 
   # noVNC Container - Web-based VNC client
   novnc:
+    security_opt:
+      - no-new-privileges:true
+    # Add iptables rules to block outbound internet access
+    # while still allowing local DNS and container communication
+    sysctls:
+      - net.ipv4.ip_forward=0
+    cap_drop:
+      - NET_RAW
+      - NET_ADMIN
+    networks:
+      - doom-internal
+      - doom-external  # Needs external for browser access
     build:
       context: ./novnc
       dockerfile: Dockerfile
+    image: docker-novnc:1.0  # Version pinning
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       - VNC_HOST=vnc-server
       - VNC_PORT=5900
@@ -83,19 +163,44 @@ services:
       vnc-server:
         condition: service_healthy
     ports:
-      - "${HOST_NOVNC_PORT:-6080}:6080"
+      - "127.0.0.1:${HOST_NOVNC_PORT:-6080}:6080"
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f websockify || exit 1"]
       interval: 5s
       timeout: 2s
       retries: 3
-    restart: unless-stopped
+    restart: on-failure:5  # Restart up to 5 times on failure
 
   # Web UI Container - Static file web server
   web-ui:
+    security_opt:
+      - no-new-privileges:true
+    # Add iptables rules to block outbound internet access
+    # while still allowing local DNS and container communication
+    sysctls:
+      - net.ipv4.ip_forward=0
+    # Need NET_ADMIN capability to configure iptables
+    cap_add:
+      - NET_ADMIN
+    cap_drop:
+      - NET_RAW
+    networks:
+      - doom-internal
+      - doom-external  # Needs external for browser access
     build:
       context: ./web-ui
       dockerfile: Dockerfile
+    image: docker-web-ui:1.0  # Version pinning
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       - ./web-ui:/usr/share/nginx/html
     environment:
@@ -104,7 +209,7 @@ services:
       - NOVNC_HOST=127.0.0.1
       - NOVNC_PORT=6080
     ports:
-      - "${HOST_WEB_PORT:-8080}:80"
+      - "127.0.0.1:${HOST_WEB_PORT:-8080}:80"
     depends_on:
       doom-game:
         condition: service_healthy
@@ -115,7 +220,30 @@ services:
       interval: 5s
       timeout: 2s
       retries: 3
-    restart: unless-stopped
+    restart: on-failure:5  # Restart up to 5 times on failure
+
+networks:
+  doom-internal:
+    # Internal network for container-to-container communication
+    internal: true  # Prevents any outbound internet access
+    driver: bridge
+    name: doom-internal
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+  doom-external:
+    # External network for user browser access
+    driver: bridge
+    name: doom-external
+    # Must be false to allow browser access
+    internal: false
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+    driver_opts:
+      # These settings prevent outbound internet access
+      com.docker.network.bridge.enable_ip_masquerade: "false"  # Prevent NAT for outbound traffic
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"  # Bind only to localhost
 
 volumes:
   x11-socket:

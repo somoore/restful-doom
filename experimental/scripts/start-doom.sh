@@ -1,6 +1,36 @@
 #!/bin/bash
 set -e
 
+# Function to clean up existing processes and containers
+cleanup() {
+    echo "Cleaning up existing processes and containers..."
+    # Kill any nc processes that might be holding ports
+    pkill nc >/dev/null 2>&1 || true
+    # Stop and remove existing containers
+    (cd "$(dirname "$0")/../docker" && docker compose down -v >/dev/null 2>&1) || true
+    # Wait a moment for ports to be released
+    sleep 2
+    # Force kill any remaining processes on our ports
+    for port in $HOST_API_PORT $HOST_VNC_PORT $HOST_NOVNC_PORT $HOST_WEB_PORT; do
+        fuser -k $port/tcp >/dev/null 2>&1 || true
+    done
+    # Wait another moment for ports to be fully released
+    sleep 1
+}
+
+# Cleanup on script exit
+trap 'echo "Cleaning up containers..."; cd "$(dirname "$0")/../docker" && docker compose down -v' EXIT
+
+# Initial cleanup
+cleanup
+
+# Production environment check
+if [ -n "$PRODUCTION" ] || [ -n "$PROD" ]; then
+    echo "ERROR: This project is not meant for production use!"
+    echo "It contains several security issues that make it unsuitable for production deployment."
+    exit 1
+fi
+
 # RESTful DOOM Microservices starter script
 echo "RESTful DOOM Microservices"
 echo "=========================="
@@ -11,6 +41,16 @@ export HOST_API_PORT=${HOST_API_PORT:-8000}
 export HOST_VNC_PORT=${HOST_VNC_PORT:-5900}
 export HOST_NOVNC_PORT=${HOST_NOVNC_PORT:-6080}
 export HOST_WEB_PORT=${HOST_WEB_PORT:-8080}
+
+# Check for port conflicts
+echo "Checking for port conflicts..."
+for port in $HOST_API_PORT $HOST_VNC_PORT $HOST_NOVNC_PORT $HOST_WEB_PORT; do
+    if lsof -i :$port > /dev/null 2>&1; then
+        echo "ERROR: Port $port is already in use!"
+        echo "Please make sure no other services are running on the required ports."
+        exit 1
+    fi
+done
 
 # Ensure WAD_PATH is absolute
 if [ -z "$WAD_PATH" ]; then
