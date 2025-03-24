@@ -1,6 +1,7 @@
-FROM ubuntu:20.04
+# Build stage
+FROM ubuntu:22.04 AS builder
 
-# Install required packages for building and running DOOM with API
+# Install build dependencies only
 RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y \
     build-essential \
@@ -14,9 +15,40 @@ RUN apt-get update && \
     libsdl2-dev \
     libsdl2-net-dev \
     libsdl2-mixer-dev \
-    curl \
     libmicrohttpd-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up build working directory
+WORKDIR /build
+
+# Copy only source code and build files
+COPY src/ /build/src/
+COPY data/ /build/data/
+COPY opl/ /build/opl/
+COPY pcsound/ /build/pcsound/
+COPY textscreen/ /build/textscreen/
+COPY autogen.sh /build/
+COPY configure.ac /build/
+COPY Makefile.am /build/
+
+# Build RESTful DOOM
+RUN ./autogen.sh && \
+    ./configure && \
+    make
+
+# Runtime stage
+FROM ubuntu:22.04
+
+# Install only runtime dependencies
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    libsdl2-2.0-0 \
+    libsdl2-net-2.0-0 \
+    libsdl2-mixer-2.0-0 \
+    libmicrohttpd12 \
     x11-utils \
+    curl \
     net-tools \
     psmisc \
     socat \
@@ -29,32 +61,21 @@ RUN useradd -m -s /bin/bash doomuser && \
     mkdir -p /tmp/.X11-unix && \
     chmod 1777 /tmp/.X11-unix
 
-# Set up working directory
+# Set up runtime working directory
 WORKDIR /app
 
-# Create directories
-RUN mkdir -p /app/wad
+# Create necessary directories
+RUN mkdir -p /app/wad /app/www && \
+    chown -R doomuser:doomuser /app
 
-# Copy source code and build files from project root
-COPY src/ /app/src/
-COPY data/ /app/data/
-COPY opl/ /app/opl/
-COPY pcsound/ /app/pcsound/
-COPY textscreen/ /app/textscreen/
-COPY autogen.sh /app/
-COPY configure.ac /app/
-COPY Makefile.am /app/
-
-# Create WAD and www directories
-RUN mkdir -p /app/wad /app/www
+# Copy the built executable and data from builder stage
+RUN mkdir -p /app/src
+COPY --from=builder /build/src/restful-doom /app/src/
+COPY --from=builder /build/data /app/data/
 
 # Create a placeholder WAD file (will be overwritten by volume mount)
-RUN touch /app/wad/placeholder.wad
-
-# Build RESTful DOOM
-RUN ./autogen.sh && \
-    ./configure && \
-    make
+RUN touch /app/wad/placeholder.wad && \
+    chown doomuser:doomuser /app/wad/placeholder.wad
 
 # Set environment variables
 ENV DISPLAY=:1
@@ -62,6 +83,8 @@ ENV SDL_VIDEODRIVER=x11
 ENV SDL_AUDIODRIVER=dummy
 ENV LIBGL_ALWAYS_SOFTWARE=1
 ENV API_PORT=8000
+ENV HOME=/home/doomuser
+ENV USER=doomuser
 
 # Expose the API port
 EXPOSE 8000

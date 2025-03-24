@@ -1,4 +1,4 @@
-FROM nginx:alpine
+FROM nginx:alpine-slim
 
 # Set environment variables for templating
 ENV DOOM_API_HOST=doom-game
@@ -13,6 +13,9 @@ COPY . /usr/share/nginx/html/
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY entrypoint.sh /entrypoint.sh
 COPY block-internet.sh /block-internet.sh
+
+# Update Alpine packages to latest versions
+RUN apk update && apk upgrade
 
 # Create non-root user for improved security
 RUN addgroup -S doomweb && adduser -S -G doomweb doomweb \
