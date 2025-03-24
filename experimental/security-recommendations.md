@@ -17,7 +17,11 @@ This document outlines security considerations and recommendations for the RESTf
 #### Elevated Privileges Management
 - [x] Document and justify `privileged: true` for x11-server
 - [x] Document and justify `ipc: host` for doom-game
-- [ ] Document specific IPC requirements for doom-game
+- [x] Document specific IPC requirements for doom-game
+  - DOOM engine requires IPC host mode for shared memory access between processes
+  - Used for efficient communication between the game engine and X11 server
+  - Required for X-server display buffer rendering and hardware acceleration
+  - Enables high-performance graphics rendering without excessive copying
 - [ ] Investigate potential alternatives to privileged mode for X11
 
 #### Resource Controls

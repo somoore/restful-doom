@@ -29,8 +29,17 @@ RUN mkdir -p /usr/share/novnc/custom
 # Copy custom CSS for fixing display aspect ratio
 COPY custom/app.css /usr/share/novnc/custom/app.css
 
+# Create non-root user for improved security
+RUN groupadd -r novncuser && useradd -r -g novncuser -d /home/novncuser -s /bin/bash novncuser \
+    && mkdir -p /home/novncuser \
+    && chown -R novncuser:novncuser /home/novncuser
+
 # Add custom CSS reference to noVNC index page
-RUN sed -i '/<\/head>/i <link rel="stylesheet" href="custom/app.css">' /usr/share/novnc/vnc.html
+RUN sed -i '/<\/head>/i <link rel="stylesheet" href="custom/app.css">' /usr/share/novnc/vnc.html \
+    && chown -R novncuser:novncuser /usr/share/novnc
+
+# Switch to non-root user for better security
+USER novncuser
 
 # Set entrypoint
 ENTRYPOINT ["/entrypoint.sh"]

@@ -14,8 +14,13 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY entrypoint.sh /entrypoint.sh
 COPY block-internet.sh /block-internet.sh
 
-RUN chmod +x /entrypoint.sh \
-    && chmod +x /block-internet.sh
+# Create non-root user for improved security
+RUN addgroup -S doomweb && adduser -S -G doomweb doomweb \
+    && chmod +x /entrypoint.sh \
+    && chmod +x /block-internet.sh \
+    && chown -R doomweb:doomweb /usr/share/nginx/html \
+    # We still need root for port 80, but we'll drop privileges where possible
+    && chmod 755 /entrypoint.sh /block-internet.sh
 
 # Expose web server port
 EXPOSE 80
