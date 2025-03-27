@@ -34,6 +34,21 @@ RUN apt-get update && \
     echo "x11user ALL=(root) NOPASSWD: /usr/bin/Xvfb, /usr/bin/fluxbox" > /etc/sudoers.d/x11user && \
     chmod 0440 /etc/sudoers.d/x11user
 
+# Configure Fluxbox to remove window decorations and disable toolbar
+RUN mkdir -p /home/x11user/.fluxbox && \
+    echo '[app] (name=doom)' > /home/x11user/.fluxbox/apps && \
+    echo '  [Deco] {NONE}' >> /home/x11user/.fluxbox/apps && \
+    echo '  [Layer] {Above}' >> /home/x11user/.fluxbox/apps && \
+    echo '  [Fullscreen] {yes}' >> /home/x11user/.fluxbox/apps && \
+    echo '[end]' >> /home/x11user/.fluxbox/apps && \
+    echo '[app] (title=The Ultimate DOOM)' >> /home/x11user/.fluxbox/apps && \
+    echo '  [Deco] {NONE}' >> /home/x11user/.fluxbox/apps && \
+    echo '  [Layer] {Above}' >> /home/x11user/.fluxbox/apps && \
+    echo '  [Fullscreen] {yes}' >> /home/x11user/.fluxbox/apps && \
+    echo '[end]' >> /home/x11user/.fluxbox/apps && \
+    echo 'session.screen0.toolbar.visible: false' > /home/x11user/.fluxbox/init && \
+    chown -R x11user:x11group /home/x11user/.fluxbox
+
 # Create directory for X11 socket with proper permissions
 RUN mkdir -p /tmp/.X11-unix && \
     chmod 1777 /tmp/.X11-unix && \
