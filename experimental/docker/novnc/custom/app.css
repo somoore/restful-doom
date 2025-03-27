@@ -18,6 +18,13 @@ div.noVNC_canvas_container {
 }
 
 /* Fix screen position */
+/* Hide noVNC controls */
+#noVNC_control_bar,
+#noVNC_control_bar_handle {
+    display: none !important;
+}
+
+/* Fix screen position */
 div#noVNC_screen {
     position: static !important;
     width: auto !important;
