@@ -13,9 +13,9 @@ echo "X11 server is ready"
 VNC_PORT=${VNC_PORT:-5900}
 
 echo "Starting VNC server..."
-x11vnc -forever -passwd password -display :1 -noshm -noxdamage -noxfixes -noxrecord -shared \
+x11vnc -forever -display :1 -noshm -noxdamage -noxfixes -noxrecord -shared \
   -ncache 10 -ncache_cr -ping 30 -nolookup -noipv6 -nowf -nowcr \
-  -timeout 60 -rfbport ${VNC_PORT} -noprimary -nosel -nosetclipboard -noclipboard
+  -timeout 60 -rfbport ${VNC_PORT} -noprimary -nosel -nosetclipboard -noclipboard -auth none
 
 # Keep the container running
 tail -f /dev/null
