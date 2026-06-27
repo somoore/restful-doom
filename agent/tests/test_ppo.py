@@ -349,6 +349,24 @@ def test_named_curriculum_selects_contact_to_combat_stages():
     assert combat["evidence"]["shootable_target_on_reset"] is True
 
 
+def test_curriculum_fixed_mode_repeats_start_index_stage():
+    curriculum = build_curriculum(
+        name="e1m1-contact-to-combat",
+        manual_reset_start={},
+        mode="fixed",
+        start_index=1,
+        seed=7,
+    )
+
+    first = stage_for_update(curriculum, 0)
+    later = stage_for_update(curriculum, 8)
+
+    assert first["name"] == "visible_contact_route"
+    assert later["name"] == "visible_contact_route"
+    assert first["selected_index"] == 1
+    assert later["selected_index"] == 1
+
+
 def test_curriculum_rejects_manual_start_mix():
     with pytest.raises(ValueError, match="cannot be combined"):
         build_curriculum(

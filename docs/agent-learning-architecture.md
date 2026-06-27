@@ -473,7 +473,10 @@ coordinate taken from a successful trajectory does not replay opened doors,
 enemy movement, or map mutations. Those starts need save-state or
 Hellbox/Shrink snapshot restore before they are valid PPO curriculum stages.
 
-Modes are `round_robin`, `progressive`, and `random`. Rollout records,
+Modes are `fixed`, `round_robin`, `progressive`, and `random`. `fixed` repeats
+the stage chosen by `--curriculum-start-index`, which is useful when a single
+contact or combat boundary needs repeated training before it is mixed back into
+the full schedule. Rollout records,
 checkpoint extras, and memory checkpoint entries carry both the curriculum
 descriptor and the active stage. This makes spawn-to-contact transfer auditable:
 we can see whether an update trained combat, first contact, route approach, or

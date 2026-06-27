@@ -186,7 +186,7 @@ CURRICULUM_PRESETS: dict[str, list[CurriculumStage]] = {
     "e1m1-spawn-to-combat": E1M1_SPAWN_TO_COMBAT_STAGES,
 }
 
-CURRICULUM_MODES = {"round_robin", "progressive", "random"}
+CURRICULUM_MODES = {"fixed", "round_robin", "progressive", "random"}
 
 
 def curriculum_names() -> list[str]:
@@ -255,6 +255,8 @@ def stage_for_update(curriculum: dict[str, Any], update_index: int) -> dict[str,
 
     if mode == "single":
         index = 0
+    elif mode == "fixed":
+        index = min(len(stages) - 1, start_index)
     elif mode == "round_robin":
         index = (start_index + update_index) % len(stages)
     elif mode == "progressive":

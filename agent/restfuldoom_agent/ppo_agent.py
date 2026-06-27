@@ -673,7 +673,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--curriculum-mode",
-        choices=["round_robin", "progressive", "random"],
+        choices=["fixed", "round_robin", "progressive", "random"],
         default="round_robin",
         help="How training updates select curriculum stages.",
     )

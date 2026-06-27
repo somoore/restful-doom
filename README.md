@@ -392,7 +392,8 @@ closing distance to a visible but not yet shootable enemy. The visible-contact
 controller uses short graded movement rays, remembered contact corridors, and
 short-lived contact use-line memory; the PPO mask keeps this boundary focused
 on `engage`, `seek_enemy`, and usable line affordances instead of generic route
-progression.
+progression. Use `--curriculum-mode fixed --curriculum-start-index <n>` when a
+single stage needs repeated training before mixing it back into the schedule.
 
 ```
 PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
