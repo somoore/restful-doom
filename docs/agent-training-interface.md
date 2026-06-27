@@ -217,7 +217,8 @@ learning observation. The current pipeline is:
 5. `SkillController` appends bounded temporal context.
 6. `SkillController` appends explicit recent-contact/use-line context.
 7. `SkillController` appends local topology/cell-visit context.
-8. PPO consumes the final 96-feature `restfuldoom.observation.v1` vector.
+8. `SkillController` appends explicit visible-contact target geometry.
+9. PPO consumes the final 104-feature `restfuldoom.observation.v1` vector.
 
 The current observation covers:
 
@@ -237,6 +238,8 @@ The current observation covers:
   close-use readiness, bounded follow-through flag, and age
 - local topology context: current-cell visits, least-visited open projected
   neighbor direction, and open-neighbor exhaustion ratio
+- visible-contact geometry: active/shootable/needs-closure flags, nearest
+  visible enemy distance, angle, alignment, and close-contact state
 
 The remaining learning gap is real. Known missing pieces:
 

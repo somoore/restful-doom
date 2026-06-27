@@ -334,6 +334,10 @@ The training API is:
   probes and AgentMemory cell visits: current-cell revisit pressure, least-
   visited open-neighbor direction, and open-cell exhaustion ratio. This is a
   compact spawn-to-contact signal, not a full map graph.
+- PPO observations append visible-contact geometry for the current line-of-sight
+  enemy: active/shootable/needs-closure flags, distance, angle, alignment, and
+  close-contact state. This makes the first-visible to first-shootable subtask
+  explicit in the vector instead of hiding it in generic enemy memory.
 - `--first-visible-bonus`, `--first-shootable-bonus`,
   `--visible-contact-progress-reward`, `--terminate-on-first-visible`, and
   `--terminate-on-first-shootable` enable first-contact and

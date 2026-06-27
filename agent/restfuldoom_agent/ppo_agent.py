@@ -1169,6 +1169,11 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         for record in records
         if (context := _learning_trace_group(record, "topology"))
     ]
+    visible_contact_contexts = [
+        context
+        for record in records
+        if (context := _learning_trace_group(record, "visible_contact"))
+    ]
     states = [
         record.info.get("state", {})
         for record in records
@@ -1357,6 +1362,39 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         "mean_topology_exhausted_open_ratio": _mean_context_value(
             topology_contexts,
             "topology_exhausted_open_ratio",
+        ),
+        "visible_contact_active_steps": sum(
+            1
+            for context in visible_contact_contexts
+            if context.get("visible_contact_active")
+        ),
+        "visible_contact_needs_closure_steps": sum(
+            1
+            for context in visible_contact_contexts
+            if context.get("visible_contact_needs_closure")
+        ),
+        "visible_contact_shootable_steps": sum(
+            1
+            for context in visible_contact_contexts
+            if context.get("visible_contact_shootable")
+        ),
+        "visible_contact_aligned_steps": sum(
+            1
+            for context in visible_contact_contexts
+            if context.get("visible_contact_aligned")
+        ),
+        "visible_contact_close_steps": sum(
+            1
+            for context in visible_contact_contexts
+            if context.get("visible_contact_close")
+        ),
+        "mean_visible_contact_distance_norm": _mean_context_value(
+            [
+                context
+                for context in visible_contact_contexts
+                if context.get("visible_contact_active")
+            ],
+            "visible_contact_distance_norm",
         ),
         "mean_action_mask_size": round(
             sum(action_mask_sizes) / max(1, len(action_mask_sizes)),

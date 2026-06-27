@@ -160,6 +160,31 @@ def test_skill_controller_observation_includes_current_contact_use_line_context(
     assert features["contact_use_line_age_norm"] == 0.0
 
 
+def test_skill_controller_observation_includes_visible_contact_geometry():
+    controller = SkillController()
+    visible = _state(enemy=True, combat=False, enemy_distance=1200)
+    shootable = _state(enemy=True, combat=True, enemy_distance=256)
+
+    visible_features = dict(
+        zip(OBSERVATION_SCHEMA["feature_names"], controller.observation(visible))
+    )
+    shootable_features = dict(
+        zip(OBSERVATION_SCHEMA["feature_names"], controller.observation(shootable))
+    )
+
+    assert visible_features["visible_contact_active"] == 1.0
+    assert visible_features["visible_contact_shootable"] == 0.0
+    assert visible_features["visible_contact_needs_closure"] == 1.0
+    assert visible_features["visible_contact_distance_norm"] == pytest.approx(0.5)
+    assert visible_features["visible_contact_angle_cos"] == pytest.approx(1.0)
+    assert visible_features["visible_contact_aligned"] == 1.0
+    assert visible_features["visible_contact_close"] == 0.0
+    assert shootable_features["visible_contact_active"] == 1.0
+    assert shootable_features["visible_contact_shootable"] == 1.0
+    assert shootable_features["visible_contact_needs_closure"] == 0.0
+    assert shootable_features["visible_contact_close"] == 1.0
+
+
 def test_skill_controller_observation_includes_remembered_contact_use_line_context():
     controller = SkillController()
     first = _state(tick=5, enemy=True, combat=False, contact_use=True)

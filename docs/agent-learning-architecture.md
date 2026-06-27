@@ -307,9 +307,9 @@ The memory lifecycle is:
 PPO receives the feature vector declared in
 `restfuldoom_agent.schemas.OBSERVATION_SCHEMA`. It is derived from protobuf
 state, memory, and macro-action history, not screenshots. The current schema has
-96 features: 55 base tactical features, 15 action-history features,
-11 bounded temporal-context features, 8 contact-context features, and 7
-local topology-context features.
+104 features: 55 base tactical features, 15 action-history features,
+11 bounded temporal-context features, 8 contact-context features, 7
+local topology-context features, and 8 visible-contact-context features.
 
 The base feature groups are:
 
@@ -360,6 +360,16 @@ The topology-context group is:
 - relative angle toward the least-visited open frontier
 - ratio of open projected neighbor cells that are already exhausted
 
+The visible-contact-context group is:
+
+- whether a line-of-sight enemy is currently visible
+- whether that visible contact is already shootable
+- whether the visible contact still needs closure before combat can begin
+- nearest visible enemy distance
+- signed visible-contact angle
+- whether the contact is roughly aligned
+- whether the contact is within the close-contact threshold
+
 The schema now also declares source groups:
 
 - `protobuf_state`: live player, enemy, combat, navigation, use-line, and level
@@ -373,6 +383,8 @@ The schema now also declares source groups:
   maintained by `SkillController`.
 - `topology_context`: projected direction probes plus persistent/episode-local
   cell visits maintained by `SkillController`.
+- `visible_contact_context`: nearest visible enemy geometry maintained by
+  `SkillController`.
 
 This is good enough for early skill learning, but it is not yet a complete
 learning observation. Known gaps:
@@ -723,6 +735,22 @@ Recent PPO evidence:
   `first-damage` eval stages, lifting the corrected snapshot eval score to
   roughly `78.44`. It still earned nothing useful from `first-visible`, so the
   remaining stage gap is visible-contact-to-shootable.
+- Visible-contact target geometry is now an explicit observation group. Live
+  smoke `ppo-visible-contact-context-smoke` emitted the new JSONL trace group
+  and rollout metrics (`visible_contact_active_steps=4`,
+  `visible_contact_needs_closure_steps=4`,
+  `mean_visible_contact_distance_norm=0.9702`). The tiny run did not reach
+  shootable contact, so this is observation-surface validation rather than
+  learning progress.
+- A migrated snapshot probe resumed the prior 96-feature native-slot checkpoint
+  into the 104-feature actor and ran two 128-record updates across the
+  `first-visible`, `first-enemy-shootable`, and `first-damage` slots. The run
+  kept snapshot verification failures at zero and emitted visible-contact trace
+  groups for every buffer record. Update 1 reached `damage_delta=55`,
+  `kill_delta=3`, `visible_contact_shootable_steps=70`, and
+  `visible_contact_needs_closure_steps=42`, but checkpoint eval still scored
+  the `first-visible` slot at zero earned kills. The feature is live; the
+  first-visible-to-shootable policy gap remains.
 
 ## Next Architecture Work
 

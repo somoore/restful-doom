@@ -85,6 +85,9 @@ def test_learning_trace_names_observation_mask_and_outcome():
     obs[feature_names.index("contact_use_line_distance_norm")] = 0.4
     obs[feature_names.index("topology_frontier_active")] = 1.0
     obs[feature_names.index("topology_exhausted_open_ratio")] = 0.25
+    obs[feature_names.index("visible_contact_active")] = 1.0
+    obs[feature_names.index("visible_contact_needs_closure")] = 1.0
+    obs[feature_names.index("visible_contact_distance_norm")] = 0.5
     action_mask = [False for _ in ACTION_SCHEMA["actions"]]
     action_mask[1] = True
     action_mask[3] = True
@@ -128,6 +131,9 @@ def test_learning_trace_names_observation_mask_and_outcome():
     assert trace["observation"]["groups"]["contact"]["contact_use_line_distance_norm"] == 0.4
     assert trace["observation"]["groups"]["topology"]["topology_frontier_active"] == 1.0
     assert trace["observation"]["groups"]["topology"]["topology_exhausted_open_ratio"] == 0.25
+    assert trace["observation"]["groups"]["visible_contact"]["visible_contact_active"] == 1.0
+    assert trace["observation"]["groups"]["visible_contact"]["visible_contact_needs_closure"] == 1.0
+    assert trace["observation"]["groups"]["visible_contact"]["visible_contact_distance_norm"] == 0.5
     assert trace["controller"]["executed_skill"] == "fire"
     assert trace["controller"]["decision"]["enemy"]["distance"] == 128.125
     assert trace["outcome"]["reward"] == 3.25
@@ -302,6 +308,7 @@ def test_training_schemas_describe_features_and_actions():
         "temporal_context",
         "contact_context",
         "topology_context",
+        "visible_contact_context",
     ]
     assert "sector_damaging" in OBSERVATION_SCHEMA["feature_names"]
     assert "route_waypoint_distance_norm" in OBSERVATION_SCHEMA["feature_names"]
@@ -314,6 +321,8 @@ def test_training_schemas_describe_features_and_actions():
     assert "contact_use_line_followthrough_active" in OBSERVATION_SCHEMA["feature_names"]
     assert "topology_current_cell_visits_norm" in OBSERVATION_SCHEMA["feature_names"]
     assert "topology_frontier_angle_cos" in OBSERVATION_SCHEMA["feature_names"]
+    assert "visible_contact_needs_closure" in OBSERVATION_SCHEMA["feature_names"]
+    assert "visible_contact_distance_norm" in OBSERVATION_SCHEMA["feature_names"]
     assert "temporal_context" in {
         group["name"] for group in OBSERVATION_SCHEMA["source_groups"]
     }
@@ -321,6 +330,9 @@ def test_training_schemas_describe_features_and_actions():
         group["name"] for group in OBSERVATION_SCHEMA["source_groups"]
     }
     assert "topology_context" in {
+        group["name"] for group in OBSERVATION_SCHEMA["source_groups"]
+    }
+    assert "visible_contact_context" in {
         group["name"] for group in OBSERVATION_SCHEMA["source_groups"]
     }
     assert "no compact topological map graph" in OBSERVATION_SCHEMA["learning_readiness"]["known_gaps"]
@@ -374,6 +386,8 @@ def test_pad_observation_features_adds_neutral_frontier_to_old_ppo_rows():
         OBSERVATION_SCHEMA["contact_context_feature_names"]
     ) - len(
         OBSERVATION_SCHEMA["topology_context_feature_names"]
+    ) - len(
+        OBSERVATION_SCHEMA["visible_contact_context_feature_names"]
     )
 
     padded = pad_observation_features(old_row)
@@ -402,6 +416,20 @@ def test_pad_observation_features_adds_neutral_topology_context_to_contact_rows(
     old_row.extend([0.5 for _ in OBSERVATION_SCHEMA["action_history_feature_names"]])
     old_row.extend([0.75 for _ in OBSERVATION_SCHEMA["temporal_context_feature_names"]])
     old_row.extend([1.0 for _ in OBSERVATION_SCHEMA["contact_context_feature_names"]])
+
+    padded = pad_observation_features(old_row)
+
+    assert len(padded) == len(OBSERVATION_SCHEMA["feature_names"])
+    assert padded[: len(old_row)] == old_row
+    assert all(value == 0.0 for value in padded[len(old_row) :])
+
+
+def test_pad_observation_features_adds_neutral_visible_contact_to_topology_rows():
+    old_row = [0.25 for _ in OBSERVATION_SCHEMA["base_feature_names"]]
+    old_row.extend([0.5 for _ in OBSERVATION_SCHEMA["action_history_feature_names"]])
+    old_row.extend([0.75 for _ in OBSERVATION_SCHEMA["temporal_context_feature_names"]])
+    old_row.extend([1.0 for _ in OBSERVATION_SCHEMA["contact_context_feature_names"]])
+    old_row.extend([0.125 for _ in OBSERVATION_SCHEMA["topology_context_feature_names"]])
 
     padded = pad_observation_features(old_row)
 
@@ -966,6 +994,66 @@ def test_rollout_summary_counts_topology_context_from_learning_trace():
     assert summary["mean_topology_current_cell_visits_norm"] == 0.375
     assert summary["mean_topology_open_cell_min_visit_norm"] == 0.1875
     assert summary["mean_topology_exhausted_open_ratio"] == 0.625
+
+
+def test_rollout_summary_counts_visible_contact_context_from_learning_trace():
+    buffer = RolloutBuffer()
+    for visible_contact in [
+        {
+            "visible_contact_active": 1.0,
+            "visible_contact_shootable": 0.0,
+            "visible_contact_needs_closure": 1.0,
+            "visible_contact_distance_norm": 0.5,
+            "visible_contact_aligned": 1.0,
+            "visible_contact_close": 0.0,
+        },
+        {
+            "visible_contact_active": 1.0,
+            "visible_contact_shootable": 1.0,
+            "visible_contact_needs_closure": 0.0,
+            "visible_contact_distance_norm": 0.25,
+            "visible_contact_aligned": 1.0,
+            "visible_contact_close": 1.0,
+        },
+        {
+            "visible_contact_active": 0.0,
+            "visible_contact_shootable": 0.0,
+            "visible_contact_needs_closure": 0.0,
+            "visible_contact_distance_norm": 0.0,
+            "visible_contact_aligned": 0.0,
+            "visible_contact_close": 0.0,
+        },
+    ]:
+        buffer.add(
+            obs=[0.0, 1.0],
+            action_mask=[True, False],
+            action=0,
+            reward=0.0,
+            done=False,
+            value=0.0,
+            logprob=0.0,
+            info={
+                "skill": "engage",
+                "learning_trace": {
+                    "observation": {
+                        "groups": {
+                            "visible_contact": visible_contact,
+                        },
+                    },
+                },
+                "transition": {},
+                "state": {"health": 100, "kills": 0},
+            },
+        )
+
+    summary = _summarize_buffer(buffer)
+
+    assert summary["visible_contact_active_steps"] == 2
+    assert summary["visible_contact_needs_closure_steps"] == 1
+    assert summary["visible_contact_shootable_steps"] == 1
+    assert summary["visible_contact_aligned_steps"] == 2
+    assert summary["visible_contact_close_steps"] == 1
+    assert summary["mean_visible_contact_distance_norm"] == 0.375
 
 
 def test_rollout_summary_counts_first_contact_events():

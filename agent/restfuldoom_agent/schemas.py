@@ -73,12 +73,24 @@ TOPOLOGY_CONTEXT_FEATURE_NAMES = [
     "topology_exhausted_open_ratio",
 ]
 
+VISIBLE_CONTACT_CONTEXT_FEATURE_NAMES = [
+    "visible_contact_active",
+    "visible_contact_shootable",
+    "visible_contact_needs_closure",
+    "visible_contact_distance_norm",
+    "visible_contact_angle_sin",
+    "visible_contact_angle_cos",
+    "visible_contact_aligned",
+    "visible_contact_close",
+]
+
 PPO_FEATURE_NAMES = [
     *TACTICAL_FEATURE_NAMES,
     *ACTION_HISTORY_FEATURE_NAMES,
     *TEMPORAL_CONTEXT_FEATURE_NAMES,
     *CONTACT_CONTEXT_FEATURE_NAMES,
     *TOPOLOGY_CONTEXT_FEATURE_NAMES,
+    *VISIBLE_CONTACT_CONTEXT_FEATURE_NAMES,
 ]
 
 EXPERT_TO_PPO_SKILL_ACTION = {
@@ -325,6 +337,31 @@ def encode_topology_context_features(
     ]
 
 
+def encode_visible_contact_context_features(
+    *,
+    visible_contact_active: bool = False,
+    visible_contact_shootable: bool = False,
+    visible_contact_distance_units: float = 0.0,
+    visible_contact_angle_degrees: float = 0.0,
+    visible_contact_aligned: bool = False,
+    visible_contact_close: bool = False,
+) -> list[float]:
+    """Encode current visible enemy geometry for contact-to-shootable learning."""
+    angle_radians = math.radians(float(visible_contact_angle_degrees))
+    active = bool(visible_contact_active)
+    shootable = bool(visible_contact_shootable)
+    return [
+        1.0 if active else 0.0,
+        1.0 if active and shootable else 0.0,
+        1.0 if active and not shootable else 0.0,
+        _clip(float(visible_contact_distance_units) / 2400.0, minimum=0.0) if active else 0.0,
+        math.sin(angle_radians) if active else 0.0,
+        math.cos(angle_radians) if active else 0.0,
+        1.0 if active and visible_contact_aligned else 0.0,
+        1.0 if active and visible_contact_close else 0.0,
+    ]
+
+
 def _clip(value: float, *, minimum: float = -1.0, maximum: float = 1.0) -> float:
     return max(minimum, min(maximum, value))
 
@@ -349,6 +386,7 @@ def pad_observation_features(features: list[float]) -> list[float]:
             *encode_temporal_context_features(),
             *encode_contact_context_features(),
             *encode_topology_context_features(),
+            *encode_visible_contact_context_features(),
         ]
     if len(features) == len(TACTICAL_FEATURE_NAMES):
         return [
@@ -366,6 +404,7 @@ def pad_observation_features(features: list[float]) -> list[float]:
             *encode_temporal_context_features(),
             *encode_contact_context_features(),
             *encode_topology_context_features(),
+            *encode_visible_contact_context_features(),
         ]
     legacy_action_history_len = len(TACTICAL_FEATURE_NAMES) + len(ACTION_HISTORY_FEATURE_NAMES)
     pre_frontier_action_history_len = (
@@ -378,6 +417,7 @@ def pad_observation_features(features: list[float]) -> list[float]:
             *encode_temporal_context_features(),
             *encode_contact_context_features(),
             *encode_topology_context_features(),
+            *encode_visible_contact_context_features(),
         ]
     if len(features) == legacy_action_history_len:
         return [
@@ -385,6 +425,7 @@ def pad_observation_features(features: list[float]) -> list[float]:
             *encode_temporal_context_features(),
             *encode_contact_context_features(),
             *encode_topology_context_features(),
+            *encode_visible_contact_context_features(),
         ]
     legacy_ppo_len = (
         len(TACTICAL_FEATURE_NAMES)
@@ -396,6 +437,7 @@ def pad_observation_features(features: list[float]) -> list[float]:
             *features,
             *encode_contact_context_features(),
             *encode_topology_context_features(),
+            *encode_visible_contact_context_features(),
         ]
     pre_frontier_ppo_len = (
         len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)
@@ -408,6 +450,7 @@ def pad_observation_features(features: list[float]) -> list[float]:
             *features[len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES) :],
             *encode_contact_context_features(),
             *encode_topology_context_features(),
+            *encode_visible_contact_context_features(),
         ]
     legacy_contact_ppo_len = (
         len(TACTICAL_FEATURE_NAMES)
@@ -425,12 +468,33 @@ def pad_observation_features(features: list[float]) -> list[float]:
         return [
             *features,
             *encode_topology_context_features(),
+            *encode_visible_contact_context_features(),
         ]
     if len(features) == pre_frontier_contact_ppo_len:
         return [
             *_insert_neutral_tactical_features(features[: len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)]),
             *features[len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES) :],
             *encode_topology_context_features(),
+            *encode_visible_contact_context_features(),
+        ]
+    legacy_topology_ppo_len = len(PPO_FEATURE_NAMES) - len(VISIBLE_CONTACT_CONTEXT_FEATURE_NAMES)
+    pre_frontier_topology_ppo_len = (
+        len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)
+        + len(ACTION_HISTORY_FEATURE_NAMES)
+        + len(TEMPORAL_CONTEXT_FEATURE_NAMES)
+        + len(CONTACT_CONTEXT_FEATURE_NAMES)
+        + len(TOPOLOGY_CONTEXT_FEATURE_NAMES)
+    )
+    if len(features) == legacy_topology_ppo_len:
+        return [
+            *features,
+            *encode_visible_contact_context_features(),
+        ]
+    if len(features) == pre_frontier_topology_ppo_len:
+        return [
+            *_insert_neutral_tactical_features(features[: len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)]),
+            *features[len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES) :],
+            *encode_visible_contact_context_features(),
         ]
     raise ValueError(
         "feature vector length does not match tactical or PPO observation schema: "
@@ -438,7 +502,8 @@ def pad_observation_features(features: list[float]) -> list[float]:
         f"{len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)}, "
         f"{legacy_action_history_len}, {pre_frontier_action_history_len}, "
         f"{legacy_ppo_len}, {pre_frontier_ppo_len}, "
-        f"{legacy_contact_ppo_len}, {pre_frontier_contact_ppo_len}, or "
+        f"{legacy_contact_ppo_len}, {pre_frontier_contact_ppo_len}, "
+        f"{legacy_topology_ppo_len}, {pre_frontier_topology_ppo_len}, or "
         f"{len(PPO_FEATURE_NAMES)}"
     )
 
@@ -555,6 +620,14 @@ def _feature_meaning(name: str) -> str:
         "topology_frontier_angle_sin": "Sine of the relative angle toward the least-visited open frontier cell.",
         "topology_frontier_angle_cos": "Cosine of the relative angle toward the least-visited open frontier cell.",
         "topology_exhausted_open_ratio": "Fraction of open projected neighbor cells that have already been visited more than once.",
+        "visible_contact_active": "A line-of-sight enemy is currently visible to the agent.",
+        "visible_contact_shootable": "The current visible enemy contact is already a shootable combat target.",
+        "visible_contact_needs_closure": "A visible enemy exists but is not yet a shootable combat target.",
+        "visible_contact_distance_norm": "Nearest visible enemy distance normalized by 2400 Doom units.",
+        "visible_contact_angle_sin": "Sine of signed angle to the nearest visible enemy contact.",
+        "visible_contact_angle_cos": "Cosine of signed angle to the nearest visible enemy contact.",
+        "visible_contact_aligned": "Visible contact is roughly centered enough for contact closing.",
+        "visible_contact_close": "Visible contact is within the close-contact threshold used by the controller.",
     }
     return meanings.get(name, "PPO observation feature.")
 
@@ -568,6 +641,7 @@ OBSERVATION_SCHEMA = {
     "temporal_context_feature_names": TEMPORAL_CONTEXT_FEATURE_NAMES,
     "contact_context_feature_names": CONTACT_CONTEXT_FEATURE_NAMES,
     "topology_context_feature_names": TOPOLOGY_CONTEXT_FEATURE_NAMES,
+    "visible_contact_context_feature_names": VISIBLE_CONTACT_CONTEXT_FEATURE_NAMES,
     "source_groups": [
         {
             "name": "protobuf_state",
@@ -638,6 +712,11 @@ OBSERVATION_SCHEMA = {
             "producer": "SkillController projected direction probes plus AgentMemory cell visits",
             "features": TOPOLOGY_CONTEXT_FEATURE_NAMES,
         },
+        {
+            "name": "visible_contact_context",
+            "producer": "SkillController nearest visible enemy geometry from protobuf state",
+            "features": VISIBLE_CONTACT_CONTEXT_FEATURE_NAMES,
+        },
     ],
     "protobuf_to_observation_pipeline": [
         {
@@ -681,6 +760,11 @@ OBSERVATION_SCHEMA = {
             "code": "encode_topology_context_features(...)",
             "payload": "coarse cell visit counts and least-visited open frontier direction",
         },
+        {
+            "phase": "visible_contact_context",
+            "code": "encode_visible_contact_context_features(...)",
+            "payload": "current visible enemy distance, angle, shootable, and closure state",
+        },
     ],
     "learning_readiness": {
         "rich_observation_definition": [
@@ -702,6 +786,7 @@ OBSERVATION_SCHEMA = {
             "bounded temporal features expose recent movement, enemy-distance, route-distance, and shootable-contact trends",
             "contact-context features expose whether PPO is acting on a remembered visible-contact use line",
             "topology-context features expose current-cell revisit pressure and the least-visited open direction",
+            "visible-contact-context features expose current line-of-sight target geometry for contact-to-shootable learning",
         ],
         "known_gaps": [
             "no compact topological map graph",
@@ -762,6 +847,7 @@ OBSERVATION_SCHEMA = {
         *_feature_descriptors(TEMPORAL_CONTEXT_FEATURE_NAMES, source="temporal_context"),
         *_feature_descriptors(CONTACT_CONTEXT_FEATURE_NAMES, source="contact_context"),
         *_feature_descriptors(TOPOLOGY_CONTEXT_FEATURE_NAMES, source="topology_context"),
+        *_feature_descriptors(VISIBLE_CONTACT_CONTEXT_FEATURE_NAMES, source="visible_contact_context"),
     ],
 }
 

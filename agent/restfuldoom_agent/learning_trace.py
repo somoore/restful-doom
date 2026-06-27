@@ -117,6 +117,16 @@ _FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
         "topology_frontier_angle_cos",
         "topology_exhausted_open_ratio",
     ),
+    "visible_contact": (
+        "visible_contact_active",
+        "visible_contact_shootable",
+        "visible_contact_needs_closure",
+        "visible_contact_distance_norm",
+        "visible_contact_angle_sin",
+        "visible_contact_angle_cos",
+        "visible_contact_aligned",
+        "visible_contact_close",
+    ),
     "survival": (
         "stuck",
         "sector_damaging",

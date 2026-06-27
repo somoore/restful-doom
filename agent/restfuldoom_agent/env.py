@@ -37,6 +37,7 @@ from .schemas import (
     encode_contact_context_features,
     encode_temporal_context_features,
     encode_topology_context_features,
+    encode_visible_contact_context_features,
 )
 from .skill_policy import features_from_tactical
 
@@ -173,6 +174,7 @@ class SkillController:
             *self._temporal_context_features(features),
             *self._contact_context_features(features),
             *self._topology_context_features(features),
+            *self._visible_contact_context_features(features),
         ]
 
     def reset_episode_context(self) -> None:
@@ -390,6 +392,23 @@ class SkillController:
             frontier_active=int(best["visits"]) <= 1,
             frontier_angle_degrees=float(best["angle_offset_degrees"]),
             exhausted_open_ratio=exhausted / max(1, len(open_cells)),
+        )
+
+    def _visible_contact_context_features(self, features: Any) -> list[float]:
+        """Returns current visible-contact geometry for PPO observations."""
+        enemy = features.visible_enemies[0] if features.visible_enemies else None
+        if enemy is None:
+            return encode_visible_contact_context_features()
+        shootable = self.policy._shootable_enemy(features) is not None
+        angle_delta = float(enemy.get("angle_delta", 0.0))
+        distance = float(enemy.get("distance", 0.0))
+        return encode_visible_contact_context_features(
+            visible_contact_active=True,
+            visible_contact_shootable=shootable,
+            visible_contact_distance_units=distance,
+            visible_contact_angle_degrees=angle_delta,
+            visible_contact_aligned=abs(angle_delta) <= self.params.aim_tolerance_degrees,
+            visible_contact_close=distance <= 700.0,
         )
 
     def _projected_open_probe_cells(
