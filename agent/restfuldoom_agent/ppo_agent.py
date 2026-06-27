@@ -577,6 +577,11 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         for record in records
         if isinstance(record.info, dict) and isinstance(record.info.get("route_outcome", {}), dict)
     ]
+    contact_contexts = [
+        context
+        for record in records
+        if (context := _learning_trace_contact_context(record))
+    ]
     states = [
         record.info.get("state", {})
         for record in records
@@ -680,6 +685,30 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
             sum(float(outcome.get("progress_units", 0.0)) for outcome in route_outcomes),
             4,
         ),
+        "contact_context_active_steps": sum(
+            1 for context in contact_contexts if context.get("recent_contact_active")
+        ),
+        "contact_use_line_active_steps": sum(
+            1 for context in contact_contexts if context.get("contact_use_line_active")
+        ),
+        "contact_use_line_close_steps": sum(
+            1 for context in contact_contexts if context.get("contact_use_line_close")
+        ),
+        "contact_use_line_followthrough_steps": sum(
+            1
+            for context in contact_contexts
+            if context.get("contact_use_line_followthrough_active")
+        ),
+        "mean_contact_use_line_distance_norm": _mean_contact_context_value(
+            contact_contexts,
+            "contact_use_line_distance_norm",
+            active_key="contact_use_line_active",
+        ),
+        "mean_contact_use_line_age_norm": _mean_contact_context_value(
+            contact_contexts,
+            "contact_use_line_age_norm",
+            active_key="contact_use_line_active",
+        ),
         "mean_action_mask_size": round(
             sum(action_mask_sizes) / max(1, len(action_mask_sizes)),
             4,
@@ -703,6 +732,38 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
     }
     summary["checkpoint_selection_score"] = _checkpoint_selection_score(summary)
     return summary
+
+
+def _learning_trace_contact_context(record: object) -> dict[str, object]:
+    """Returns the compact contact feature group from a rollout record."""
+    info = getattr(record, "info", {})
+    if not isinstance(info, dict):
+        return {}
+    trace = info.get("learning_trace", {})
+    if not isinstance(trace, dict):
+        return {}
+    observation = trace.get("observation", {})
+    if not isinstance(observation, dict):
+        return {}
+    groups = observation.get("groups", {})
+    if not isinstance(groups, dict):
+        return {}
+    contact = groups.get("contact", {})
+    return contact if isinstance(contact, dict) else {}
+
+
+def _mean_contact_context_value(
+    contexts: list[dict[str, object]],
+    key: str,
+    *,
+    active_key: str,
+) -> float:
+    values = [
+        float(context.get(key, 0.0))
+        for context in contexts
+        if context.get(active_key)
+    ]
+    return round(sum(values) / max(1, len(values)), 4)
 
 
 def _checkpoint_selection_score(summary: dict[str, object]) -> float:

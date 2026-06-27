@@ -70,6 +70,15 @@ memory/temporal/survival concerns, lists the feasible skills from the mask, and
 records the selected skill, executed controller decision, reward, route/contact
 outcomes, and transition deltas.
 
+Rollout summaries aggregate the trace contact group into:
+
+- `contact_context_active_steps`
+- `contact_use_line_active_steps`
+- `contact_use_line_close_steps`
+- `contact_use_line_followthrough_steps`
+- `mean_contact_use_line_distance_norm`
+- `mean_contact_use_line_age_norm`
+
 ## 2. Memory Layer
 
 `AgentMemory` is an inspectable JSON ledger, not a neural hidden state. The

@@ -647,6 +647,20 @@ Recent PPO evidence:
   follow-through, or aging out. This is observation-surface progress, not new
   learning evidence until a live contact curriculum run shows better
   repeatability.
+- `ppo-contact-context-seek-probe`: after adding contact-context features and
+  resuming the previous 81-feature seek checkpoint through 89-feature
+  observation migration, a four-update fixed-stage `visible_contact_seek` run
+  reached `max_kills>=1` in all updates. The strongest updates reached
+  `shootable_target_steps=117/150`, `fire_on_shootable=101/130`,
+  `damage_delta=56/35`, and `max_kills=2`. This is strong evidence that the new
+  observation can make the previously weak seek contact stage learnable.
+- `ppo-contact-context-round-robin`: transferring that checkpoint back across
+  `visible_contact_fast`, `visible_contact_route`, `visible_contact_seek`, and
+  `combat_start` was mixed. Route and seek still reached shootable combat and
+  kills, but fast regressed to zero damage and combat-start lost kill
+  competence. Treat contact-context PPO as improved but still overfit-prone; it
+  needs better curriculum mixing or a topology/snapshot upgrade before
+  full-level promotion.
 
 ## Next Architecture Work
 

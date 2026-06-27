@@ -601,6 +601,66 @@ def test_rollout_summary_counts_route_outcomes():
     assert summary["route_action_reward"] == 1.5
 
 
+def test_rollout_summary_counts_contact_context_from_learning_trace():
+    buffer = RolloutBuffer()
+    for contact in [
+        {
+            "recent_contact_active": 1.0,
+            "contact_use_line_active": 1.0,
+            "contact_use_line_distance_norm": 0.5,
+            "contact_use_line_close": 0.0,
+            "contact_use_line_followthrough_active": 1.0,
+            "contact_use_line_age_norm": 0.25,
+        },
+        {
+            "recent_contact_active": 1.0,
+            "contact_use_line_active": 1.0,
+            "contact_use_line_distance_norm": 0.25,
+            "contact_use_line_close": 1.0,
+            "contact_use_line_followthrough_active": 0.0,
+            "contact_use_line_age_norm": 0.5,
+        },
+        {
+            "recent_contact_active": 0.0,
+            "contact_use_line_active": 0.0,
+            "contact_use_line_distance_norm": 0.0,
+            "contact_use_line_close": 0.0,
+            "contact_use_line_followthrough_active": 0.0,
+            "contact_use_line_age_norm": 0.0,
+        },
+    ]:
+        buffer.add(
+            obs=[0.0, 1.0],
+            action_mask=[True, False],
+            action=0,
+            reward=0.0,
+            done=False,
+            value=0.0,
+            logprob=0.0,
+            info={
+                "skill": "engage",
+                "learning_trace": {
+                    "observation": {
+                        "groups": {
+                            "contact": contact,
+                        },
+                    },
+                },
+                "transition": {},
+                "state": {"health": 100, "kills": 0},
+            },
+        )
+
+    summary = _summarize_buffer(buffer)
+
+    assert summary["contact_context_active_steps"] == 2
+    assert summary["contact_use_line_active_steps"] == 2
+    assert summary["contact_use_line_close_steps"] == 1
+    assert summary["contact_use_line_followthrough_steps"] == 1
+    assert summary["mean_contact_use_line_distance_norm"] == 0.375
+    assert summary["mean_contact_use_line_age_norm"] == 0.375
+
+
 def test_rollout_summary_counts_first_contact_events():
     buffer = RolloutBuffer()
     buffer.add(
