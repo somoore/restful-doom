@@ -561,6 +561,7 @@ def summarize_state(state: Any) -> dict[str, Any]:
         "tick": state.tick,
         "episode": state.level.episode,
         "map": state.level.map,
+        "level_time": state.level.level_time,
         "health": player.health,
         "armor": player.armor,
         "kills": player.kills,

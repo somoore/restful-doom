@@ -58,10 +58,12 @@ def test_snapshot_builder_generates_manifest_from_trajectory_rows(tmp_path):
     assert first["reset_start"]["x_fp"] == 101 * 65536
     assert first["expected_state"]["visible_enemy"] is True
     assert first["expected_state"]["shootable_target"] is False
+    assert first["expected_state"]["target_is_enemy"] is False
     assert first["snapshot"]["slot"] == 3
     assert first["snapshot"]["ref"] == "save_slot:3"
     assert second["evidence"]["selectors"] == ["first-shootable", "first-damage"]
     assert second["expected_state"]["shootable_target"] is True
+    assert second["expected_state"]["target_is_enemy"] is True
     assert second["expected_state"]["damage_delta"] == 20
     assert second["snapshot"]["slot"] == 4
 
@@ -257,23 +259,33 @@ def test_native_snapshot_load_verification_matches_progressed_state():
     expected = {
         "episode": 1,
         "map": 1,
+        "tick": 100,
+        "level_time": 409,
         "position_fp": [100 * 65536, -200 * 65536, 0],
         "shootable_target": True,
+        "target_is_enemy": False,
     }
     observed = {
         "episode": 1,
         "map": 1,
+        "tick": 5000,
+        "level_time": 410,
         "position_fp": [101 * 65536, -200 * 65536, 0],
-        "combat": {"has_shootable_target": True},
+        "combat": {"has_shootable_target": True, "target_is_enemy": False},
     }
     wrong_map = {**observed, "map": 2}
+    wrong_enemy_flag = {
+        **observed,
+        "combat": {"has_shootable_target": True, "target_is_enemy": True},
+    }
 
     assert _verify_snapshot_restored_state(
         actual=observed,
         expected=expected,
-        raw_state=_state(combat=True),
+        raw_state=_state(combat=False),
         enabled=True,
         tick_tolerance=35,
+        verify_stream_tick=False,
         position_tolerance_fp=160 * 65536,
     )["valid"]
     assert not _verify_snapshot_restored_state(
@@ -282,6 +294,16 @@ def test_native_snapshot_load_verification_matches_progressed_state():
         raw_state=_state(combat=True),
         enabled=True,
         tick_tolerance=35,
+        verify_stream_tick=False,
+        position_tolerance_fp=160 * 65536,
+    )["valid"]
+    assert not _verify_snapshot_restored_state(
+        actual=wrong_enemy_flag,
+        expected=expected,
+        raw_state=_state(combat=False),
+        enabled=True,
+        tick_tolerance=35,
+        verify_stream_tick=False,
         position_tolerance_fp=160 * 65536,
     )["valid"]
 

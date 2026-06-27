@@ -397,13 +397,26 @@ def _policy_skill(record: dict[str, Any]) -> str | None:
 def _expected_state(record: dict[str, Any]) -> dict[str, Any]:
     state = _record_state(record)
     expected: dict[str, Any] = {}
-    for key in ("tick", "episode", "map", "health", "armor", "kills", "items", "secrets"):
+    for key in (
+        "tick",
+        "level_time",
+        "episode",
+        "map",
+        "health",
+        "armor",
+        "kills",
+        "items",
+        "secrets",
+    ):
         if key in state:
             expected[key] = state[key]
     if "position_fp" in state:
         expected["position_fp"] = state["position_fp"]
     expected["visible_enemy"] = _has_visible_enemy(record)
     expected["shootable_target"] = _has_shootable_target(record)
+    combat = state.get("combat")
+    if isinstance(combat, dict) and "target_is_enemy" in combat:
+        expected["target_is_enemy"] = bool(combat.get("target_is_enemy"))
     expected["damage_delta"] = _damage_delta(record)
     expected["kill_delta"] = _kill_delta(record)
     done_reason = _record_info(record).get("done_reason")

@@ -647,7 +647,7 @@ def test_doom_agent_env_reset_sends_curriculum_start():
 
 
 def test_doom_agent_env_snapshot_reset_observes_without_episode_reset():
-    first = _state(tick=700, enemy=True)
+    first = _state(tick=700, level_time=12, enemy=True)
     client = _FakeClient([first])
     env = DoomAgentEnv(
         DoomEnvConfig(
@@ -660,7 +660,7 @@ def test_doom_agent_env_snapshot_reset_observes_without_episode_reset():
             curriculum_stage={
                 "name": "first_contact_snapshot",
                 "reset_mode": "snapshot",
-                "expected_state": {"tick": 700},
+                "expected_state": {"level_time": 12},
                 "snapshot_restore": {
                     "schema": "restfuldoom.snapshot_restore.v1",
                     "returncode": 0,
@@ -687,12 +687,15 @@ def test_doom_agent_env_snapshot_reset_observes_without_episode_reset():
     assert reset_context["snapshot_id"] == "snap-1"
     assert reset_context["restore"]["returncode"] == 0
     assert reset_context["actual_first_state"]["tick"] == 700
+    assert reset_context["actual_first_state"]["level_time"] == 12
     assert reset_context["restored_state_verification"]["valid"] is True
-    assert reset_context["restored_state_verification"]["compared_fields"] == ["tick"]
+    assert reset_context["restored_state_verification"]["compared_fields"] == [
+        "level_time"
+    ]
 
 
 def test_doom_agent_env_snapshot_reset_can_load_server_slot():
-    first = _state(tick=800, enemy=True)
+    first = _state(tick=800, level_time=14, enemy=True)
     client = _FakeClient([first])
     env = DoomAgentEnv(
         DoomEnvConfig(
@@ -706,7 +709,7 @@ def test_doom_agent_env_snapshot_reset_can_load_server_slot():
             curriculum_stage={
                 "name": "first_contact_snapshot",
                 "reset_mode": "snapshot",
-                "expected_state": {"tick": 800},
+                "expected_state": {"level_time": 14},
                 "snapshot_restore": {
                     "schema": "restfuldoom.snapshot_restore.v1",
                     "api_method": "grpc_load_snapshot",
@@ -733,12 +736,13 @@ def test_doom_agent_env_snapshot_reset_can_load_server_slot():
     assert reset_context["restore"]["api_method"] == "grpc_load_snapshot"
     assert reset_context["restore"]["returncode"] == 0
     assert reset_context["actual_first_state"]["tick"] == 800
+    assert reset_context["actual_first_state"]["level_time"] == 14
     assert reset_context["restored_state_verification"]["valid"] is True
     assert reset_context["restored_state_verification"]["enabled"] is True
 
 
 def test_doom_agent_env_snapshot_reset_fails_on_unverified_server_slot():
-    first = _state(tick=900, enemy=True)
+    first = _state(tick=900, level_time=20, enemy=True)
     client = _FakeClient([first])
     env = DoomAgentEnv(
         DoomEnvConfig(
@@ -751,7 +755,7 @@ def test_doom_agent_env_snapshot_reset_fails_on_unverified_server_slot():
             curriculum_stage={
                 "name": "first_contact_snapshot",
                 "reset_mode": "snapshot",
-                "expected_state": {"tick": 800},
+                "expected_state": {"level_time": 14},
             },
             snapshot_verify_tick_tolerance=0,
         ),
@@ -1090,6 +1094,7 @@ class _FixedDurationController:
 def _state(
     *,
     tick=1,
+    level_time=None,
     kills=0,
     enemy=False,
     enemy_line_of_sight=True,
@@ -1234,7 +1239,7 @@ def _state(
             episode=1,
             map=1,
             skill=2,
-            level_time=0,
+            level_time=tick if level_time is None else level_time,
             total_kills=1,
             total_items=0,
             total_secrets=0,

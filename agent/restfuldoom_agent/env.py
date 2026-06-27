@@ -96,6 +96,7 @@ class DoomEnvConfig:
     snapshot: dict[str, Any] | None = None
     snapshot_verify_restored_state: bool = True
     snapshot_verify_tick_tolerance: int = 35
+    snapshot_verify_stream_tick: bool = False
     snapshot_verify_position_tolerance_fp: int = 160 * 65536
 
     def reward_goal(self) -> Goal:
@@ -1013,6 +1014,7 @@ class DoomAgentEnv:
             enabled=reset_source == "snapshot_restore"
             and bool(self.config.snapshot_verify_restored_state),
             tick_tolerance=int(self.config.snapshot_verify_tick_tolerance),
+            verify_stream_tick=bool(self.config.snapshot_verify_stream_tick),
             position_tolerance_fp=int(
                 self.config.snapshot_verify_position_tolerance_fp
             ),
@@ -1698,6 +1700,7 @@ def _verify_snapshot_restored_state(
     raw_state: Any,
     enabled: bool,
     tick_tolerance: int,
+    verify_stream_tick: bool,
     position_tolerance_fp: int,
 ) -> dict[str, Any]:
     """Verifies that a restored snapshot produced the expected first state."""
@@ -1712,6 +1715,7 @@ def _verify_snapshot_restored_state(
             "tick": int(tick_tolerance),
             "position_fp": int(position_tolerance_fp),
         },
+        "stream_tick_checked": bool(verify_stream_tick),
     }
     if not enabled:
         verification["skipped"] = True
@@ -1733,7 +1737,23 @@ def _verify_snapshot_restored_state(
                 f"{key} expected {expected_value!r} got {actual_value!r}"
             )
 
-    if "tick" in expected:
+    if "level_time" in expected:
+        compared.append("level_time")
+        actual_level_time = _optional_int(actual.get("level_time"))
+        expected_level_time = _optional_int(expected.get("level_time"))
+        if actual_level_time is None or expected_level_time is None:
+            errors.append(
+                "level_time expected "
+                f"{expected.get('level_time')!r} got {actual.get('level_time')!r}"
+            )
+        elif abs(actual_level_time - expected_level_time) > tick_tolerance:
+            errors.append(
+                "level_time drift "
+                f"{abs(actual_level_time - expected_level_time)} exceeds tolerance "
+                f"{tick_tolerance} (expected {expected_level_time}, got {actual_level_time})"
+            )
+
+    if verify_stream_tick and "tick" in expected:
         compared.append("tick")
         actual_tick = _optional_int(actual.get("tick"))
         expected_tick = _optional_int(expected.get("tick"))
@@ -1776,17 +1796,43 @@ def _verify_snapshot_restored_state(
 
     if "shootable_target" in expected:
         compared.append("shootable_target")
-        actual_shootable = _has_shootable_enemy(raw_state)
+        actual_shootable = _combat_flag(actual, raw_state, "has_shootable_target")
+        if actual_shootable is None:
+            actual_shootable = _has_shootable_enemy(raw_state)
         if actual_shootable != bool(expected.get("shootable_target")):
             errors.append(
                 "shootable_target expected "
                 f"{bool(expected.get('shootable_target'))!r} got {actual_shootable!r}"
             )
 
+    if "target_is_enemy" in expected:
+        compared.append("target_is_enemy")
+        actual_target_is_enemy = _combat_flag(actual, raw_state, "target_is_enemy")
+        if actual_target_is_enemy is None:
+            errors.append(
+                "target_is_enemy expected "
+                f"{bool(expected.get('target_is_enemy'))!r} got None"
+            )
+        elif actual_target_is_enemy != bool(expected.get("target_is_enemy")):
+            errors.append(
+                "target_is_enemy expected "
+                f"{bool(expected.get('target_is_enemy'))!r} got {actual_target_is_enemy!r}"
+            )
+
     verification["compared_fields"] = compared
     verification["errors"] = errors
     verification["valid"] = not errors
     return verification
+
+
+def _combat_flag(actual: dict[str, Any], raw_state: Any, key: str) -> bool | None:
+    combat = actual.get("combat")
+    if isinstance(combat, dict) and key in combat:
+        return bool(combat.get(key))
+    raw_combat = getattr(raw_state, "combat", None)
+    if raw_combat is not None and hasattr(raw_combat, key):
+        return bool(getattr(raw_combat, key))
+    return None
 
 
 def _optional_int(value: object) -> int | None:

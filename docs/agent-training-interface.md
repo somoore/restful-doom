@@ -335,11 +335,13 @@ is later passed to `ppo_agent --snapshot-curriculum`.
 Snapshot resets are verified by default. After an external restore or native
 `LoadSnapshot`, `DoomAgentEnv.reset()` observes the first protobuf state and
 compares it with the stage `expected_state`. The verifier compares only fields
-present in the manifest, with tolerances for tick and position drift, and writes
-`restfuldoom.snapshot_restored_state_verification.v1` into
+present in the manifest, with tolerances for saved `level_time` and position
+drift, and writes `restfuldoom.snapshot_restored_state_verification.v1` into
 `reset_context.restored_state_verification`. PPO training fails the reset when
 verification is invalid unless `--no-snapshot-verify-restored-state` is set for
-debugging.
+debugging. `GameState.tick` is a stream counter, not a saved level timestamp,
+so it is advisory by default; `--snapshot-verify-stream-tick` enables it only
+for diagnostics.
 
 Native slots can be managed with `python -m restfuldoom_agent.snapshot_slots
 save|load --slot N` or the Hellbox wrapper commands `snapshot-save` and

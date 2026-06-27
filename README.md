@@ -597,9 +597,12 @@ matches the expected map/position/shootable-target evidence.
 During PPO training, snapshot resets verify the first restored protobuf state
 against the stage `expected_state` before collecting rollout records. The check
 compares only fields present in the manifest, including map/episode, health,
-kills/items/secrets, shootable/visible contact, and position/tick with
-tolerances. A mismatch fails the reset by default; `ppo_agent
---no-snapshot-verify-restored-state` exists only for debugging broken manifests.
+kills/items/secrets, shootable/visible contact, and position/`level_time` with
+tolerances. `GameState.tick` is a live stream counter and is not checked by
+default; use `ppo_agent --snapshot-verify-stream-tick` only when debugging a
+source that should preserve stream ticks. A mismatch fails the reset by
+default; `ppo_agent --no-snapshot-verify-restored-state` exists only for
+debugging broken manifests.
 
 ```
 PYTHONPATH=agent python -m restfuldoom_agent.snapshot_curriculum \

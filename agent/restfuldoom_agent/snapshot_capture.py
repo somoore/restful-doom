@@ -410,6 +410,7 @@ async def _observe_matching_state(
                 raw_state=state,
                 enabled=True,
                 tick_tolerance=35,
+                verify_stream_tick=False,
                 position_tolerance_fp=160 * 65536,
             )
             if verification["valid"]:
@@ -433,6 +434,7 @@ def _compact_observed_state(summary: dict[str, Any]) -> dict[str, Any]:
     combat = summary.get("combat") if isinstance(summary.get("combat"), dict) else {}
     return {
         "tick": summary.get("tick"),
+        "level_time": summary.get("level_time"),
         "episode": summary.get("episode"),
         "map": summary.get("map"),
         "health": summary.get("health"),
@@ -440,6 +442,7 @@ def _compact_observed_state(summary: dict[str, Any]) -> dict[str, Any]:
         "items": summary.get("items"),
         "position_fp": summary.get("position_fp"),
         "shootable_target": combat.get("has_shootable_target"),
+        "target_is_enemy": combat.get("target_is_enemy"),
     }
 
 

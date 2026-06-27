@@ -278,6 +278,7 @@ async def evaluate(args: argparse.Namespace) -> dict[str, object]:
         terminate_on_first_shootable=args.terminate_on_first_shootable,
         snapshot_verify_restored_state=args.snapshot_verify_restored_state,
         snapshot_verify_tick_tolerance=args.snapshot_verify_tick_tolerance,
+        snapshot_verify_stream_tick=args.snapshot_verify_stream_tick,
         snapshot_verify_position_tolerance_fp=args.snapshot_verify_position_tolerance_fp,
     )
     candidate = await evaluate_checkpoint(
@@ -1498,6 +1499,14 @@ def main() -> None:
         help="Disable expected_state checks after snapshot restore. Intended for debugging only.",
     )
     parser.add_argument("--snapshot-verify-tick-tolerance", type=int, default=35)
+    parser.add_argument(
+        "--snapshot-verify-stream-tick",
+        action="store_true",
+        help=(
+            "Also verify GameState.tick after snapshot restore. Normally disabled "
+            "because native Doom saves restore level_time while stream tick keeps advancing."
+        ),
+    )
     parser.add_argument(
         "--snapshot-verify-position-tolerance-fp",
         type=int,
