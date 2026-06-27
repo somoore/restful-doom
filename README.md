@@ -159,10 +159,70 @@ The Python package includes:
 - async gRPC client helpers
 - streaming rollout API with reconnect/backoff and last-seen-tick reporting
 - a deterministic smoke policy
+- a structured local brain with tactical memory, skill selection, and policy evolution
 - named goal/reward presets
 - optional nonblocking AWS Bedrock text-reasoning policy
 - JSONL trajectory logging
 - JSON rollout config for goal injection, auth metadata, and demo budgets
+
+### Structured Local Brain
+
+The practical agent path is not an LLM pressing controls every tic. The fast
+player is a local process that consumes protobuf `GameState`, chooses a small
+skill, and sends `PlayerAction` back over gRPC. Codex or another LLM can then
+act as the training operator: inspect failures, adjust goals/rewards, and
+promote better policies.
+
+Run the first trainable brain against a local Doom gRPC endpoint:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.brain_agent \
+    --endpoint 127.0.0.1:50051 \
+    --goal-preset combat \
+    --max-states 700 \
+    --evolve-runs 3 \
+    --memory-path agent_memory/e1m1.json \
+    --trajectory-jsonl trajectories/brain.jsonl
+```
+
+The brain persists cross-run memory in `agent_memory/e1m1.json`: visited map
+cells, enemy sightings, lessons from deaths/kills, and the best promoted
+policy parameters. Each evolution run mutates the current best parameters,
+scores the real rollout with the selected reward preset, and promotes the
+candidate when its fitness beats the stored baseline.
+
+The gRPC stream includes a compact `NavigationProbe` so the brain can avoid
+video latency and REST map queries. Each state reports whether forward/back/side
+movement is locally open, whether a usable line is ahead, and the distance to
+the front blocking line. The local policy uses this to open doors, sidestep, or
+turn away from blocked geometry while hunting enemies from protobuf state.
+
+The default success target is intentionally concrete: complete a level and score
+at least one kill in the same autonomous run. Until that happens, the training
+job is still in progress even if fitness improves.
+
+The Codex MCP server exposes the same path through `brain_drive` and
+`brain_memory`, so Codex can run a goal, inspect memory, adjust rewards, and
+iterate without relying on screenshots for control.
+
+Export the current training job before moving from Docker to cloud:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.brain_agent \
+    --memory-path agent_memory/e1m1.json \
+    --export-job training-jobs/restfuldoom-agent-training.tar.gz
+```
+
+The bundle uses schema `restfuldoom.training_job.v1` and includes a manifest,
+memory, promoted parameters, `agent-notes.md`, and referenced JSONL
+trajectories. A cloud worker can import it and continue training against a new
+gRPC endpoint:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.brain_agent \
+    --import-job training-jobs/restfuldoom-agent-training.tar.gz \
+    --import-destination .
+```
 
 ### Local Docker + Codex MCP
 

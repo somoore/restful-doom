@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import random
 import signal
 import socket
 import subprocess
@@ -348,12 +349,162 @@ async def run_rollout(
     }
 
 
+@MCP.tool()
+async def brain_drive(
+    endpoint: str = f"127.0.0.1:{DEFAULT_AGENT_PORT}",
+    max_states: int = 700,
+    goal_preset: str = "combat",
+    memory_path: str = "agent_memory/e1m1.json",
+    trajectory_jsonl: str | None = "trajectories/brain.jsonl",
+    evolve_runs: int = 1,
+    seed: int = 7,
+    required_kills: int = 1,
+    require_level_complete: bool = True,
+) -> dict[str, Any]:
+    """Drive Doom with the structured local brain and persist learning memory."""
+    _ensure_agent_path()
+    from restfuldoom_agent.brain import BrainConfig, run_brain
+
+    return await run_brain(
+        BrainConfig(
+            endpoint=endpoint,
+            goal_preset=goal_preset,
+            max_states=max_states,
+            memory_path=Path(memory_path),
+            trajectory_jsonl=Path(trajectory_jsonl) if trajectory_jsonl else None,
+            evolve_runs=evolve_runs,
+            seed=seed,
+            required_kills=required_kills,
+            require_level_complete=require_level_complete,
+        )
+    )
+
+
+@MCP.tool()
+def brain_memory(memory_path: str = "agent_memory/e1m1.json") -> dict[str, Any]:
+    """Return persistent structured-brain memory diagnostics."""
+    _ensure_agent_path()
+    from restfuldoom_agent.brain import AgentMemory
+
+    return AgentMemory.load(memory_path).summary()
+
+
+@MCP.tool()
+async def brain_train_docker(
+    image: str = DEFAULT_IMAGE,
+    container: str = DEFAULT_CONTAINER,
+    endpoint: str = f"127.0.0.1:{DEFAULT_AGENT_PORT}",
+    max_states: int = 700,
+    goal_preset: str = "combat",
+    memory_path: str = "agent_memory/e1m1.json",
+    trajectory_jsonl: str | None = "trajectories/brain-train.jsonl",
+    episodes: int = 3,
+    seed: int = 7,
+    video: bool = True,
+    required_kills: int = 1,
+    require_level_complete: bool = True,
+) -> dict[str, Any]:
+    """Restart Dockerized Doom for each candidate and evolve brain parameters."""
+    _ensure_agent_path()
+    from restfuldoom_agent.brain import (
+        AgentMemory,
+        BrainConfig,
+        BrainPolicyParams,
+        run_brain_episode,
+    )
+
+    memory = AgentMemory.load(_repo_path(memory_path))
+    rng = random.Random(seed)
+    base_params = memory.best_params()
+    summaries: list[dict[str, Any]] = []
+    starts: list[dict[str, Any]] = []
+
+    for index in range(episodes):
+        docker = docker_start(image=image, container=container, video=video, replace=True)
+        starts.append(
+            {
+                "episode": index + 1,
+                "ready": docker["ready"],
+                "video_ready": docker["video_ready"],
+                "agent_endpoint": docker["agent_endpoint"],
+            }
+        )
+        params = base_params if index == 0 else base_params.mutate(rng, scale=1.0)
+        candidate_id = f"candidate-{index + 1}"
+        summary = await run_brain_episode(
+            BrainConfig(
+                endpoint=endpoint,
+                goal_preset=goal_preset,
+                max_states=max_states,
+                memory_path=_repo_path(memory_path),
+                trajectory_jsonl=(
+                    _repo_path(trajectory_jsonl) if trajectory_jsonl is not None else None
+                ),
+                evolve_runs=1,
+                seed=seed + index,
+                required_kills=required_kills,
+                require_level_complete=require_level_complete,
+            ),
+            memory,
+            params,
+            candidate_id,
+        )
+        summaries.append(summary)
+        if summary["promoted"]:
+            base_params = BrainPolicyParams(**summary["params"]).bounded()
+        if summary.get("success"):
+            break
+
+    return {
+        "schema": "restfuldoom.brain_train_docker.v1",
+        "episodes": summaries,
+        "docker_starts": starts,
+        "memory": memory.summary(),
+        "success": any(summary.get("success") for summary in summaries),
+    }
+
+
+@MCP.tool()
+def brain_export_job(
+    output_path: str = "training-jobs/restfuldoom-agent-training.tar.gz",
+    memory_path: str = "agent_memory/e1m1.json",
+) -> dict[str, Any]:
+    """Export memory, notes, and trajectories as a portable training job bundle."""
+    _ensure_agent_path()
+    from restfuldoom_agent.brain import export_training_job
+
+    return export_training_job(
+        _repo_path(output_path),
+        memory_path=_repo_path(memory_path),
+        notes_path=ROOT / "agent-notes.md",
+    )
+
+
+@MCP.tool()
+def brain_import_job(
+    bundle_path: str,
+    destination: str = ".",
+) -> dict[str, Any]:
+    """Import a portable structured-brain training job bundle."""
+    _ensure_agent_path()
+    from restfuldoom_agent.brain import import_training_job
+
+    return import_training_job(_repo_path(bundle_path), destination=_repo_path(destination))
+
+
 def _ensure_agent_path() -> None:
     import sys
 
     path = str(AGENT_ROOT)
     if path not in sys.path:
         sys.path.insert(0, path)
+
+
+def _repo_path(path: str | Path) -> Path:
+    value = Path(path)
+    if value.is_absolute():
+        return value
+    return ROOT / value
 
 
 def _run(

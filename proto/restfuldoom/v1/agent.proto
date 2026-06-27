@@ -39,6 +39,12 @@ message GameState {
 
   // True when delta_state was computed against the prior streamed state.
   bool has_delta_state = 7;
+
+  // Local navigation affordances around the player.
+  NavigationProbe navigation = 8;
+
+  // Weapon-line affordances for deciding when to fire.
+  CombatProbe combat = 9;
 }
 
 // A compact delta from one streamed state to the next.
@@ -53,6 +59,10 @@ message StateDelta {
   repeated int32 removed_object_ids = 8;
   LevelInfo level = 9;
   bool level_changed = 10;
+  NavigationProbe navigation = 11;
+  bool navigation_changed = 12;
+  CombatProbe combat = 13;
+  bool combat_changed = 14;
 }
 
 // Player statistics and inventory.
@@ -124,6 +134,53 @@ message LevelInfo {
   int32 total_items = 6;
   int32 total_secrets = 7;
   int32 gamestate = 8;
+}
+
+// Cheap local movement probes for agent navigation.
+message NavigationProbe {
+  bool forward_open = 1;
+  bool back_open = 2;
+  bool left_open = 3;
+  bool right_open = 4;
+  bool use_line_ahead = 5;
+  int32 front_blocking_line_special = 6;
+  sfixed32 front_block_distance_fp = 7;
+  sfixed32 probe_distance_fp = 8;
+  repeated DirectionProbe direction_probes = 9;
+  repeated UseLineInfo use_lines = 10;
+}
+
+// One local movement ray relative to the player's current angle.
+message DirectionProbe {
+  sint32 angle_offset_degrees = 1;
+  bool open = 2;
+  sfixed32 block_distance_fp = 3;
+  int32 blocking_line_special = 4;
+  bool use_line_ahead = 5;
+}
+
+// Nearby special line that can usually be activated with USE.
+message UseLineInfo {
+  int32 line_id = 1;
+  Vec3Fixed midpoint = 2;
+  int32 special = 3;
+  int32 tag = 4;
+  sfixed32 distance_fp = 5;
+  Vec3Fixed start = 6;
+  Vec3Fixed end = 7;
+  Vec3Fixed nearest_point = 8;
+  sfixed32 nearest_distance_fp = 9;
+}
+
+// Cheap weapon-line target probe for agent combat decisions.
+message CombatProbe {
+  bool has_shootable_target = 1;
+  int32 target_id = 2;
+  int32 target_health = 3;
+  sfixed32 target_distance_fp = 4;
+  sfixed32 aim_slope_fp = 5;
+  sfixed32 range_fp = 6;
+  bool target_is_enemy = 7;
 }
 
 // Fixed-point Doom world position.

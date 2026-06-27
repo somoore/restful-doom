@@ -391,6 +391,8 @@ def summarize_state(state: Any) -> dict[str, Any]:
     player = state.player
     obj = player.object
     position = obj.position
+    navigation = getattr(state, "navigation", None)
+    combat = getattr(state, "combat", None)
     return {
         "tick": state.tick,
         "episode": state.level.episode,
@@ -405,6 +407,77 @@ def summarize_state(state: Any) -> dict[str, Any]:
         "enemy_count": len(state.enemies),
         "object_count": len(state.objects),
         "has_delta_state": state.has_delta_state,
+        "navigation": {
+            "forward_open": bool(getattr(navigation, "forward_open", True)),
+            "back_open": bool(getattr(navigation, "back_open", True)),
+            "left_open": bool(getattr(navigation, "left_open", True)),
+            "right_open": bool(getattr(navigation, "right_open", True)),
+            "use_line_ahead": bool(getattr(navigation, "use_line_ahead", False)),
+            "front_blocking_line_special": int(
+                getattr(navigation, "front_blocking_line_special", 0)
+            ),
+            "front_block_distance_fp": int(
+                getattr(navigation, "front_block_distance_fp", 0)
+            ),
+            "probe_distance_fp": int(getattr(navigation, "probe_distance_fp", 0)),
+            "direction_probes": [
+                {
+                    "angle_offset_degrees": int(
+                        getattr(probe, "angle_offset_degrees", 0)
+                    ),
+                    "open": bool(getattr(probe, "open", False)),
+                    "block_distance_fp": int(getattr(probe, "block_distance_fp", 0)),
+                    "blocking_line_special": int(
+                        getattr(probe, "blocking_line_special", 0)
+                    ),
+                    "use_line_ahead": bool(getattr(probe, "use_line_ahead", False)),
+                }
+                for probe in getattr(navigation, "direction_probes", [])
+            ],
+            "use_lines": [
+                {
+                    "line_id": int(getattr(line, "line_id", 0)),
+                    "midpoint_fp": [
+                        int(getattr(getattr(line, "midpoint", None), "x_fp", 0)),
+                        int(getattr(getattr(line, "midpoint", None), "y_fp", 0)),
+                        int(getattr(getattr(line, "midpoint", None), "z_fp", 0)),
+                    ],
+                    "nearest_point_fp": [
+                        int(getattr(getattr(line, "nearest_point", None), "x_fp", 0)),
+                        int(getattr(getattr(line, "nearest_point", None), "y_fp", 0)),
+                        int(getattr(getattr(line, "nearest_point", None), "z_fp", 0)),
+                    ],
+                    "start_fp": [
+                        int(getattr(getattr(line, "start", None), "x_fp", 0)),
+                        int(getattr(getattr(line, "start", None), "y_fp", 0)),
+                        int(getattr(getattr(line, "start", None), "z_fp", 0)),
+                    ],
+                    "end_fp": [
+                        int(getattr(getattr(line, "end", None), "x_fp", 0)),
+                        int(getattr(getattr(line, "end", None), "y_fp", 0)),
+                        int(getattr(getattr(line, "end", None), "z_fp", 0)),
+                    ],
+                    "special": int(getattr(line, "special", 0)),
+                    "tag": int(getattr(line, "tag", 0)),
+                    "distance_fp": int(getattr(line, "distance_fp", 0)),
+                    "nearest_distance_fp": int(
+                        getattr(line, "nearest_distance_fp", 0)
+                    ),
+                }
+                for line in getattr(navigation, "use_lines", [])
+            ],
+        },
+        "combat": {
+            "has_shootable_target": bool(
+                getattr(combat, "has_shootable_target", False)
+            ),
+            "target_id": int(getattr(combat, "target_id", 0)),
+            "target_health": int(getattr(combat, "target_health", 0)),
+            "target_distance_fp": int(getattr(combat, "target_distance_fp", 0)),
+            "aim_slope_fp": int(getattr(combat, "aim_slope_fp", 0)),
+            "range_fp": int(getattr(combat, "range_fp", 0)),
+            "target_is_enemy": bool(getattr(combat, "target_is_enemy", False)),
+        },
     }
 
 
@@ -524,6 +597,7 @@ def _rollout_step_metadata(
         "reconnect_attempts": reconnect_attempts,
         "policy_errors": policy_errors,
         "bedrock_fallback_count": bedrock_fallback_count,
+        "policy_decision": _dict_attr(policy, "last_decision"),
         "last_token_usage": _dict_attr(policy, "last_token_usage"),
         "total_token_usage": _dict_attr(policy, "total_token_usage"),
         "policy_latency_ms": round(policy_latency_ms, 3),

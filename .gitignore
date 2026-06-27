@@ -27,6 +27,7 @@ __pycache__
 .venv-mcp
 agent/restfuldoom_agent/generated
 trajectories/
+training-jobs/*.tar.gz
 
 # These are the default patterns globally ignored by Subversion:
 *.o

@@ -30,8 +30,9 @@ pub mod proto {
 
 use proto::doom_agent_server::{DoomAgent, DoomAgentServer};
 use proto::{
-    Ammo, DoomKey, EnemyInfo, GameState, LevelInfo, MapObjectState, MouseInput, ObserveRequest,
-    PlayerAction, PlayerActionType, PlayerState, RawTiccmd, StateDelta, Vec3Fixed,
+    Ammo, CombatProbe, DirectionProbe, DoomKey, EnemyInfo, GameState, LevelInfo, MapObjectState,
+    MouseInput, NavigationProbe, ObserveRequest, PlayerAction, PlayerActionType, PlayerState,
+    RawTiccmd, StateDelta, UseLineInfo, Vec3Fixed,
 };
 
 const DEFAULT_GRPC_PORT: u16 = 50_051;
@@ -180,6 +181,10 @@ fn encode_delta(previous: &GameState, current: &GameState) -> Vec<u8> {
         removed_object_ids: prior_object_ids.into_keys().collect(),
         level: current.level,
         level_changed: previous.level != current.level,
+        navigation: current.navigation.clone(),
+        navigation_changed: previous.navigation != current.navigation,
+        combat: current.combat,
+        combat_changed: previous.combat != current.combat,
     };
 
     delta.encode_to_vec()
@@ -333,6 +338,8 @@ fn state_from_snapshot(snapshot: &AgentGameStateSnapshot) -> GameState {
         }),
         delta_state: Vec::new(),
         has_delta_state: false,
+        navigation: Some(navigation_from_snapshot(&snapshot.navigation)),
+        combat: Some(combat_from_snapshot(&snapshot.combat)),
     }
 }
 
@@ -383,6 +390,81 @@ fn object_from_snapshot(snapshot: &AgentMobjState) -> MapObjectState {
         flags: snapshot.flags,
         attacking_id: snapshot.attacking_id,
         distance_fp: snapshot.distance_fp,
+    }
+}
+
+fn navigation_from_snapshot(snapshot: &AgentNavigationProbe) -> NavigationProbe {
+    let direction_count = (snapshot.direction_count as usize).min(AGENT_MAX_NAV_DIRECTIONS);
+    let use_line_count = (snapshot.use_line_count as usize).min(AGENT_MAX_USE_LINES);
+    NavigationProbe {
+        forward_open: snapshot.forward_open != 0,
+        back_open: snapshot.back_open != 0,
+        left_open: snapshot.left_open != 0,
+        right_open: snapshot.right_open != 0,
+        use_line_ahead: snapshot.use_line_ahead != 0,
+        front_blocking_line_special: snapshot.front_blocking_line_special,
+        front_block_distance_fp: snapshot.front_block_distance_fp,
+        probe_distance_fp: snapshot.probe_distance_fp,
+        direction_probes: snapshot.directions[..direction_count]
+            .iter()
+            .map(direction_probe_from_snapshot)
+            .collect(),
+        use_lines: snapshot.use_lines[..use_line_count]
+            .iter()
+            .map(use_line_from_snapshot)
+            .collect(),
+    }
+}
+
+fn direction_probe_from_snapshot(snapshot: &AgentDirectionProbe) -> DirectionProbe {
+    DirectionProbe {
+        angle_offset_degrees: snapshot.angle_offset_degrees,
+        open: snapshot.open != 0,
+        block_distance_fp: snapshot.block_distance_fp,
+        blocking_line_special: snapshot.blocking_line_special,
+        use_line_ahead: snapshot.use_line_ahead != 0,
+    }
+}
+
+fn use_line_from_snapshot(snapshot: &AgentUseLine) -> UseLineInfo {
+    UseLineInfo {
+        line_id: snapshot.line_id,
+        midpoint: Some(Vec3Fixed {
+            x_fp: snapshot.midpoint_x_fp,
+            y_fp: snapshot.midpoint_y_fp,
+            z_fp: snapshot.midpoint_z_fp,
+        }),
+        special: snapshot.special,
+        tag: snapshot.tag,
+        distance_fp: snapshot.distance_fp,
+        start: Some(Vec3Fixed {
+            x_fp: snapshot.start_x_fp,
+            y_fp: snapshot.start_y_fp,
+            z_fp: snapshot.midpoint_z_fp,
+        }),
+        end: Some(Vec3Fixed {
+            x_fp: snapshot.end_x_fp,
+            y_fp: snapshot.end_y_fp,
+            z_fp: snapshot.midpoint_z_fp,
+        }),
+        nearest_point: Some(Vec3Fixed {
+            x_fp: snapshot.nearest_x_fp,
+            y_fp: snapshot.nearest_y_fp,
+            z_fp: snapshot.midpoint_z_fp,
+        }),
+        nearest_distance_fp: snapshot.nearest_distance_fp,
+    }
+}
+
+fn combat_from_snapshot(snapshot: &AgentCombatProbe) -> CombatProbe {
+    CombatProbe {
+        has_shootable_target: snapshot.has_shootable_target != 0,
+        target_id: snapshot.target_id,
+        target_health: snapshot.target_health,
+        target_distance_fp: snapshot.target_distance_fp,
+        aim_slope_fp: snapshot.aim_slope_fp,
+        range_fp: snapshot.range_fp,
+        target_is_enemy: snapshot.target_is_enemy != 0,
     }
 }
 
@@ -569,11 +651,98 @@ pub struct AgentPlayerState {
     pub last_attacked_by: i32,
 }
 
+/// One local movement ray copied from Doom.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AgentDirectionProbe {
+    pub angle_offset_degrees: i32,
+    pub open: u32,
+    pub block_distance_fp: i32,
+    pub blocking_line_special: i32,
+    pub use_line_ahead: u32,
+}
+
+/// One nearby special/use line copied from Doom.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AgentUseLine {
+    pub line_id: i32,
+    pub midpoint_x_fp: i32,
+    pub midpoint_y_fp: i32,
+    pub midpoint_z_fp: i32,
+    pub start_x_fp: i32,
+    pub start_y_fp: i32,
+    pub end_x_fp: i32,
+    pub end_y_fp: i32,
+    pub nearest_x_fp: i32,
+    pub nearest_y_fp: i32,
+    pub special: i32,
+    pub tag: i32,
+    pub distance_fp: i32,
+    pub nearest_distance_fp: i32,
+}
+
+/// Local movement affordances copied from Doom.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AgentNavigationProbe {
+    pub forward_open: u32,
+    pub back_open: u32,
+    pub left_open: u32,
+    pub right_open: u32,
+    pub use_line_ahead: u32,
+    pub front_blocking_line_special: i32,
+    pub front_block_distance_fp: i32,
+    pub probe_distance_fp: i32,
+    pub direction_count: u32,
+    pub directions: [AgentDirectionProbe; AGENT_MAX_NAV_DIRECTIONS],
+    pub use_line_count: u32,
+    pub use_lines: [AgentUseLine; AGENT_MAX_USE_LINES],
+}
+
+impl Default for AgentNavigationProbe {
+    fn default() -> Self {
+        Self {
+            forward_open: 0,
+            back_open: 0,
+            left_open: 0,
+            right_open: 0,
+            use_line_ahead: 0,
+            front_blocking_line_special: 0,
+            front_block_distance_fp: 0,
+            probe_distance_fp: 0,
+            direction_count: 0,
+            directions: [AgentDirectionProbe::default(); AGENT_MAX_NAV_DIRECTIONS],
+            use_line_count: 0,
+            use_lines: [AgentUseLine::default(); AGENT_MAX_USE_LINES],
+        }
+    }
+}
+
+/// Weapon-line combat affordances copied from Doom.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AgentCombatProbe {
+    pub has_shootable_target: u32,
+    pub target_is_enemy: u32,
+    pub target_id: i32,
+    pub target_health: i32,
+    pub target_distance_fp: i32,
+    pub aim_slope_fp: i32,
+    pub range_fp: i32,
+}
+
 /// Maximum enemies copied per tic.
 pub const AGENT_MAX_ENEMIES: usize = 128;
 
 /// Maximum useful objects copied per tic.
 pub const AGENT_MAX_OBJECTS: usize = 256;
+
+/// Maximum local navigation rays copied per tic.
+pub const AGENT_MAX_NAV_DIRECTIONS: usize = 9;
+
+/// Maximum nearby special/use lines copied per tic.
+pub const AGENT_MAX_USE_LINES: usize = 32;
 
 /// Fixed-size game-state snapshot copied from Doom.
 #[repr(C)]
@@ -590,6 +759,8 @@ pub struct AgentGameStateSnapshot {
     pub gamestate: i32,
     pub player_active: u32,
     pub player: AgentPlayerState,
+    pub navigation: AgentNavigationProbe,
+    pub combat: AgentCombatProbe,
     pub enemy_count: u32,
     pub object_count: u32,
     pub enemies: [AgentMobjState; AGENT_MAX_ENEMIES],
@@ -610,6 +781,8 @@ impl Default for AgentGameStateSnapshot {
             gamestate: 0,
             player_active: 0,
             player: AgentPlayerState::default(),
+            navigation: AgentNavigationProbe::default(),
+            combat: AgentCombatProbe::default(),
             enemy_count: 0,
             object_count: 0,
             enemies: [AgentMobjState::default(); AGENT_MAX_ENEMIES],
@@ -661,6 +834,33 @@ mod tests {
         };
         snapshot.enemies[0].id = 7;
         snapshot.enemies[0].health = 20;
+        snapshot.navigation.forward_open = 1;
+        snapshot.navigation.probe_distance_fp = 96 * 65_536;
+        snapshot.navigation.direction_count = 1;
+        snapshot.navigation.directions[0] = AgentDirectionProbe {
+            angle_offset_degrees: 30,
+            open: 1,
+            block_distance_fp: 96 * 65_536,
+            blocking_line_special: 0,
+            use_line_ahead: 0,
+        };
+        snapshot.navigation.use_line_count = 1;
+        snapshot.navigation.use_lines[0] = AgentUseLine {
+            line_id: 12,
+            midpoint_x_fp: 128 * 65_536,
+            midpoint_y_fp: -64 * 65_536,
+            midpoint_z_fp: 0,
+            start_x_fp: 128 * 65_536,
+            start_y_fp: -128 * 65_536,
+            end_x_fp: 128 * 65_536,
+            end_y_fp: 0,
+            nearest_x_fp: 128 * 65_536,
+            nearest_y_fp: -32 * 65_536,
+            special: 1,
+            tag: 7,
+            distance_fp: 96 * 65_536,
+            nearest_distance_fp: 32 * 65_536,
+        };
 
         let state = state_from_snapshot(&snapshot);
 
@@ -669,6 +869,33 @@ mod tests {
         assert_eq!(
             state.enemies[0].object.as_ref().map(|object| object.id),
             Some(7)
+        );
+        assert_eq!(
+            state.navigation.as_ref().map(|navigation| navigation.forward_open),
+            Some(true)
+        );
+        assert_eq!(
+            state
+                .navigation
+                .as_ref()
+                .and_then(|navigation| navigation.direction_probes.first())
+                .map(|probe| (probe.angle_offset_degrees, probe.open)),
+            Some((30, true))
+        );
+        assert_eq!(
+            state
+                .navigation
+                .as_ref()
+                .and_then(|navigation| navigation.use_lines.first())
+                .map(|line| {
+                    (
+                        line.line_id,
+                        line.special,
+                        line.tag,
+                        line.nearest_distance_fp / 65_536,
+                    )
+                }),
+            Some((12, 1, 7, 32))
         );
     }
 

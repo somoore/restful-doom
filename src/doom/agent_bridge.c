@@ -9,11 +9,30 @@
 #include "g_game.h"
 #include "info.h"
 #include "p_local.h"
+#include "r_state.h"
 #include "tables.h"
 
-extern int leveltime;
-
 static boolean agent_bridge_initialized = false;
+static fixed_t agent_probe_distance;
+static fixed_t agent_probe_height;
+static int agent_probe_blocking_line_special;
+static int agent_probe_block_distance_fp;
+static boolean agent_probe_use_line_ahead;
+
+#define AGENT_NAV_PROBE_DISTANCE (96 * FRACUNIT)
+
+static boolean IsLivingEnemy(const mobj_t *obj);
+static const int agent_nav_direction_offsets[AGENT_MAX_NAV_DIRECTIONS] = {
+    -90,
+    -60,
+    -30,
+    -15,
+    0,
+    15,
+    30,
+    60,
+    90,
+};
 
 static int ClampInt(int value, int low, int high)
 {
@@ -31,6 +50,11 @@ static int ClampInt(int value, int low, int high)
 static uint32_t AngleToDegrees(angle_t angle)
 {
     return (uint32_t) (((uint64_t) angle * 360ULL) / ANG_MAX);
+}
+
+static angle_t DegreesToAngleOffset(int degrees)
+{
+    return (angle_t) (((int64_t) degrees * (int64_t) ANG_MAX) / 360);
 }
 
 static uint32_t WeaponMask(const player_t *player)
@@ -61,6 +85,270 @@ static uint32_t KeyCardMask(const player_t *player)
     }
 
     return mask;
+}
+
+static boolean AgentBridge_ProbeLineTraverse(intercept_t *in)
+{
+    line_t *line;
+
+    if (!in->isaline)
+    {
+        return true;
+    }
+
+    line = in->d.line;
+    if (line->special)
+    {
+        agent_probe_use_line_ahead = true;
+    }
+
+    if (!line->backsector || (line->flags & ML_BLOCKING))
+    {
+        agent_probe_blocking_line_special = line->special;
+        agent_probe_block_distance_fp = FixedMul(agent_probe_distance, in->frac);
+        return false;
+    }
+
+    P_LineOpening(line);
+    if (openrange < agent_probe_height)
+    {
+        agent_probe_blocking_line_special = line->special;
+        agent_probe_block_distance_fp = FixedMul(agent_probe_distance, in->frac);
+        return false;
+    }
+
+    return true;
+}
+
+static uint32_t AgentBridge_ProbeDirection(
+    const mobj_t *obj,
+    angle_t angle,
+    fixed_t distance,
+    int *blocking_line_special,
+    int *block_distance_fp,
+    boolean *use_line_ahead)
+{
+    int fine_angle;
+    fixed_t x2;
+    fixed_t y2;
+    boolean clear;
+
+    fine_angle = angle >> ANGLETOFINESHIFT;
+    agent_probe_distance = distance;
+    agent_probe_height = obj->height;
+    agent_probe_blocking_line_special = 0;
+    agent_probe_block_distance_fp = distance;
+    agent_probe_use_line_ahead = false;
+
+    x2 = obj->x + FixedMul(distance, finecosine[fine_angle]);
+    y2 = obj->y + FixedMul(distance, finesine[fine_angle]);
+
+    clear = P_PathTraverse(
+        obj->x,
+        obj->y,
+        x2,
+        y2,
+        PT_ADDLINES | PT_EARLYOUT,
+        AgentBridge_ProbeLineTraverse);
+
+    if (blocking_line_special != NULL)
+    {
+        *blocking_line_special = agent_probe_blocking_line_special;
+    }
+    if (block_distance_fp != NULL)
+    {
+        *block_distance_fp = clear ? distance : agent_probe_block_distance_fp;
+    }
+    if (use_line_ahead != NULL)
+    {
+        *use_line_ahead = agent_probe_use_line_ahead;
+    }
+
+    return clear ? 1u : 0u;
+}
+
+static void FillNavigationProbe(agent_game_state_snapshot_t *snapshot, const mobj_t *obj)
+{
+    int front_special = 0;
+    int front_distance = AGENT_NAV_PROBE_DISTANCE;
+    boolean use_line_ahead = false;
+
+    if (obj == NULL)
+    {
+        return;
+    }
+
+    snapshot->navigation.probe_distance_fp = AGENT_NAV_PROBE_DISTANCE;
+    snapshot->navigation.forward_open = AgentBridge_ProbeDirection(
+        obj,
+        obj->angle,
+        AGENT_NAV_PROBE_DISTANCE,
+        &front_special,
+        &front_distance,
+        &use_line_ahead);
+    snapshot->navigation.back_open = AgentBridge_ProbeDirection(
+        obj,
+        obj->angle + ANG180,
+        AGENT_NAV_PROBE_DISTANCE,
+        NULL,
+        NULL,
+        NULL);
+    snapshot->navigation.left_open = AgentBridge_ProbeDirection(
+        obj,
+        obj->angle + ANG90,
+        AGENT_NAV_PROBE_DISTANCE,
+        NULL,
+        NULL,
+        NULL);
+    snapshot->navigation.right_open = AgentBridge_ProbeDirection(
+        obj,
+        obj->angle - ANG90,
+        AGENT_NAV_PROBE_DISTANCE,
+        NULL,
+        NULL,
+        NULL);
+    snapshot->navigation.use_line_ahead = use_line_ahead ? 1u : 0u;
+    snapshot->navigation.front_blocking_line_special = front_special;
+    snapshot->navigation.front_block_distance_fp = front_distance;
+
+    snapshot->navigation.direction_count = AGENT_MAX_NAV_DIRECTIONS;
+    for (int i = 0; i < AGENT_MAX_NAV_DIRECTIONS; ++i)
+    {
+        int special = 0;
+        int distance = AGENT_NAV_PROBE_DISTANCE;
+        boolean use_line = false;
+        const int offset = agent_nav_direction_offsets[i];
+
+        snapshot->navigation.directions[i].angle_offset_degrees = offset;
+        snapshot->navigation.directions[i].open = AgentBridge_ProbeDirection(
+            obj,
+            obj->angle + DegreesToAngleOffset(offset),
+            AGENT_NAV_PROBE_DISTANCE,
+            &special,
+            &distance,
+            &use_line);
+        snapshot->navigation.directions[i].block_distance_fp = distance;
+        snapshot->navigation.directions[i].blocking_line_special = special;
+        snapshot->navigation.directions[i].use_line_ahead = use_line ? 1u : 0u;
+    }
+
+    snapshot->navigation.use_line_count = 0;
+    for (int i = 0; i < numlines; ++i)
+    {
+        const line_t *line = &lines[i];
+        fixed_t midpoint_x;
+        fixed_t midpoint_y;
+        fixed_t nearest_x;
+        fixed_t nearest_y;
+        fixed_t distance;
+        fixed_t nearest_distance;
+        double dx;
+        double dy;
+        double length_sq;
+        double projection;
+        uint32_t slot;
+
+        if (line->special == 0)
+        {
+            continue;
+        }
+
+        midpoint_x = line->v1->x + ((line->v2->x - line->v1->x) / 2);
+        midpoint_y = line->v1->y + ((line->v2->y - line->v1->y) / 2);
+        distance = P_AproxDistance(obj->x - midpoint_x, obj->y - midpoint_y);
+        dx = (double) (line->v2->x - line->v1->x);
+        dy = (double) (line->v2->y - line->v1->y);
+        length_sq = dx * dx + dy * dy;
+        if (length_sq <= 1.0)
+        {
+            projection = 0.0;
+        }
+        else
+        {
+            projection = (((double) (obj->x - line->v1->x) * dx)
+                          + ((double) (obj->y - line->v1->y) * dy))
+                         / length_sq;
+            if (projection < 0.0)
+            {
+                projection = 0.0;
+            }
+            else if (projection > 1.0)
+            {
+                projection = 1.0;
+            }
+        }
+        nearest_x = line->v1->x + (fixed_t) (projection * dx);
+        nearest_y = line->v1->y + (fixed_t) (projection * dy);
+        nearest_distance = P_AproxDistance(obj->x - nearest_x, obj->y - nearest_y);
+
+        if (snapshot->navigation.use_line_count < AGENT_MAX_USE_LINES)
+        {
+            slot = snapshot->navigation.use_line_count++;
+        }
+        else
+        {
+            int farthest = 0;
+            for (int j = 1; j < AGENT_MAX_USE_LINES; ++j)
+            {
+                if (snapshot->navigation.use_lines[j].nearest_distance_fp
+                    > snapshot->navigation.use_lines[farthest].nearest_distance_fp)
+                {
+                    farthest = j;
+                }
+            }
+            if (nearest_distance >= snapshot->navigation.use_lines[farthest].nearest_distance_fp)
+            {
+                continue;
+            }
+            slot = (uint32_t) farthest;
+        }
+
+        snapshot->navigation.use_lines[slot].line_id = i;
+        snapshot->navigation.use_lines[slot].midpoint_x_fp = midpoint_x;
+        snapshot->navigation.use_lines[slot].midpoint_y_fp = midpoint_y;
+        snapshot->navigation.use_lines[slot].midpoint_z_fp = obj->z;
+        snapshot->navigation.use_lines[slot].start_x_fp = line->v1->x;
+        snapshot->navigation.use_lines[slot].start_y_fp = line->v1->y;
+        snapshot->navigation.use_lines[slot].end_x_fp = line->v2->x;
+        snapshot->navigation.use_lines[slot].end_y_fp = line->v2->y;
+        snapshot->navigation.use_lines[slot].nearest_x_fp = nearest_x;
+        snapshot->navigation.use_lines[slot].nearest_y_fp = nearest_y;
+        snapshot->navigation.use_lines[slot].special = line->special;
+        snapshot->navigation.use_lines[slot].tag = line->tag;
+        snapshot->navigation.use_lines[slot].distance_fp = distance;
+        snapshot->navigation.use_lines[slot].nearest_distance_fp = nearest_distance;
+    }
+}
+
+static void FillCombatProbe(agent_game_state_snapshot_t *snapshot, mobj_t *obj)
+{
+    mobj_t *previous_linetarget;
+    mobj_t *target;
+    fixed_t slope;
+
+    if (obj == NULL)
+    {
+        return;
+    }
+
+    previous_linetarget = linetarget;
+    slope = P_AimLineAttack(obj, obj->angle, MISSILERANGE);
+    target = linetarget;
+    linetarget = previous_linetarget;
+
+    snapshot->combat.range_fp = MISSILERANGE;
+    snapshot->combat.aim_slope_fp = slope;
+
+    if (target == NULL)
+    {
+        return;
+    }
+
+    snapshot->combat.has_shootable_target = 1u;
+    snapshot->combat.target_is_enemy = IsLivingEnemy(target) ? 1u : 0u;
+    snapshot->combat.target_id = target->id;
+    snapshot->combat.target_health = target->health;
+    snapshot->combat.target_distance_fp = P_AproxDistance(obj->x - target->x, obj->y - target->y);
 }
 
 static void FillMobjState(agent_mobj_state_t *state, const mobj_t *obj, const mobj_t *player)
@@ -136,6 +424,8 @@ static void FillPlayerState(agent_game_state_snapshot_t *snapshot)
     snapshot->player.key_cards = KeyCardMask(player);
     snapshot->player.cheat_flags = (uint32_t) player->cheats;
     snapshot->player.last_attacked_by = player->attacker != NULL ? player->attacker->id : 0;
+    FillNavigationProbe(snapshot, player->mo);
+    FillCombatProbe(snapshot, player->mo);
 }
 
 static void FillThinkerStates(agent_game_state_snapshot_t *snapshot)
