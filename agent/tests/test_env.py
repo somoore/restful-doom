@@ -48,6 +48,14 @@ def test_doom_agent_env_reset_step_with_fake_client():
     ]
     assert step.reward > 0
     assert step.info["skill"] == "fire"
+    assert step.info["decision_cycle"]["schema"] == "restfuldoom.decision_cycle.v1"
+    assert step.info["decision_cycle"]["observation_schema"] == "restfuldoom.observation.v1"
+    assert step.info["decision_cycle"]["action_schema"] == "restfuldoom.skill_action.v1"
+    assert step.info["decision_cycle"]["memory_contract"] == (
+        "restfuldoom.agent_memory_contract.v1"
+    )
+    assert step.info["decision_cycle"]["input_tick"] == 1
+    assert step.info["decision_cycle"]["output_tick"] == 2
     assert not step.done
 
 
@@ -64,6 +72,23 @@ def test_skill_controller_observation_includes_previous_action_history():
     assert after_fire["prev_skill_fire"] == 1.0
     assert after_fire["prev_had_shootable_target"] == 1.0
     assert after_fire["same_skill_streak_norm"] > 0.0
+
+
+def test_skill_controller_action_mask_uses_affordances():
+    controller = SkillController()
+    combat_state = _state(enemy=True, combat=True)
+    quiet_state = _state(enemy=False, combat=False)
+
+    combat_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(combat_state)))
+    quiet_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(quiet_state)))
+
+    assert combat_mask["fire"]
+    assert combat_mask["engage"]
+    assert not combat_mask["retreat"]
+    assert not combat_mask["seek_enemy"]
+    assert not combat_mask["open_use_line"]
+    assert not combat_mask["press_exit"]
+    assert quiet_mask["route_progression"]
 
 
 def test_doom_agent_env_reset_sends_curriculum_start():

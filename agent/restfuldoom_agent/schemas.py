@@ -84,6 +84,9 @@ ACTION_DEFINITIONS = [
     {
         "index": 0,
         "skill": "engage",
+        "kind": "code_defined_option",
+        "learned": False,
+        "execution_owner": "BrainPolicy",
         "role": "Turn toward, approach, or strafe around a visible enemy.",
         "controller_entrypoint": "SkillController._execute_skill('engage')",
         "primary_signal": "visible enemy distance and threat",
@@ -92,6 +95,9 @@ ACTION_DEFINITIONS = [
     {
         "index": 1,
         "skill": "fire",
+        "kind": "code_defined_option",
+        "learned": False,
+        "execution_owner": "BrainPolicy",
         "role": "Fire only when the combat probe reports a valid enemy target.",
         "controller_entrypoint": "SkillController._execute_skill('fire')",
         "primary_signal": "combat_has_target and combat_target_enemy",
@@ -100,6 +106,9 @@ ACTION_DEFINITIONS = [
     {
         "index": 2,
         "skill": "seek_enemy",
+        "kind": "code_defined_option",
+        "learned": False,
+        "execution_owner": "BrainPolicy",
         "role": "Route toward the best remembered or known enemy.",
         "controller_entrypoint": "SkillController._execute_skill('seek_enemy')",
         "primary_signal": "known and remembered enemy memory",
@@ -108,6 +117,9 @@ ACTION_DEFINITIONS = [
     {
         "index": 3,
         "skill": "open_use_line",
+        "kind": "code_defined_option",
+        "learned": False,
+        "execution_owner": "BrainPolicy",
         "role": "Turn toward and activate nearby doors, switches, or use lines.",
         "controller_entrypoint": "SkillController._execute_skill('open_use_line')",
         "primary_signal": "usable-line probes and manual line specials",
@@ -116,6 +128,9 @@ ACTION_DEFINITIONS = [
     {
         "index": 4,
         "skill": "route_progression",
+        "kind": "code_defined_option",
+        "learned": False,
+        "execution_owner": "BrainPolicy",
         "role": "Move toward progression lines or open exploratory space.",
         "controller_entrypoint": "SkillController._execute_skill('route_progression')",
         "primary_signal": "progression line priorities and navigation probes",
@@ -124,6 +139,9 @@ ACTION_DEFINITIONS = [
     {
         "index": 5,
         "skill": "retreat",
+        "kind": "code_defined_option",
+        "learned": False,
+        "execution_owner": "BrainPolicy",
         "role": "Back up or strafe away from nearby threats.",
         "controller_entrypoint": "SkillController._execute_skill('retreat')",
         "primary_signal": "low health or close visible enemy",
@@ -132,6 +150,9 @@ ACTION_DEFINITIONS = [
     {
         "index": 6,
         "skill": "recover_stuck",
+        "kind": "code_defined_option",
+        "learned": False,
+        "execution_owner": "BrainPolicy",
         "role": "Run the deterministic unstuck routine.",
         "controller_entrypoint": "SkillController._execute_skill('recover_stuck')",
         "primary_signal": "stuck and blocked-target indicators",
@@ -140,6 +161,9 @@ ACTION_DEFINITIONS = [
     {
         "index": 7,
         "skill": "press_exit",
+        "kind": "code_defined_option",
+        "learned": False,
+        "execution_owner": "BrainPolicy",
         "role": "Prioritize exit switch approach and activation.",
         "controller_entrypoint": "SkillController._execute_skill('press_exit')",
         "primary_signal": "exit-line affordances",
@@ -254,9 +278,196 @@ OBSERVATION_SCHEMA = {
     "feature_names": PPO_FEATURE_NAMES,
     "base_feature_names": TACTICAL_FEATURE_NAMES,
     "action_history_feature_names": ACTION_HISTORY_FEATURE_NAMES,
+    "source_groups": [
+        {
+            "name": "protobuf_state",
+            "producer": "Doom gRPC GameState",
+            "features": [
+                "health_norm",
+                "ammo_norm",
+                "kills_norm",
+                "items_norm",
+                "x_units_norm",
+                "y_units_norm",
+                "angle_sin",
+                "angle_cos",
+                "visible_enemies_norm",
+                "known_enemies_norm",
+                "enemy_count_norm",
+                "combat_has_target",
+                "combat_target_enemy",
+                "nav_forward_open",
+                "nav_back_open",
+                "nav_left_open",
+                "nav_right_open",
+                "nav_use_line_ahead",
+                "has_use_line",
+            ],
+        },
+        {
+            "name": "memory_queries",
+            "producer": "AgentMemory.remembered_enemies and BrainPolicy blocked-target state",
+            "features": [
+                "remembered_enemies_norm",
+                "blocked_targets_norm",
+            ],
+        },
+        {
+            "name": "controller_state",
+            "producer": "SkillController and BrainPolicy transient episode state",
+            "features": [
+                "stuck",
+                *ACTION_HISTORY_FEATURE_NAMES,
+            ],
+        },
+    ],
+    "learning_readiness": {
+        "strengths": [
+            "combat and navigation affordances are structured protobuf fields",
+            "memory-derived enemy recall gives PPO a target when line of sight is lost",
+            "macro-action history tells PPO whether it just ignored or used a shootable target",
+        ],
+        "known_gaps": [
+            "no compact topological map graph",
+            "no sector or floor-hazard feature group",
+            "no recurrent state beyond one previous macro action",
+            "no explicit waypoint or route-plan feature",
+            "no projectile or incoming-damage predictor",
+            "reset seeds are labels until the server reports seed_applied=true",
+        ],
+        "next_feature_candidates": [
+            "sector_floor_damage_norm",
+            "route_waypoint_distance_norm",
+            "route_waypoint_angle_sin",
+            "route_waypoint_angle_cos",
+            "recent_damage_window_norm",
+            "enemy_projectile_threat_norm",
+            "topology_frontier_count_norm",
+        ],
+    },
     "feature_descriptors": [
         *_feature_descriptors(TACTICAL_FEATURE_NAMES, source="protobuf_or_memory"),
         *_feature_descriptors(ACTION_HISTORY_FEATURE_NAMES, source="macro_step_history"),
+    ],
+}
+
+DECISION_CYCLE_SCHEMA = {
+    "schema": "restfuldoom.decision_cycle.v1",
+    "clock": "one learned decision per bounded macro-step, not one raw ticcmd per Doom tic",
+    "layers": [
+        {
+            "name": "decision_layer",
+            "owner": "PPOTrainer ActorCritic, SkillPolicyModel, or BrainPolicy",
+            "input": "restfuldoom.observation.v1 feature vector",
+            "output": "integer index into restfuldoom.skill_action.v1 actions",
+        },
+        {
+            "name": "fast_controller",
+            "owner": "SkillController plus BrainPolicy",
+            "input": "selected skill index plus latest protobuf GameState",
+            "output": "protobuf PlayerAction with optional raw ticcmd overlay",
+        },
+        {
+            "name": "environment",
+            "owner": "DoomAgentEnv plus DoomAgentClient",
+            "input": "PlayerAction stream",
+            "output": "next GameState, transition reward, terminal flag, trace metadata",
+        },
+    ],
+    "handshake": [
+        "DoomAgentEnv.action_mask() derives feasible skills from the current state.",
+        "ActorCritic samples or selects one skill under that mask.",
+        "SkillController.action_for() converts the skill into one concrete PlayerAction.",
+        "DoomAgentEnv.step() sends the action and waits through bounded duration_tics.",
+        "RewardEngine scores the resulting GameState transitions.",
+        "SkillController.record_action_history() writes macro-action context for the next observation.",
+    ],
+    "trace_fields": {
+        "rollout_record.action": "selected PPO skill index",
+        "rollout_record.action_mask": "feasible-skill mask used for sampling and PPO logprobs",
+        "rollout_record.info.decision": "controller decision details and selected primitive",
+        "rollout_record.info.decision_cycle": "tick range and schema markers for this macro-step",
+    },
+}
+
+MEMORY_CONTRACT = {
+    "schema": "restfuldoom.agent_memory_contract.v1",
+    "memory_schema": "restfuldoom.agent_memory.v1",
+    "default_path": "agent_memory/e1m1.json",
+    "role": "inspectable world ledger and training checkpoint index, not a neural hidden state",
+    "sections": [
+        {
+            "name": "cells",
+            "meaning": "coarse map-cell visits, enemy sightings, damage events, and last-seen ticks",
+        },
+        {
+            "name": "enemies",
+            "meaning": "enemy id to last position, health, distance, line of sight, and threat",
+        },
+        {
+            "name": "episodes",
+            "meaning": "recent rollout summaries used for audit and export",
+        },
+        {
+            "name": "policy",
+            "meaning": "best deterministic parameter set and promotion metadata",
+        },
+        {
+            "name": "learned_policy",
+            "meaning": "behavior-cloned skill selector metadata",
+        },
+        {
+            "name": "ppo_policy",
+            "meaning": "latest PPO checkpoint metadata, reward config, rollout summary, and eval history",
+        },
+        {
+            "name": "ppo_checkpoints",
+            "meaning": "PPO checkpoint lineage for resume/export",
+        },
+    ],
+    "query_paths": [
+        {
+            "method": "AgentMemory.best_params()",
+            "reader": "run_brain_training",
+            "returns": "promoted BrainPolicyParams",
+        },
+        {
+            "method": "AgentMemory.remembered_enemies(x_units, y_units, tick, max_age_tics)",
+            "reader": "extract_features",
+            "returns": "recent enemy sightings sorted by current distance while rejecting stale/future ticks",
+        },
+        {
+            "method": "AgentMemory.summary()",
+            "reader": "brain_agent --memory-summary and MCP brain_memory",
+            "returns": "compact diagnostics for Codex/operator inspection",
+        },
+    ],
+    "update_paths": [
+        {
+            "method": "AgentMemory.record_step(features, decision, reward, stats)",
+            "writer": "run_brain_episode",
+            "updates": "cells, enemies, per-episode stats, lessons",
+        },
+        {
+            "method": "AgentMemory.finish_episode(stats, params, promoted)",
+            "writer": "run_brain_episode",
+            "updates": "episodes, policy best score/params, lessons",
+        },
+        {
+            "method": "ppo_agent._record_ppo_checkpoint()",
+            "writer": "ppo_agent train",
+            "updates": "ppo_policy and ppo_checkpoints",
+        },
+        {
+            "method": "ppo_agent._record_eval_history()",
+            "writer": "ppo_agent eval",
+            "updates": "ppo_policy.eval_history",
+        },
+        {
+            "method": "train_skill_policy_from_memory()",
+            "writer": "brain_agent --train-skill-model",
+            "updates": "learned_policy",
+        },
     ],
 }
 
@@ -264,6 +475,16 @@ ACTION_SCHEMA = {
     "schema": "restfuldoom.skill_action.v1",
     "actions": PPO_SKILL_ACTIONS,
     "definitions": ACTION_DEFINITIONS,
+    "representation": {
+        "current": "code-defined options implemented by SkillController._execute_skill",
+        "learned_now": "PPO learns when to choose each option",
+        "learned_later": "movement primitives can become learned/subpolicy-backed after the option set stabilizes",
+    },
+    "mask_semantics": {
+        "schema": "restfuldoom.skill_action_mask.v1",
+        "source": "protobuf navigation/combat affordances plus AgentMemory",
+        "meaning": "True entries are feasible skills for the current macro-step; PPO sampling and update logprobs use this mask.",
+    },
 }
 
 

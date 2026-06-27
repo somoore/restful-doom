@@ -45,6 +45,8 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
         kill_goal_bonus=args.kill_goal_bonus,
         required_kills=args.required_kills,
         memory_path=args.memory_path,
+        reset_timeout_seconds=args.reset_timeout_seconds,
+        reset_attempts=args.reset_attempts,
         reset_start_x_fp=reset_start.get("x_fp"),
         reset_start_y_fp=reset_start.get("y_fp"),
         reset_start_angle_degrees=int(reset_start.get("angle_degrees", 0)),
@@ -72,12 +74,25 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
     )
     env = DoomAgentEnv(env_config)
     memory = AgentMemory.load(args.memory_path) if args.memory_path is not None else None
-    trainer = PPOTrainer(
-        obs_dim=len(OBSERVATION_SCHEMA["feature_names"]),
-        action_dim=len(ACTION_SCHEMA["actions"]),
-        config=ppo_config,
-        device=args.device,
-    )
+    if args.resume_checkpoint is not None:
+        trainer = PPOTrainer.load_checkpoint(args.resume_checkpoint, device=args.device)
+        if trainer.obs_dim != len(OBSERVATION_SCHEMA["feature_names"]):
+            raise ValueError(
+                "resume checkpoint observation dimension does not match current schema: "
+                f"{trainer.obs_dim} != {len(OBSERVATION_SCHEMA['feature_names'])}"
+            )
+        if trainer.action_dim != len(ACTION_SCHEMA["actions"]):
+            raise ValueError(
+                "resume checkpoint action dimension does not match current schema: "
+                f"{trainer.action_dim} != {len(ACTION_SCHEMA['actions'])}"
+            )
+    else:
+        trainer = PPOTrainer(
+            obs_dim=len(OBSERVATION_SCHEMA["feature_names"]),
+            action_dim=len(ACTION_SCHEMA["actions"]),
+            config=ppo_config,
+            device=args.device,
+        )
     behavior_clone_summary = None
     if args.bc_trajectory:
         samples, behavior_clone_summary = _load_behavior_clone_samples(args)
@@ -121,6 +136,9 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     "rollout_summary": rollout_summary,
                     "behavior_clone": behavior_clone_summary or {},
                     "reset_start": reset_start,
+                    "resume_checkpoint": str(args.resume_checkpoint)
+                    if args.resume_checkpoint is not None
+                    else None,
                 },
             )
             if memory is not None:
@@ -159,6 +177,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
         "updates": summaries,
         "behavior_clone": behavior_clone_summary or {},
         "reset_start": reset_start,
+        "resume_checkpoint": str(args.resume_checkpoint) if args.resume_checkpoint else None,
         "observation_schema": OBSERVATION_SCHEMA,
         "action_schema": ACTION_SCHEMA,
     }
@@ -186,6 +205,8 @@ async def evaluate(args: argparse.Namespace) -> dict[str, object]:
         kill_goal_bonus=args.kill_goal_bonus,
         required_kills=args.required_kills,
         memory_path=args.memory_path,
+        reset_timeout_seconds=args.reset_timeout_seconds,
+        reset_attempts=args.reset_attempts,
         reset_start_x_fp=reset_start.get("x_fp"),
         reset_start_y_fp=reset_start.get("y_fp"),
         reset_start_angle_degrees=int(reset_start.get("angle_degrees", 0)),
@@ -421,6 +442,19 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         for record in records
         if isinstance(record.info, dict)
     ]
+    action_mask_sizes = [
+        sum(1 for allowed in getattr(record, "action_mask", []) if allowed)
+        for record in records
+    ]
+    invalid_action_steps = sum(
+        1
+        for record in records
+        if getattr(record, "action_mask", [])
+        and (
+            record.action >= len(record.action_mask)
+            or not bool(record.action_mask[record.action])
+        )
+    )
     warmups = [
         record.info.get("reset_warmup", {})
         for record in records
@@ -446,6 +480,11 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         "shootable_target_steps": sum(
             1 for record in records if record.info.get("had_shootable_target")
         ),
+        "mean_action_mask_size": round(
+            sum(action_mask_sizes) / max(1, len(action_mask_sizes)),
+            4,
+        ),
+        "invalid_action_steps": invalid_action_steps,
         "reset_warmup_tics": sum(int(warmup.get("tics", 0)) for warmup in warmups),
         "reset_warmup_steps": sum(int(warmup.get("steps", 0)) for warmup in warmups),
         "reset_warmup_stop_reasons": dict(sorted(warmup_reasons.items())),
@@ -488,6 +527,8 @@ def main() -> None:
     parser.add_argument("--level-complete-bonus", type=float, default=100.0)
     parser.add_argument("--kill-goal-bonus", type=float, default=10.0)
     parser.add_argument("--memory-path", type=Path, default=Path("agent_memory/e1m1.json"))
+    parser.add_argument("--reset-timeout-seconds", type=float, default=5.0)
+    parser.add_argument("--reset-attempts", type=int, default=2)
     parser.add_argument("--reset-start-x-fp", type=int)
     parser.add_argument("--reset-start-y-fp", type=int)
     parser.add_argument("--reset-start-angle-degrees", type=int)
@@ -520,6 +561,7 @@ def main() -> None:
     parser.add_argument("--bc-batch-size", type=int, default=128)
     parser.add_argument("--bc-learning-rate", type=float)
     parser.add_argument("--bc-max-samples", type=int, default=20000)
+    parser.add_argument("--resume-checkpoint", type=Path)
     parser.add_argument("--eval-checkpoint", type=Path)
     parser.add_argument("--eval-baseline", choices=["random", "heuristic"], default="heuristic")
     parser.add_argument("--eval-episodes", type=int, default=1)

@@ -15,6 +15,8 @@ from restfuldoom_agent.ppo import (
 from restfuldoom_agent.ppo_eval import EpisodeEval, PolicyEval, decide_promotion
 from restfuldoom_agent.schemas import (
     ACTION_SCHEMA,
+    DECISION_CYCLE_SCHEMA,
+    MEMORY_CONTRACT,
     OBSERVATION_SCHEMA,
     PPO_SKILL_ACTIONS,
     pad_observation_features,
@@ -27,6 +29,7 @@ def test_rollout_buffer_saves_jsonl(tmp_path):
     buffer = RolloutBuffer()
     buffer.add(
         obs=[0.0, 1.0],
+        action_mask=[False, True],
         action=1,
         reward=2.0,
         done=False,
@@ -40,7 +43,10 @@ def test_rollout_buffer_saves_jsonl(tmp_path):
 
     assert rows[0]["schema"] == "restfuldoom.ppo_rollout.v1"
     assert rows[0]["count"] == 1
+    assert rows[0]["decision_cycle_schema"]["schema"] == "restfuldoom.decision_cycle.v1"
+    assert rows[0]["memory_contract"]["memory_schema"] == "restfuldoom.agent_memory.v1"
     assert rows[1]["action"] == 1
+    assert rows[1]["action_mask"] == [False, True]
     assert rows[1]["info"]["skill"] == "fire"
 
 
@@ -142,6 +148,22 @@ def test_training_schemas_describe_features_and_actions():
     assert [definition["skill"] for definition in ACTION_SCHEMA["definitions"]] == (
         PPO_SKILL_ACTIONS
     )
+    assert all(
+        definition["kind"] == "code_defined_option"
+        and not definition["learned"]
+        and definition["execution_owner"] == "BrainPolicy"
+        for definition in ACTION_SCHEMA["definitions"]
+    )
+    assert ACTION_SCHEMA["mask_semantics"]["schema"] == "restfuldoom.skill_action_mask.v1"
+    assert ACTION_SCHEMA["representation"]["learned_now"] == (
+        "PPO learns when to choose each option"
+    )
+    assert DECISION_CYCLE_SCHEMA["schema"] == "restfuldoom.decision_cycle.v1"
+    assert "rollout_record.action_mask" in DECISION_CYCLE_SCHEMA["trace_fields"]
+    assert MEMORY_CONTRACT["memory_schema"] == "restfuldoom.agent_memory.v1"
+    assert any(path["method"].startswith("AgentMemory.remembered_enemies") for path in MEMORY_CONTRACT["query_paths"])
+    assert any(group["name"] == "memory_queries" for group in OBSERVATION_SCHEMA["source_groups"])
+    assert "no compact topological map graph" in OBSERVATION_SCHEMA["learning_readiness"]["known_gaps"]
 
 
 def test_pad_observation_features_adds_neutral_action_history():
@@ -228,11 +250,37 @@ def test_reset_start_from_trajectory_row(tmp_path):
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")
+def test_ppo_actor_respects_action_mask():
+    trainer = PPOTrainer(
+        obs_dim=2,
+        action_dim=3,
+        config=PPOConfig(update_epochs=1, minibatch_size=4, rollout_steps=8, seed=17),
+    )
+
+    actions = {
+        trainer.model.act(
+            [0.0, 1.0],
+            action_mask=[False, True, False],
+        )[0]
+        for _ in range(12)
+    }
+    deterministic, _logprob, _value = trainer.model.act(
+        [0.0, 1.0],
+        deterministic=True,
+        action_mask=[False, False, True],
+    )
+
+    assert actions == {1}
+    assert deterministic == 2
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")
 def test_ppo_update_and_checkpoint_roundtrip(tmp_path):
     buffer = RolloutBuffer()
     for index in range(8):
         buffer.add(
             obs=[float(index % 2), 1.0],
+            action_mask=[index % 2 == 0, index % 2 == 1],
             action=index % 2,
             reward=1.0 if index % 2 else 0.0,
             done=index == 7,

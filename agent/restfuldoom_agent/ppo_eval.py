@@ -55,7 +55,11 @@ async def evaluate_checkpoint(
     trainer = PPOTrainer.load_checkpoint(checkpoint_path, device=device)
 
     def choose(obs: list[float], _env: DoomAgentEnv) -> int:
-        action, _logprob, _value = trainer.model.act(obs, deterministic=deterministic)
+        action, _logprob, _value = trainer.model.act(
+            obs,
+            deterministic=deterministic,
+            action_mask=_env.action_mask(),
+        )
         return action
 
     return await evaluate_skill_policy(
@@ -80,7 +84,11 @@ async def evaluate_random_policy(
     action_count = len(ACTION_SCHEMA["actions"])
 
     def choose(_obs: list[float], _env: DoomAgentEnv) -> int:
-        return rng.randrange(action_count)
+        mask = _env.action_mask()
+        choices = [index for index, allowed in enumerate(mask) if allowed]
+        if not choices:
+            return rng.randrange(action_count)
+        return rng.choice(choices)
 
     return await evaluate_skill_policy(
         policy_id="random_skill",
@@ -151,7 +159,7 @@ async def evaluate_skill_policy(
                 decision = step.info.get("decision", {})
                 max_kills = max(max_kills, int(state.get("kills", 0)))
                 min_health = min(min_health, int(state.get("health", 0)))
-                if decision.get("stuck"):
+                if decision.get("stuck") and step.info.get("skill") == "recover_stuck":
                     stuck_events += 1
                 if step.done:
                     done_reason = step.info.get("done_reason")

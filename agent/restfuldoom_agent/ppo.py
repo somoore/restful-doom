@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .env import DoomAgentEnv, EnvStep
-from .schemas import ACTION_SCHEMA, OBSERVATION_SCHEMA
+from .schemas import ACTION_SCHEMA, DECISION_CYCLE_SCHEMA, MEMORY_CONTRACT, OBSERVATION_SCHEMA
 
 PPO_CHECKPOINT_SCHEMA = "restfuldoom.ppo_checkpoint.v1"
 ROLLOUT_BUFFER_SCHEMA = "restfuldoom.ppo_rollout.v1"
@@ -52,6 +52,7 @@ class RolloutRecord:
     """One PPO training transition."""
 
     obs: list[float]
+    action_mask: list[bool]
     action: int
     reward: float
     done: bool
@@ -71,6 +72,7 @@ class RolloutBuffer:
         self,
         *,
         obs: list[float],
+        action_mask: list[bool] | None = None,
         action: int,
         reward: float,
         done: bool,
@@ -82,6 +84,7 @@ class RolloutBuffer:
         self.records.append(
             RolloutRecord(
                 obs=list(obs),
+                action_mask=list(action_mask or []),
                 action=int(action),
                 reward=float(reward),
                 done=bool(done),
@@ -107,6 +110,8 @@ class RolloutBuffer:
                         "count": len(self.records),
                         "observation_schema": OBSERVATION_SCHEMA,
                         "action_schema": ACTION_SCHEMA,
+                        "decision_cycle_schema": DECISION_CYCLE_SCHEMA,
+                        "memory_contract": MEMORY_CONTRACT,
                     },
                     sort_keys=True,
                 )
@@ -137,6 +142,11 @@ class RolloutBuffer:
         returns = [advantage + value for advantage, value in zip(advantages, values[:-1])]
 
         obs = torch.tensor([record.obs for record in self.records], dtype=torch.float32, device=device)
+        action_masks = _action_mask_tensor(
+            [record.action_mask for record in self.records],
+            action_dim=max((len(record.action_mask) for record in self.records), default=0),
+            device=device,
+        )
         actions = torch.tensor([record.action for record in self.records], dtype=torch.long, device=device)
         old_logprobs = torch.tensor(
             [record.logprob for record in self.records],
@@ -150,6 +160,7 @@ class RolloutBuffer:
         returns_tensor = torch.tensor(returns, dtype=torch.float32, device=device)
         return {
             "obs": obs,
+            "action_masks": action_masks,
             "actions": actions,
             "old_logprobs": old_logprobs,
             "advantages": advantages_tensor,
@@ -178,11 +189,20 @@ if TORCH_AVAILABLE:
             hidden = self.shared(obs)
             return self.actor(hidden), self.critic(hidden).squeeze(-1)
 
-        def act(self, obs: list[float], *, deterministic: bool = False) -> tuple[int, float, float]:
+        def act(
+            self,
+            obs: list[float],
+            *,
+            deterministic: bool = False,
+            action_mask: list[bool] | None = None,
+        ) -> tuple[int, float, float]:
             """Samples or selects a skill action for one observation."""
             with torch.no_grad():
                 obs_tensor = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
                 logits, value = self(obs_tensor)
+                if action_mask is not None:
+                    mask_tensor = _action_mask_tensor([action_mask], logits.shape[-1], logits.device)
+                    logits = _masked_logits(logits, mask_tensor)
                 dist = Categorical(logits=logits)
                 action = torch.argmax(logits, dim=-1) if deterministic else dist.sample()
                 logprob = dist.log_prob(action)
@@ -239,10 +259,12 @@ class PPOTrainer:
         buffer = RolloutBuffer()
         obs = await env.reset(seed=seed)
         while len(buffer) < target_steps:
-            action, logprob, value = self.model.act(obs)
+            action_mask = env.action_mask()
+            action, logprob, value = self.model.act(obs, action_mask=action_mask)
             transition: EnvStep = await env.step(action)
             buffer.add(
                 obs=obs,
+                action_mask=action_mask,
                 action=action,
                 reward=transition.reward,
                 done=transition.done,
@@ -277,6 +299,7 @@ class PPOTrainer:
             for start in range(0, count, self.config.minibatch_size):
                 batch = permutation[start : start + self.config.minibatch_size]
                 logits, values = self.model(tensors["obs"][batch])
+                logits = _masked_logits(logits, tensors["action_masks"][batch])
                 dist = Categorical(logits=logits)
                 new_logprobs = dist.log_prob(tensors["actions"][batch])
                 entropy = dist.entropy().mean()
@@ -387,6 +410,8 @@ class PPOTrainer:
                 "update_index": self.update_index,
                 "observation_schema": OBSERVATION_SCHEMA,
                 "action_schema": ACTION_SCHEMA,
+                "decision_cycle_schema": DECISION_CYCLE_SCHEMA,
+                "memory_contract": MEMORY_CONTRACT,
                 "reward_config": reward_config or {},
                 "eval_history": list(self.eval_history),
                 "extra": dict(extra or {}),
@@ -507,6 +532,36 @@ def require_torch() -> None:
             "PyTorch is required for PPO. Install the agent dependencies with "
             "`pip install -e agent` in a Python version supported by torch."
         )
+
+
+def _action_mask_tensor(
+    masks: list[list[bool]],
+    action_dim: int,
+    device: str | Any = "cpu",
+) -> Any:
+    """Return a boolean action-mask tensor, defaulting empty rows to all actions."""
+    require_torch()
+    width = max(1, int(action_dim))
+    normalized: list[list[bool]] = []
+    for mask in masks:
+        row = [bool(value) for value in mask[:width]]
+        if len(row) < width:
+            row.extend([True] * (width - len(row)))
+        if not any(row):
+            row = [True for _ in range(width)]
+        normalized.append(row)
+    return torch.tensor(normalized, dtype=torch.bool, device=device)
+
+
+def _masked_logits(logits: Any, action_masks: Any) -> Any:
+    """Apply an action mask to logits while preserving tensor shape."""
+    if action_masks.shape[-1] != logits.shape[-1]:
+        action_masks = _action_mask_tensor(
+            action_masks.detach().cpu().tolist(),
+            logits.shape[-1],
+            logits.device,
+        )
+    return logits.masked_fill(~action_masks, -1.0e9)
 
 
 def _iso_now() -> str:

@@ -175,7 +175,10 @@ promote better policies.
 
 For the concrete boundary between the fast controller, learned decision layer,
 memory file, skill action space, and PPO observation vector, see
-`docs/agent-learning-architecture.md`.
+`docs/agent-learning-architecture.md`. The same contracts are exported in
+trajectory/checkpoint metadata as `restfuldoom.decision_cycle.v1`,
+`restfuldoom.agent_memory_contract.v1`, `restfuldoom.observation.v1`, and
+`restfuldoom.skill_action.v1`.
 
 Run the first trainable brain against a local Doom gRPC endpoint:
 
@@ -259,6 +262,8 @@ The training API is:
 - `DoomAgentEnv.reset()` calls that reset and returns a compact feature vector.
 - `DoomAgentEnv.step(action)` sends one PPO-selected skill action and returns
   `(observation, reward, done, info)`.
+- PPO samples under action masks derived from protobuf combat/navigation
+  affordances, and the update recomputes logprobs under the same masks.
 - `--bc-trajectory` can warm-start the PPO actor from successful protobuf
   trajectory decisions before live reward updates.
 - `--reset-warmup-*` can run bounded heuristic curriculum warmup before PPO
@@ -267,6 +272,10 @@ The training API is:
 - `--reset-start-*` can request a fresh-reset curriculum start: position,
   facing, health, armor, and ammo are applied inside Doom before the first
   training observation is published.
+- `--reset-timeout-seconds` and `--reset-attempts` harden long PPO runs against
+  a missed reset observation.
+- `--resume-checkpoint` continues PPO from a saved `.pt` checkpoint, including
+  model weights and optimizer state.
 - `restfuldoom_agent.ppo` provides actor-critic PPO, GAE, clipped objective,
   entropy bonus, rollout JSONL buffers, checkpoint save/load, and a promotion
   gate.
@@ -277,6 +286,9 @@ The training API is:
 - Checkpoints and rollout buffers carry `restfuldoom.observation.v1` and
   `restfuldoom.skill_action.v1`, including feature descriptors and
   machine-readable definitions for each PPO skill.
+- Rollout buffers and checkpoints also carry the decision-cycle and memory
+  contracts, so a resumed cloud job can inspect how skills, masks, memory
+  queries, and controller execution are meant to interact.
 
 Run a small PPO batch against a live gRPC Doom endpoint:
 
@@ -322,6 +334,20 @@ PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
     --reset-start-face-nearest-enemy \
     --reset-start-health 100 \
     --reset-start-ammo-bullets 50
+```
+
+Continue from an existing PPO checkpoint:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
+    --endpoint 127.0.0.1:50051 \
+    --goal-preset combat \
+    --updates 2 \
+    --rollout-steps 256 \
+    --checkpoint-dir agent_models/ppo \
+    --buffer-dir trajectories/ppo \
+    --memory-path agent_memory/e1m1.json \
+    --resume-checkpoint agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0007.pt
 ```
 
 Bounded curriculum warmup is still available for experiments, but current local

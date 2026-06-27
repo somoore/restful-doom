@@ -23,6 +23,8 @@ from .client import EpisodeStart as ClientEpisodeStart
 from .reward import Goal, RewardEngine, TransitionReward, goal_preset
 from .schemas import (
     ACTION_SCHEMA,
+    DECISION_CYCLE_SCHEMA,
+    MEMORY_CONTRACT,
     OBSERVATION_SCHEMA,
     PPO_SKILL_ACTIONS,
     encode_action_history_features,
@@ -55,6 +57,7 @@ class DoomEnvConfig:
     required_kills: int = 1
     memory_path: Path | None = None
     reset_timeout_seconds: float = 5.0
+    reset_attempts: int = 2
     reset_start_x_fp: int | None = None
     reset_start_y_fp: int | None = None
     reset_start_angle_degrees: int = 0
@@ -201,6 +204,52 @@ class SkillController:
         if self.policy._select_known_enemy(features) is not None:
             return SKILL_ACTIONS.index("seek_enemy")
         return SKILL_ACTIONS.index("route_progression")
+
+    def action_mask(self, state: Any) -> list[bool]:
+        """Returns currently feasible PPO skills from protobuf affordances."""
+        features = extract_features(state, self.memory, self.params)
+        stuck = self.policy._is_stuck(features)
+        mask = {skill: False for skill in SKILL_ACTIONS}
+
+        shootable = self.policy._shootable_enemy(features)
+        if shootable is not None and self.policy._can_shoot(features, shootable):
+            mask["fire"] = True
+
+        if features.visible_enemies:
+            mask["engage"] = True
+            nearest_visible = min(
+                (float(enemy["distance"]) for enemy in features.visible_enemies),
+                default=99999.0,
+            )
+            if (
+                features.health <= self.params.retreat_health
+                or nearest_visible <= self.params.close_enemy_units
+            ):
+                mask["retreat"] = True
+
+        if not features.visible_enemies and self.policy._select_known_enemy(features) is not None:
+            mask["seek_enemy"] = True
+
+        if (
+            self.policy._select_nearby_use_line(features) is not None
+            or self.policy._select_use_ray(features) is not None
+            or self.policy._should_use_ahead(features)
+        ):
+            mask["open_use_line"] = True
+
+        if self.policy._select_progression_line(features) is not None or not features.visible_enemies:
+            mask["route_progression"] = True
+
+        if stuck:
+            mask["recover_stuck"] = True
+
+        if self.policy._select_local_exit_line(features) is not None:
+            mask["press_exit"] = True
+
+        if not any(mask.values()):
+            mask["route_progression"] = True
+
+        return [mask[skill] for skill in SKILL_ACTIONS]
 
     def _execute_skill(self, skill: str, features: Any, stuck: bool) -> tuple[Any, dict[str, Any]]:
         if features.visible_enemies:
@@ -351,15 +400,7 @@ class DoomAgentEnv:
         if hasattr(self.controller, "reset_episode_context"):
             self.controller.reset_episode_context()
         reset_seed = self.config.seed if seed is None else seed
-        reset = await self.client.reset_episode(
-            skill=self.config.skill,
-            episode=self.config.episode,
-            map=self.config.map,
-            seed=reset_seed,
-            run_id=f"{self.config.run_id}-{self._episode_index}",
-            start=self._episode_start(),
-        )
-        state = await self._next_reset_state(reset.episode, reset.map)
+        state = await self._reset_with_retries(reset_seed)
         self._last_reset_warmup = {
             "enabled": False,
             "steps": 0,
@@ -375,6 +416,27 @@ class DoomAgentEnv:
         self._start_level = (state.level.episode, state.level.map)
         self._start_kills = state.player.kills
         return self.controller.observation(state)
+
+    async def _reset_with_retries(self, reset_seed: int) -> Any:
+        attempts = max(1, int(self.config.reset_attempts))
+        last_error: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            reset = await self.client.reset_episode(
+                skill=self.config.skill,
+                episode=self.config.episode,
+                map=self.config.map,
+                seed=reset_seed,
+                run_id=f"{self.config.run_id}-{self._episode_index}-attempt-{attempt}",
+                start=self._episode_start(),
+            )
+            if not reset.accepted:
+                raise RuntimeError(f"reset rejected: {reset.message}")
+            try:
+                return await self._next_reset_state(reset.episode, reset.map)
+            except TimeoutError as error:
+                last_error = error
+        assert last_error is not None
+        raise last_error
 
     def _episode_start(self) -> ClientEpisodeStart | None:
         if (
@@ -447,6 +509,15 @@ class DoomAgentEnv:
             info={
                 "skill": skill,
                 "action_index": action_index,
+                "decision_cycle": {
+                    "schema": DECISION_CYCLE_SCHEMA["schema"],
+                    "observation_schema": OBSERVATION_SCHEMA["schema"],
+                    "action_schema": ACTION_SCHEMA["schema"],
+                    "memory_contract": MEMORY_CONTRACT["schema"],
+                    "input_tick": int(getattr(previous, "tick", 0)),
+                    "output_tick": int(getattr(current, "tick", 0)),
+                    "macro_tics": len(transition_summaries),
+                },
                 "decision": decision,
                 "transition": _combine_transition_summaries(transition_summaries),
                 "macro_tics": len(transition_summaries),
@@ -457,6 +528,14 @@ class DoomAgentEnv:
                 "done_reason": reason,
             },
         )
+
+    def action_mask(self) -> list[bool]:
+        """Returns feasible PPO actions for the current state."""
+        if self._current_state is None:
+            return [True for _ in SKILL_ACTIONS]
+        if hasattr(self.controller, "action_mask"):
+            return list(self.controller.action_mask(self._current_state))
+        return [True for _ in SKILL_ACTIONS]
 
     def _combat_action_reward(self, skill: str, had_shootable_target: bool) -> float:
         if had_shootable_target and skill == "fire":
