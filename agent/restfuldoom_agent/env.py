@@ -628,11 +628,22 @@ class SkillController:
         if skill == "close_visible_contact":
             enemy = features.visible_enemies[0] if features.visible_enemies else None
             if enemy is not None and self.policy._shootable_enemy(features) is None:
+                contact_line = self._contact_use_line(features)
+                if (
+                    contact_line is not None
+                    and not self._contact_use_line_ready_for_visible_contact(
+                        features,
+                        contact_line,
+                    )
+                ):
+                    self._remember_contact_use_line(features, contact_line)
+                    return self._use_contact_line(features, contact_line, stuck)
                 contact = self.policy._close_visible_contact(
                     features,
                     enemy,
                     stuck,
                     "ppo_close_visible_contact",
+                    prefer_open_ray=True,
                 )
                 if contact is not None:
                     return contact
@@ -646,6 +657,9 @@ class SkillController:
             contact = self.policy._continue_last_contact_corridor(features, stuck)
             if contact is not None:
                 return contact
+            contact_line = self._recent_contact_use_line_for(features)
+            if contact_line is not None:
+                return self._use_contact_line(features, contact_line, stuck)
             enemy = self.policy._select_known_enemy(features)
             if enemy is not None:
                 return self.policy._turn_toward_or_move(
@@ -736,6 +750,7 @@ class SkillController:
                             enemy,
                             stuck,
                             "ppo_close_visible_contact",
+                            prefer_open_ray=True,
                         )
                         if contact is not None:
                             return contact
@@ -758,6 +773,7 @@ class SkillController:
                     enemy,
                     stuck,
                     "ppo_close_visible_contact",
+                    prefer_open_ray=True,
                 )
                 if contact is not None:
                     return contact

@@ -283,6 +283,91 @@ def test_skill_controller_far_visible_contact_uses_close_option_before_use_line(
     assert decision["ppo_skill"] == "open_use_line"
 
 
+def test_skill_controller_close_visible_contact_prefers_open_side_ray():
+    controller = SkillController()
+    state = _state(
+        enemy=True,
+        combat=False,
+        enemy_distance=1800,
+        direction_probes=[
+            {"angle_offset_degrees": 0, "open": False, "block_distance": 96},
+            {"angle_offset_degrees": -90, "open": True, "block_distance": 512},
+            {"angle_offset_degrees": 90, "open": True, "block_distance": 512},
+        ],
+    )
+    state.navigation.forward_open = False
+
+    _close_action, close_decision = controller.action_for(
+        SKILL_ACTIONS.index("close_visible_contact"),
+        state,
+    )
+    _seek_action, seek_decision = controller.action_for(
+        SKILL_ACTIONS.index("seek_enemy"),
+        state,
+    )
+
+    assert close_decision["skill"] == "ppo_close_visible_contact"
+    assert close_decision["direction_probe"]["open"] is True
+    assert close_decision["direction_probe"]["angle_offset_degrees"] == -90
+    assert seek_decision["skill"] == "ppo_seek_visible_contact"
+    assert seek_decision["direction_probe"]["open"] is False
+    assert seek_decision["direction_probe"]["angle_offset_degrees"] == 0
+
+
+def test_skill_controller_close_visible_contact_approaches_contact_line():
+    controller = SkillController()
+    state = _state(
+        enemy=True,
+        combat=False,
+        enemy_distance=1800,
+        contact_use=True,
+        contact_use_distance_units=640,
+    )
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+    _action, decision = controller.action_for(
+        SKILL_ACTIONS.index("close_visible_contact"),
+        state,
+    )
+
+    assert mask["close_visible_contact"]
+    assert not mask["open_use_line"]
+    assert decision["ppo_skill"] == "close_visible_contact"
+    assert decision["skill"] == "contact_approach_use_line"
+    assert decision["use_line"]["line_id"] == 151
+
+
+def test_skill_controller_close_visible_contact_continues_contact_line_after_los_drops():
+    controller = SkillController()
+    first = _state(
+        tick=5,
+        enemy=True,
+        combat=False,
+        enemy_distance=1800,
+        contact_use=True,
+        contact_use_distance_units=640,
+    )
+    second = _state(
+        tick=24,
+        enemy=True,
+        enemy_line_of_sight=False,
+        combat=False,
+        enemy_distance=1800,
+        contact_use=True,
+        contact_use_distance_units=560,
+    )
+
+    controller.action_for(SKILL_ACTIONS.index("close_visible_contact"), first)
+    _action, decision = controller.action_for(
+        SKILL_ACTIONS.index("close_visible_contact"),
+        second,
+    )
+
+    assert decision["ppo_skill"] == "close_visible_contact"
+    assert decision["skill"] == "contact_approach_use_line"
+    assert decision["use_line"]["line_id"] == 151
+
+
 def test_skill_controller_engage_continues_recent_contact_corridor():
     controller = SkillController()
     first = _state(tick=5, enemy=True, combat=False, enemy_distance=2200)

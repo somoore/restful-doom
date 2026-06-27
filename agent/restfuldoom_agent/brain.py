@@ -1051,12 +1051,18 @@ class BrainPolicy:
         enemy: dict[str, Any],
         stuck: bool,
         skill: str,
+        *,
+        prefer_open_ray: bool = False,
     ) -> tuple[Any, dict[str, Any]] | None:
         """Close visible-but-not-shootable contact using local movement rays."""
         angle_delta = float(enemy["angle_delta"])
         if float(enemy.get("distance", 0.0)) <= 700.0:
             return None
-        ray = self._contact_closing_ray(features, enemy)
+        ray = self._contact_closing_ray(
+            features,
+            enemy,
+            prefer_open_ray=prefer_open_ray,
+        )
         if ray is not None and abs(angle_delta) <= 100:
             return self._move_on_ray(
                 features,
@@ -1102,13 +1108,20 @@ class BrainPolicy:
         self,
         features: TacticalFeatures,
         enemy: dict[str, Any],
+        *,
+        prefer_open_ray: bool = False,
     ) -> dict[str, Any] | None:
-        probes = [
+        candidates = [
             probe
             for probe in features.navigation.get("direction_probes") or []
             if probe.get("open")
             or float(probe.get("block_distance_fp", 0) or 0) / FP >= 48.0
         ]
+        if prefer_open_ray:
+            open_candidates = [probe for probe in candidates if probe.get("open")]
+            probes = open_candidates or candidates
+        else:
+            probes = candidates
         if not probes:
             return None
 
@@ -1187,6 +1200,7 @@ class BrainPolicy:
                 direction_probe={
                     "angle_offset_degrees": int(offset),
                     "block_distance_fp": int(ray.get("block_distance_fp", 0)),
+                    "open": bool(ray.get("open")),
                 },
             ),
         )

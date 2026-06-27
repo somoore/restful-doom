@@ -447,6 +447,27 @@ distinguish a fresh contact candidate from a stale or over-forced line. Use
 `--curriculum-mode fixed --curriculum-start-index <n>` when a single stage needs
 repeated training before mixing it back into the schedule.
 
+Before spending more PPO updates on a contact-stage failure, run a forced-option
+micro-eval from the same restored stage. This checks whether a primitive can
+deterministically turn first-visible contact into first-shootable contact, and
+reports mask validity, decision-skill counts, visible-contact loss,
+enemy-distance delta, contact-line close steps, first-shootable contacts,
+damage, and earned kills.
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.forced_option_eval \
+    --endpoint 127.0.0.1:50051 \
+    --snapshot-curriculum trajectories/e1m1-snapshot-curriculum.json \
+    --stage-index 0 \
+    --force-skill close_visible_contact \
+    --force-skill seek_enemy \
+    --force-skill open_use_line \
+    --macro-steps 128 \
+    --max-steps 512 \
+    --output trajectories/forced-option-report.json \
+    --jsonl trajectories/forced-option-records.jsonl
+```
+
 For longer curriculum runs, add `--checkpoint-eval-curriculum` with small
 `--checkpoint-eval-max-steps` first. The eval result is stored in checkpoint
 extras, training output, and memory as
