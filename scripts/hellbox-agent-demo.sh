@@ -31,8 +31,9 @@ Environment:
   ROLLOUT_CONFIG          JSON rollout config. Default: agent/examples/hellbox-rollout.json
   TRAJECTORY_JSONL        Output trajectory path. Default: trajectories/hellbox-run.jsonl
 
-The run command uses token JSON from '$HELLBOX_CLI token' unless endpoint/token
-overrides are present in the environment.
+The run command uses raw token JSON from '$HELLBOX_CLI token --raw' unless
+endpoint/token overrides are present in the environment. The token command writes
+raw JSON to HELLBOX_TOKEN_JSON and prints a redacted copy to stdout.
 EOF
 }
 
@@ -46,7 +47,11 @@ import sys
 path, key = sys.argv[1], sys.argv[2]
 with open(path, encoding="utf-8") as handle:
     data = json.load(handle)
-value = data.get(key)
+value = data
+for part in key.split("."):
+    if not isinstance(value, dict):
+        sys.exit(1)
+    value = value.get(part)
 if value is None:
     sys.exit(1)
 print(value)
@@ -66,9 +71,33 @@ with open(path, "a", encoding="utf-8") as handle:
 PY
 }
 
+print_redacted_token_json() {
+    "$PYTHON_BIN" - "$TOKEN_JSON" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    data = json.load(handle)
+if "token" in data:
+    data["token"] = "<redacted>"
+headers = data.get("headers")
+if isinstance(headers, dict) and "x-aws-proxy-auth" in headers:
+    headers["x-aws-proxy-auth"] = "<redacted>"
+print(json.dumps(data, indent=2, sort_keys=True))
+PY
+}
+
 ensure_token_json() {
     if [ ! -s "$TOKEN_JSON" ]; then
         "$0" token >/dev/null
+    fi
+    local schema
+    schema="$(json_value "$TOKEN_JSON" schema || true)"
+    if [ "$schema" != "shrink.auth.v1" ]; then
+        echo "token JSON must use schema shrink.auth.v1; got '${schema:-missing}'" >&2
+        echo "regenerate it with: $HELLBOX_CLI token $NAME --port $AGENT_PORT --minutes $TOKEN_MINUTES --raw" >&2
+        exit 2
     fi
 }
 
@@ -78,8 +107,10 @@ run_agent() {
     local token="${HELLBOX_GRPC_TOKEN:-$(json_value "$TOKEN_JSON" token)}"
     local capsule_id
     local auth_lease_id
+    local capsule_name
     capsule_id="$(json_value "$TOKEN_JSON" microvm_id || true)"
     auth_lease_id="$(json_value "$TOKEN_JSON" auth_lease_id || true)"
+    capsule_name="$(json_value "$TOKEN_JSON" capsule || echo "$NAME")"
 
     mkdir -p "$(dirname "$TRAJECTORY_JSONL")"
     PYTHONPATH="$ROOT/agent" "$PYTHON_BIN" -m restfuldoom_agent.smoke_agent \
@@ -89,7 +120,7 @@ run_agent() {
         --agent-port "$AGENT_PORT" \
         --tls \
         --trajectory-jsonl "$TRAJECTORY_JSONL" \
-        --capsule-name "$NAME" \
+        --capsule-name "$capsule_name" \
         --capsule-id "$capsule_id" \
         --auth-lease-id "$auth_lease_id"
 }
@@ -144,9 +175,9 @@ case "${1:-}" in
         ;;
     token)
         mkdir -p "$(dirname "$TOKEN_JSON")"
-        "$HELLBOX_CLI" token "$NAME" --port "$AGENT_PORT" --minutes "$TOKEN_MINUTES" > "$TOKEN_JSON"
+        "$HELLBOX_CLI" token "$NAME" --port "$AGENT_PORT" --minutes "$TOKEN_MINUTES" --raw > "$TOKEN_JSON"
         note "token"
-        cat "$TOKEN_JSON"
+        print_redacted_token_json
         ;;
     run)
         run_agent

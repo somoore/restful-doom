@@ -196,6 +196,10 @@ Doom process that happens to listen on the same endpoint.
 
 ### Hellbox Capsule
 
+Hellbox is the demo and brand. `shrink` is the MicroVM capsule runtime CLI.
+`agent-doom` is the headless Doom capsule, and `restful-doom` is the Doom agent
+environment implementation.
+
 The `capsule/` directory contains a Hellbox-style headless capsule that builds this repo,
 starts Doom in agent mode, exposes gRPC on `50051`, and uses the MicroVM ready hook on `9000`.
 The capsule contract is declared in `capsule/agent-doom.hellbox.json`. See
@@ -206,11 +210,15 @@ External capsule demo path:
 ```
 RESTFUL_DOOM_CAPSULE_DIR="$PWD/capsule" shrink build --name agent-doom
 shrink up agent-doom
-shrink token agent-doom --port 50051 --minutes 60 > trajectories/agent-doom-token.json
+shrink token agent-doom --port 50051 --minutes 60 --raw > trajectories/agent-doom-token.json
 scripts/hellbox-agent-demo.sh run
 shrink suspend --name agent-doom
 shrink resume --name agent-doom
 ```
+
+For docs or screenshots, omit `--raw`; `shrink token` redacts
+`headers.x-aws-proxy-auth` by default while preserving the stable
+`schema: "shrink.auth.v1"` shape.
 
 The strongest demo loop is:
 
