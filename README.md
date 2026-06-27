@@ -131,6 +131,36 @@ The Python package includes:
 - optional nonblocking AWS Bedrock text-reasoning policy
 - JSONL trajectory logging
 
+### Resilient Rollout Demo
+
+Run a long-lived rollout with a narratable goal and incremental trajectory log:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.smoke_agent \
+    --endpoint 127.0.0.1:50051 \
+    --goal-preset combat \
+    --trajectory-jsonl trajectories/combat.jsonl
+```
+
+If the gRPC stream drops during a Hellbox freeze/thaw or process restart, the
+client prints reconnect notices to stderr:
+
+```
+{"attempt":1,"code":"UNAVAILABLE","delay_seconds":0.25,"details":"Stream removed (Socket closed)","event":"reconnect","last_seen_tick":1234}
+{"attempt":2,"code":"UNAVAILABLE","delay_seconds":0.5,"details":"failed to connect to all addresses","event":"reconnect","last_seen_tick":1234}
+```
+
+Trajectory records are written one line at a time so rollouts do not retain the
+full state history in memory:
+
+```
+{"index":0,"last_seen_tick":1234,"next_action":{"action":7,"amount":10,"duration_tics":1},"reconnect_attempts":0,"reward":{"done":false,"health_delta":0,"item_delta":0,"kill_delta":0,"progress_delta":0.0,"reward":0.0,"secret_delta":0},"state":{"enemy_count":6,"health":100,"tick":1234}}
+```
+
+`last_seen_tick` makes reconnect behavior debuggable. For training/eval
+lineage, a future server-side run id should distinguish a thawed VM from a new
+Doom process that happens to listen on the same endpoint.
+
 ### Hellbox Capsule
 
 The `capsule/` directory contains a Hellbox-style headless capsule that builds this repo,

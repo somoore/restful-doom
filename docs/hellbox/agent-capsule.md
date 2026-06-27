@@ -60,3 +60,7 @@ not only a human-playable game stream.
 - Freeze the MicroVM while the trajectory file is still receiving ticks.
 - Thaw the MicroVM and confirm the next reconnect continues from a later tick instead of starting a fresh process.
 - Save the trajectory, Hellbox VM id, auth lease id, freeze timestamp, and thaw timestamp with the demo notes.
+
+`last_seen_tick` proves what the client last observed before reconnecting. For
+formal eval lineage, add a server-side run id later so the client can distinguish
+same MicroVM resumed, same process new game, and fresh process restart.
