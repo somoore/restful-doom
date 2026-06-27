@@ -835,7 +835,12 @@ def _record_ppo_checkpoint(
     score = _checkpoint_resume_score(rollout_summary, checkpoint_eval)
     score_source = _checkpoint_resume_score_source(checkpoint_eval)
     previous_best = memory.data.get("ppo_best_checkpoint")
-    if _should_replace_best_checkpoint(previous_best, score, score_source):
+    if _should_replace_best_checkpoint(
+        previous_best,
+        score,
+        score_source,
+        checkpoint_eval=checkpoint_eval,
+    ):
         memory.data["ppo_best_checkpoint"] = {
             "schema": "restfuldoom.ppo_best_checkpoint.v1",
             "checkpoint_path": str(checkpoint_path),
@@ -993,6 +998,8 @@ def _should_replace_best_checkpoint(
     previous_best: object,
     score: float,
     score_source: str,
+    *,
+    checkpoint_eval: dict[str, object] | None = None,
 ) -> bool:
     """Returns whether a checkpoint should become the memory resume candidate."""
     if not isinstance(previous_best, dict):
@@ -1000,6 +1007,16 @@ def _should_replace_best_checkpoint(
     previous_source = _best_checkpoint_score_source(previous_best)
     if previous_source != score_source:
         return score_source == "checkpoint_curriculum_eval"
+    if score_source == "checkpoint_curriculum_eval":
+        previous_rank = _checkpoint_eval_protocol_rank(previous_best.get("checkpoint_eval"))
+        candidate_rank = _checkpoint_eval_protocol_rank(checkpoint_eval)
+        if candidate_rank > previous_rank:
+            previous_score = _best_checkpoint_score(previous_best)
+            if previous_score <= 0:
+                return score > previous_score
+            return score >= previous_score * 0.85
+        if candidate_rank < previous_rank:
+            return False
     return score > float(previous_best.get("checkpoint_selection_score", -1e12))
 
 
@@ -1012,6 +1029,36 @@ def _best_checkpoint_score_source(best: dict[str, object]) -> str:
     if isinstance(checkpoint_eval, dict) and checkpoint_eval.get("selection_score") is not None:
         return "checkpoint_curriculum_eval"
     return "rollout_summary"
+
+
+def _best_checkpoint_score(best: dict[str, object]) -> float:
+    try:
+        return float(best.get("checkpoint_selection_score", -1e12))
+    except (TypeError, ValueError):
+        return -1e12
+
+
+def _checkpoint_eval_protocol_rank(checkpoint_eval: object) -> tuple[int, int, int, int]:
+    """Ranks eval protocols so stricter gates supersede weaker resume evidence."""
+    if not isinstance(checkpoint_eval, dict):
+        return (0, 0, 0, 0)
+    stages = checkpoint_eval.get("stages")
+    stage_count = checkpoint_eval.get("stage_count")
+    if stage_count is None and isinstance(stages, list):
+        stage_count = len(stages)
+    return (
+        0 if checkpoint_eval.get("sample") else 1,
+        _positive_int(stage_count),
+        _positive_int(checkpoint_eval.get("episodes_per_stage")),
+        _positive_int(checkpoint_eval.get("max_steps")),
+    )
+
+
+def _positive_int(value: object) -> int:
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _resolve_resume_checkpoint(

@@ -1497,6 +1497,60 @@ def test_curriculum_eval_best_replaces_legacy_rollout_best():
     )
 
 
+def test_curriculum_eval_best_prefers_stronger_eval_protocol():
+    weak_eval_best = {
+        "checkpoint_selection_score": 500.0,
+        "checkpoint_selection_source": "checkpoint_curriculum_eval",
+        "checkpoint_eval": {
+            "selection_score": 500.0,
+            "stage_count": 3,
+            "episodes_per_stage": 1,
+            "max_steps": 640,
+            "sample": False,
+        },
+    }
+    stronger_eval = {
+        "selection_score": 450.0,
+        "stage_count": 3,
+        "episodes_per_stage": 3,
+        "max_steps": 640,
+        "sample": False,
+    }
+    stronger_but_regressed_eval = {
+        "selection_score": 300.0,
+        "stage_count": 3,
+        "episodes_per_stage": 3,
+        "max_steps": 640,
+        "sample": False,
+    }
+    weaker_eval = {
+        "selection_score": 900.0,
+        "stage_count": 3,
+        "episodes_per_stage": 1,
+        "max_steps": 320,
+        "sample": False,
+    }
+
+    assert _should_replace_best_checkpoint(
+        weak_eval_best,
+        score=450.0,
+        score_source="checkpoint_curriculum_eval",
+        checkpoint_eval=stronger_eval,
+    )
+    assert not _should_replace_best_checkpoint(
+        weak_eval_best,
+        score=300.0,
+        score_source="checkpoint_curriculum_eval",
+        checkpoint_eval=stronger_but_regressed_eval,
+    )
+    assert not _should_replace_best_checkpoint(
+        weak_eval_best,
+        score=900.0,
+        score_source="checkpoint_curriculum_eval",
+        checkpoint_eval=weaker_eval,
+    )
+
+
 def test_record_ppo_checkpoint_preserves_best_resume_candidate(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     first_summary = {
