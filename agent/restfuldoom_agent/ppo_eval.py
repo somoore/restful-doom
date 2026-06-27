@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import random
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Callable
 
 from .env import ACTION_SCHEMA, DoomAgentEnv, DoomEnvConfig
@@ -41,6 +41,16 @@ class EpisodeEval:
     end_map: int = 0
     level_transition_delta: int = 0
     reset_source: str = ""
+    skill_counts: dict[str, int] = field(default_factory=dict)
+    visible_enemy_steps: int = 0
+    first_visible_contacts: int = 0
+    first_shootable_contacts: int = 0
+    shootable_target_steps: int = 0
+    fire_on_shootable_steps: int = 0
+    missed_shootable_fire_steps: int = 0
+    damage_delta: int = 0
+    invalid_action_steps: int = 0
+    snapshot_verification_failures: int = 0
 
 
 @dataclass(frozen=True)
@@ -190,17 +200,48 @@ async def evaluate_skill_policy(
                 if isinstance(reset_context, dict)
                 else ""
             )
+            snapshot_verification_failures = int(
+                _reset_context_snapshot_verification_failed(reset_context)
+            )
             stuck_events = 0
             done_reason = None
             steps = 0
+            skill_counts: dict[str, int] = {}
+            visible_enemy_steps = 0
+            first_visible_contacts = 0
+            first_shootable_contacts = 0
+            shootable_target_steps = 0
+            fire_on_shootable_steps = 0
+            missed_shootable_fire_steps = 0
+            damage_delta = 0
+            invalid_action_steps = 0
             step_limit = max_steps or env_config.max_steps
             for steps in range(1, step_limit + 1):
+                action_mask = env.action_mask()
                 action_index = choose_action(obs, env)
+                if not _action_allowed(action_mask, action_index):
+                    invalid_action_steps += 1
                 step = await env.step(action_index)
                 obs = step.observation
                 total_reward += step.reward
                 state = step.info.get("state", {})
                 decision = step.info.get("decision", {})
+                skill = str(step.info.get("skill", "unknown"))
+                skill_counts[skill] = skill_counts.get(skill, 0) + 1
+                had_visible_enemy = bool(step.info.get("had_visible_enemy"))
+                had_shootable_target = bool(step.info.get("had_shootable_target"))
+                if had_visible_enemy:
+                    visible_enemy_steps += 1
+                if had_shootable_target:
+                    shootable_target_steps += 1
+                    if skill == "fire":
+                        fire_on_shootable_steps += 1
+                    else:
+                        missed_shootable_fire_steps += 1
+                if step.info.get("first_visible_contact"):
+                    first_visible_contacts += 1
+                if step.info.get("first_shootable_contact"):
+                    first_shootable_contacts += 1
                 max_kills = max(max_kills, int(state.get("kills", 0)))
                 max_items = max(max_items, _int_field(state, "items"))
                 max_secrets = max(max_secrets, _int_field(state, "secrets"))
@@ -209,6 +250,7 @@ async def evaluate_skill_policy(
                     kill_delta += _int_field(transition, "kill_delta")
                     item_delta += _int_field(transition, "item_delta")
                     secret_delta += _int_field(transition, "secret_delta")
+                    damage_delta += _int_field(transition, "damage_delta")
                 min_health = min(min_health, int(state.get("health", 0)))
                 if decision.get("stuck") and step.info.get("skill") == "recover_stuck":
                     stuck_events += 1
@@ -255,6 +297,16 @@ async def evaluate_skill_policy(
                     end_map=end_map,
                     level_transition_delta=level_transition_delta,
                     reset_source=reset_source,
+                    skill_counts=dict(sorted(skill_counts.items())),
+                    visible_enemy_steps=visible_enemy_steps,
+                    first_visible_contacts=first_visible_contacts,
+                    first_shootable_contacts=first_shootable_contacts,
+                    shootable_target_steps=shootable_target_steps,
+                    fire_on_shootable_steps=fire_on_shootable_steps,
+                    missed_shootable_fire_steps=missed_shootable_fire_steps,
+                    damage_delta=damage_delta,
+                    invalid_action_steps=invalid_action_steps,
+                    snapshot_verification_failures=snapshot_verification_failures,
                 )
             )
     finally:
@@ -303,6 +355,27 @@ def _episode_earned_kills(episode: EpisodeEval) -> int:
     """Returns kills earned after episode reset, excluding restored snapshot state."""
     absolute_gain = max(0, int(episode.max_kills) - int(getattr(episode, "start_kills", 0)))
     return max(int(getattr(episode, "kill_delta", 0)), int(episode.max_kill_gain), absolute_gain)
+
+
+def _action_allowed(action_mask: list[bool], action_index: int) -> bool:
+    return 0 <= int(action_index) < len(action_mask) and bool(action_mask[int(action_index)])
+
+
+def _reset_context_snapshot_verification_failed(reset_context: Any) -> bool:
+    if not isinstance(reset_context, dict):
+        return False
+    verification = reset_context.get("verification")
+    if not isinstance(verification, dict):
+        verification = reset_context.get("snapshot_verification")
+    if not isinstance(verification, dict):
+        verification = reset_context.get("snapshot_restored_state_verification")
+    if not isinstance(verification, dict):
+        return False
+    if "ok" in verification:
+        return not bool(verification.get("ok"))
+    if "verified" in verification:
+        return not bool(verification.get("verified"))
+    return bool(verification.get("failed"))
 
 
 def _int_field(values: dict[str, Any], key: str) -> int:

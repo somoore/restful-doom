@@ -180,6 +180,7 @@ class SkillController:
 
     def reset_episode_context(self) -> None:
         """Clears stateful observation features at episode boundaries."""
+        self.last_decision = {}
         self._previous_action_index = None
         self._previous_had_shootable_target = False
         self._same_skill_streak = 0
@@ -196,6 +197,8 @@ class SkillController:
         self._recent_route_failure_flags.clear()
         self._recent_contact_use_line = None
         self._recent_visible_contact = None
+        if hasattr(self.policy, "reset_episode_context"):
+            self.policy.reset_episode_context()
 
     def record_action_history(
         self,

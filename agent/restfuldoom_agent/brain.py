@@ -596,6 +596,27 @@ class BrainPolicy:
         self._last_contact_ray: dict[str, Any] | None = None
         self._hazard_escape: dict[str, Any] | None = None
 
+    def reset_episode_context(self) -> None:
+        """Clear episode-local tactical state while preserving persistent memory."""
+        self.last_features = None
+        self.last_decision = {}
+        self._last_position = None
+        self._last_progress_tick = 0
+        self._last_shot_tick = -9999
+        self._last_use_tick = -9999
+        self._last_stuck_phase = -1
+        self._explore_bias = 1
+        self._blocked_enemy_cells.clear()
+        self._blocked_use_lines.clear()
+        self._line_attempts.clear()
+        self._exit_push_attempts.clear()
+        self._episode_cell_visits.clear()
+        self._start_kills = None
+        self._last_visible_enemy_tick = -9999
+        self._last_visible_enemy_id = None
+        self._last_contact_ray = None
+        self._hazard_escape = None
+
     async def next_action(self, state: Any) -> Any:
         """Return a fast local action for the current protobuf state."""
         features = extract_features(state, self.memory, self.params)

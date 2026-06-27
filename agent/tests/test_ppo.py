@@ -216,12 +216,58 @@ def test_ppo_eval_contract_serializes_and_blocks_weak_candidate():
 
     assert payload["result"]["policy_id"] == "ppo:test"
     assert payload["episodes"][0]["total_reward"] == 1.25
+    assert payload["episodes"][0]["skill_counts"] == {}
+    assert payload["episodes"][0]["damage_delta"] == 0
+    assert payload["episodes"][0]["first_shootable_contacts"] == 0
     assert not decision.promote
     assert "completion rate did not beat baseline" in decision.reasons
     assert "completion rate below promotion minimum" in decision.reasons
     assert "mean kills did not beat baseline" in decision.reasons
     assert "mean kills below promotion minimum" in decision.reasons
     assert "mean reward did not beat baseline" in decision.reasons
+
+
+def test_ppo_eval_episode_serializes_contact_diagnostics():
+    episode = EpisodeEval(
+        seed=9,
+        total_reward=12.5,
+        level_completed=False,
+        death=False,
+        max_kills=2,
+        min_health=80,
+        steps=128,
+        steps_to_exit=640,
+        stuck_events=0,
+        done_reason="max_steps",
+        kill_delta=2,
+        max_kill_gain=2,
+        skill_counts={"close_visible_contact": 40, "fire": 12},
+        visible_enemy_steps=54,
+        first_shootable_contacts=1,
+        shootable_target_steps=12,
+        fire_on_shootable_steps=12,
+        damage_delta=20,
+    )
+    payload = PolicyEval(
+        result=EvaluationResult(
+            policy_id="ppo:diagnostic",
+            level_completion_rate=0.0,
+            mean_kills=2.0,
+            survival_rate=1.0,
+            mean_steps_to_exit=640,
+            mean_stuck_events=0.0,
+            episode_count=1,
+            mean_reward=12.5,
+        ),
+        episodes=[episode],
+    ).to_dict()
+
+    row = payload["episodes"][0]
+    assert row["skill_counts"] == {"close_visible_contact": 40, "fire": 12}
+    assert row["first_shootable_contacts"] == 1
+    assert row["shootable_target_steps"] == 12
+    assert row["fire_on_shootable_steps"] == 12
+    assert row["damage_delta"] == 20
 
 
 def test_expert_skill_labels_map_to_ppo_actions():

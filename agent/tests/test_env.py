@@ -75,6 +75,62 @@ def test_skill_controller_observation_includes_previous_action_history():
     assert after_fire["same_skill_streak_norm"] > 0.0
 
 
+def test_skill_controller_reset_clears_policy_episode_context():
+    controller = SkillController()
+    policy = controller.policy
+    controller.last_decision = {"skill": "old"}
+    controller._previous_action_index = SKILL_ACTIONS.index("seek_enemy")
+    controller._same_skill_streak = 7
+    controller._recent_visible_enemy_flags.extend([True, False])
+    controller._recent_route_progress_units.extend([32.0])
+    controller._recent_contact_use_line = {"tick": 10}
+    controller._recent_visible_contact = {"tick": 11}
+    policy.last_decision = {"skill": "stale"}
+    policy._last_position = (1.0, 2.0)
+    policy._last_progress_tick = 99
+    policy._last_shot_tick = 88
+    policy._last_use_tick = 77
+    policy._last_stuck_phase = 3
+    policy._explore_bias = -1
+    policy._blocked_enemy_cells["1:2:3"] = 100
+    policy._blocked_use_lines["1:2:4"] = 100
+    policy._line_attempts["1:2:4"] = {"count": 2}
+    policy._exit_push_attempts["1:2:5"] = {"count": 1}
+    policy._episode_cell_visits["1:2"] = 12
+    policy._start_kills = 4
+    policy._last_visible_enemy_tick = 55
+    policy._last_visible_enemy_id = 6
+    policy._last_contact_ray = {"tick": 55, "enemy_id": 6, "ray_offset": -45}
+    policy._hazard_escape = {"started_tick": 66}
+
+    controller.reset_episode_context()
+
+    assert controller.last_decision == {}
+    assert controller._previous_action_index is None
+    assert controller._same_skill_streak == 0
+    assert controller._recent_visible_enemy_flags == []
+    assert controller._recent_route_progress_units == []
+    assert controller._recent_contact_use_line is None
+    assert controller._recent_visible_contact is None
+    assert policy.last_decision == {}
+    assert policy._last_position is None
+    assert policy._last_progress_tick == 0
+    assert policy._last_shot_tick == -9999
+    assert policy._last_use_tick == -9999
+    assert policy._last_stuck_phase == -1
+    assert policy._explore_bias == 1
+    assert policy._blocked_enemy_cells == {}
+    assert policy._blocked_use_lines == {}
+    assert policy._line_attempts == {}
+    assert policy._exit_push_attempts == {}
+    assert policy._episode_cell_visits == {}
+    assert policy._start_kills is None
+    assert policy._last_visible_enemy_tick == -9999
+    assert policy._last_visible_enemy_id is None
+    assert policy._last_contact_ray is None
+    assert policy._hazard_escape is None
+
+
 def test_skill_controller_observation_includes_route_outcome_history():
     controller = SkillController()
     state = _state(route=True)
