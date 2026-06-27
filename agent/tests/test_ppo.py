@@ -160,6 +160,10 @@ def test_training_schemas_describe_features_and_actions():
         for definition in ACTION_SCHEMA["definitions"]
     )
     assert ACTION_SCHEMA["mask_semantics"]["schema"] == "restfuldoom.skill_action_mask.v1"
+    assert any(
+        rule["name"] == "shootable_followthrough"
+        for rule in ACTION_SCHEMA["mask_semantics"]["rules"]
+    )
     assert ACTION_SCHEMA["representation"]["learned_now"] == (
         "PPO learns when to choose each option"
     )

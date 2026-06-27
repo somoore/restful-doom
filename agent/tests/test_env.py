@@ -154,10 +154,11 @@ def test_skill_controller_action_mask_uses_affordances():
     quiet_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(quiet_state)))
 
     assert combat_mask["fire"]
-    assert combat_mask["engage"]
+    assert not combat_mask["engage"]
     assert not combat_mask["retreat"]
     assert not combat_mask["seek_enemy"]
     assert not combat_mask["open_use_line"]
+    assert not combat_mask["route_progression"]
     assert not combat_mask["press_exit"]
     assert not visible_mask["fire"]
     assert visible_mask["engage"]

@@ -131,6 +131,10 @@ and memory:
 
 - `fire` is available only when the combat probe reports a shootable enemy and
   the controller cooldown allows a shot.
+- When a shootable enemy is available and the controller can fire, the mask
+  follows through by suppressing normal `engage`, use-line, and route actions.
+  This prevents PPO from creating a brief firing window and then immediately
+  moving out of it before damage can land.
 - `engage` is available when an enemy is visible.
 - `seek_enemy` is also available during visible-but-not-shootable contact, so
   PPO can choose a different close/turn primitive instead of being forced into
@@ -576,6 +580,13 @@ Recent PPO evidence:
   follow-up no-terminate contact-to-damage probe did not reproduce shootable
   contact or produce damage, so this is a first-shootable breakthrough, not a
   solved contact-to-combat policy.
+- `ppo-shootable-followthrough-probe`: after making the shootable mask follow
+  through to `fire`, a no-terminate live contact run on `visible_contact_fast`
+  reached `first_shootable_contacts=1`, `shootable_target_steps=81`,
+  `fire_on_shootable=76`, `damage_delta=20`, and `max_kills=2`. The other two
+  visible-contact starts still produced no shootable target, damage, or kills,
+  so contact-to-damage is now proven for one stage but not reliable across the
+  contact curriculum.
 
 ## Next Architecture Work
 

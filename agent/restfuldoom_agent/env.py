@@ -381,14 +381,16 @@ class SkillController:
         recent_contact_active = self._recent_contact_active(features)
 
         shootable = self.policy._shootable_enemy(features)
-        if shootable is not None and self.policy._can_shoot(features, shootable):
+        can_fire = shootable is not None and self.policy._can_shoot(features, shootable)
+        if can_fire:
             mask["fire"] = True
 
         if features.visible_enemies:
-            mask["engage"] = True
-            if shootable is None and self.policy._select_known_enemy(features) is not None:
+            if not can_fire:
+                mask["engage"] = True
+            if not can_fire and shootable is None and self.policy._select_known_enemy(features) is not None:
                 mask["seek_enemy"] = True
-            if shootable is None and self._contact_use_line(features) is not None:
+            if not can_fire and shootable is None and self._contact_use_line(features) is not None:
                 mask["open_use_line"] = True
             nearest_visible = min(
                 (float(enemy["distance"]) for enemy in features.visible_enemies),
@@ -396,7 +398,7 @@ class SkillController:
             )
             if (
                 features.health <= self.params.retreat_health
-                or nearest_visible <= self.params.close_enemy_units
+                or (not can_fire and nearest_visible <= self.params.close_enemy_units)
             ):
                 mask["retreat"] = True
         elif recent_contact_active:
@@ -408,22 +410,26 @@ class SkillController:
             mask["seek_enemy"] = True
 
         if (
-            self.policy._select_nearby_use_line(features) is not None
-            or self._recent_contact_use_line_for(features) is not None
-            or self.policy._select_use_ray(features) is not None
-            or self.policy._should_use_ahead(features)
+            not can_fire
+            and (
+                self.policy._select_nearby_use_line(features) is not None
+                or self._recent_contact_use_line_for(features) is not None
+                or self.policy._select_use_ray(features) is not None
+                or self.policy._should_use_ahead(features)
+            )
         ):
             mask["open_use_line"] = True
 
-        if self.policy._select_progression_line(features) is not None or (
-            not features.visible_enemies and not recent_contact_active
+        if not can_fire and (
+            self.policy._select_progression_line(features) is not None
+            or (not features.visible_enemies and not recent_contact_active)
         ):
             mask["route_progression"] = True
 
         if stuck:
             mask["recover_stuck"] = True
 
-        if self.policy._select_local_exit_line(features) is not None:
+        if not can_fire and self.policy._select_local_exit_line(features) is not None:
             mask["press_exit"] = True
 
         if not any(mask.values()):

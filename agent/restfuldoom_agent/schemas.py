@@ -786,6 +786,23 @@ ACTION_SCHEMA = {
         "schema": "restfuldoom.skill_action_mask.v1",
         "source": "protobuf navigation/combat affordances plus AgentMemory",
         "meaning": "True entries are feasible skills for the current macro-step; PPO sampling and update logprobs use this mask.",
+        "rules": [
+            {
+                "name": "shootable_followthrough",
+                "meaning": (
+                    "when the protobuf combat probe reports a shootable enemy and "
+                    "the controller can fire, the normal combat mask exposes fire "
+                    "and suppresses engage/use/route actions so the shot window is not lost"
+                ),
+            },
+            {
+                "name": "visible_contact",
+                "meaning": (
+                    "visible-but-not-shootable contact exposes engage, seek_enemy, "
+                    "and contact use-line actions when those affordances exist"
+                ),
+            },
+        ],
     },
 }
 
