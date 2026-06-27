@@ -358,6 +358,13 @@ save|load --slot N` or the Hellbox wrapper commands `snapshot-save` and
 `snapshot-load`. The Hellbox wrapper `snapshot-capture` runs the live capture
 flow using the current token JSON and `SNAPSHOT_AUTO` selectors.
 
+Snapshot PPO summaries separate inherited map counters from earned progress.
+Absolute `max_kills` can be nonzero immediately after loading a progressed
+`first-kill` slot, so summaries also report `kill_delta`, `max_kill_gain`,
+`snapshot_kill_delta`, and `snapshot_max_kill_gain`. Rollout-only best
+checkpoint selection scores use the earned fields. This keeps a checkpoint from
+looking better merely because a reset slot already contained kills.
+
 The validator checks the schema, stage structure, local snapshot files, and
 `sha256:` digests. PPO experiments can load an unvalidated manifest for plumbing
 smokes, but any promotion or export meant to resume in cloud should use a

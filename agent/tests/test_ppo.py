@@ -782,6 +782,48 @@ def test_rollout_summary_counts_snapshot_restore_contexts():
     assert summary["max_snapshot_restore_seconds"] == pytest.approx(0.5)
 
 
+def test_rollout_summary_separates_inherited_snapshot_kills_from_earned_kills():
+    buffer = RolloutBuffer()
+    reset_context = {
+        "schema": "restfuldoom.reset_context.v1",
+        "source": "snapshot_restore",
+        "episode_index": 1,
+        "actual_first_state": {"kills": 1, "health": 96},
+        "expected_state": {"kills": 1},
+        "restore": {"returncode": 0, "elapsed_seconds": 0.1},
+        "restored_state_verification": {"valid": True},
+    }
+    for state_kills, kill_delta in [(1, 0), (1, 0), (2, 1)]:
+        buffer.add(
+            obs=[0.0, 1.0],
+            action_mask=[True, False],
+            action=0,
+            reward=float(kill_delta),
+            done=False,
+            value=0.0,
+            logprob=0.0,
+            info={
+                "skill": "fire",
+                "transition": {"kill_delta": kill_delta, "damage_delta": 0},
+                "state": {"health": 96, "kills": state_kills},
+                "curriculum_stage": {
+                    "name": "first_kill_snapshot",
+                    "reset_mode": "snapshot",
+                    "expected_state": {"kills": 1},
+                },
+                "reset_context": reset_context,
+            },
+        )
+
+    summary = _summarize_buffer(buffer)
+
+    assert summary["max_kills"] == 2
+    assert summary["kill_delta"] == 1
+    assert summary["max_kill_gain"] == 1
+    assert summary["snapshot_kill_delta"] == 1
+    assert summary["snapshot_max_kill_gain"] == 1
+
+
 def test_rollout_summary_counts_route_outcomes():
     buffer = RolloutBuffer()
     for index, route_outcome in enumerate(
@@ -1026,6 +1068,28 @@ def test_checkpoint_selection_score_prefers_damage_contact_and_fire():
     }
 
     assert _checkpoint_selection_score(useful) > _checkpoint_selection_score(weak)
+
+
+def test_checkpoint_selection_score_ignores_inherited_snapshot_kills():
+    inherited = {
+        "total_reward": 0.0,
+        "max_kills": 5,
+        "max_kill_gain": 0,
+        "kill_delta": 0,
+        "damage_delta": 0,
+        "first_shootable_contacts": 0,
+        "fire_on_shootable_steps": 0,
+        "missed_shootable_fire_steps": 0,
+        "route_failed_steps": 0,
+    }
+    earned = {
+        **inherited,
+        "max_kills": 1,
+        "max_kill_gain": 1,
+    }
+
+    assert _checkpoint_selection_score(inherited) == 0.0
+    assert _checkpoint_selection_score(earned) == 75.0
 
 
 def test_policy_eval_selection_score_rewards_cross_stage_competence():

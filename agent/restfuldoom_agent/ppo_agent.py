@@ -1212,6 +1212,21 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         for context in snapshot_contexts
         if isinstance(context.get("restored_state_verification", {}), dict)
     ]
+    kill_delta = sum(int(transition.get("kill_delta", 0)) for transition in transitions)
+    damage_delta = sum(int(transition.get("damage_delta", 0)) for transition in transitions)
+    kill_gains = [_earned_kill_gain(record) for record in records]
+    snapshot_kill_gains = [
+        _earned_kill_gain(record)
+        for record in records
+        if _record_reset_source(record) == "snapshot_restore"
+    ]
+    snapshot_transitions = [
+        record.info.get("transition", {})
+        for record in records
+        if isinstance(record.info, dict)
+        and _record_reset_source(record) == "snapshot_restore"
+        and isinstance(record.info.get("transition", {}), dict)
+    ]
     summary = {
         "records": len(records),
         "total_reward": round(sum(float(record.reward) for record in records), 4),
@@ -1356,7 +1371,16 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         "positive_reward_steps": sum(1 for record in records if record.reward > 0),
         "negative_reward_steps": sum(1 for record in records if record.reward < 0),
         "done_count": sum(1 for record in records if record.done),
-        "damage_delta": sum(int(transition.get("damage_delta", 0)) for transition in transitions),
+        "kill_delta": kill_delta,
+        "damage_delta": damage_delta,
+        "max_kill_gain": max(kill_gains, default=0),
+        "snapshot_kill_delta": sum(
+            int(transition.get("kill_delta", 0)) for transition in snapshot_transitions
+        ),
+        "snapshot_damage_delta": sum(
+            int(transition.get("damage_delta", 0)) for transition in snapshot_transitions
+        ),
+        "snapshot_max_kill_gain": max(snapshot_kill_gains, default=0),
         "enemy_distance_delta": round(
             sum(float(transition.get("enemy_distance_delta", 0.0)) for transition in transitions),
             4,
@@ -1410,10 +1434,57 @@ def _mean_context_value(
     return round(sum(values) / max(1, len(values)), 4)
 
 
+def _earned_kill_gain(record: object) -> int:
+    info = getattr(record, "info", {})
+    if not isinstance(info, dict):
+        return 0
+    state = info.get("state", {})
+    if not isinstance(state, dict):
+        return 0
+    kills = _int_field(state, "kills")
+    baseline = _record_kill_baseline(info)
+    return max(0, kills - baseline)
+
+
+def _record_kill_baseline(info: dict[str, object]) -> int:
+    reset_context = info.get("reset_context", {})
+    if isinstance(reset_context, dict):
+        for key in ("actual_first_state", "expected_state"):
+            value = reset_context.get(key, {})
+            if isinstance(value, dict) and "kills" in value:
+                return _int_field(value, "kills")
+    curriculum_stage = info.get("curriculum_stage", {})
+    if isinstance(curriculum_stage, dict):
+        expected = curriculum_stage.get("expected_state", {})
+        if isinstance(expected, dict) and "kills" in expected:
+            return _int_field(expected, "kills")
+    return 0
+
+
+def _record_reset_source(record: object) -> str:
+    info = getattr(record, "info", {})
+    if not isinstance(info, dict):
+        return ""
+    reset_context = info.get("reset_context", {})
+    if not isinstance(reset_context, dict):
+        return ""
+    return str(reset_context.get("source", ""))
+
+
+def _int_field(values: dict[str, object], key: str) -> int:
+    try:
+        return int(values.get(key, 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _checkpoint_selection_score(summary: dict[str, object]) -> float:
     """Scores a rollout for resume selection without changing promotion rules."""
     total_reward = float(summary.get("total_reward", 0.0))
-    max_kills = int(summary.get("max_kills", 0))
+    earned_kills = max(
+        int(summary.get("kill_delta", 0)),
+        int(summary.get("max_kill_gain", summary.get("max_kills", 0))),
+    )
     damage_delta = int(summary.get("damage_delta", 0))
     first_shootable_contacts = int(summary.get("first_shootable_contacts", 0))
     fire_on_shootable = int(summary.get("fire_on_shootable_steps", 0))
@@ -1421,7 +1492,7 @@ def _checkpoint_selection_score(summary: dict[str, object]) -> float:
     route_failed = int(summary.get("route_failed_steps", 0))
     return round(
         total_reward
-        + max_kills * 75.0
+        + earned_kills * 75.0
         + damage_delta * 2.0
         + first_shootable_contacts * 25.0
         + fire_on_shootable * 0.5

@@ -698,6 +698,14 @@ Recent PPO evidence:
   competence. Treat contact-context PPO as improved but still overfit-prone; it
   needs better curriculum mixing or a topology/snapshot upgrade before
   full-level promotion.
+- Native save-slot curriculum now produces PPO-ready progressed-map stages.
+  The valid E1M1 slot capture restored `first-shootable`, `first-visible`,
+  `first-damage`, and `first-kill` states with hard verification. Short smoke
+  `ppo-earned-kill-smoke` restored those slots five times with zero
+  verification failures and earned one post-restore kill
+  (`kill_delta=1`, `max_kill_gain=1`). Snapshot summaries intentionally
+  distinguish those earned fields from absolute `max_kills`, because absolute
+  counters may be inherited from the loaded slot.
 
 ## Next Architecture Work
 

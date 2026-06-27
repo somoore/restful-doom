@@ -35,6 +35,8 @@ The punchline is:
 - PPO combat-start curriculum can learn kills from reward feedback.
 - Snapshot-backed curriculum contracts, manifest builder, artifact validator,
   PPO restore plumbing, and native agent save-slot restore are implemented.
+- Snapshot PPO summaries distinguish earned kill progress from absolute kill
+  counters inherited from restored slots.
 - Full independent PPO level completion from E1M1 spawn is not proven yet.
 - Next major unlock: capture real Hellbox/Shrink progressed-map snapshots and
   train/evaluate PPO through the promotion gate.
@@ -656,6 +658,10 @@ PPO rollout summaries include route diagnostics for spawn-to-contact work:
 to inspect when a run moves through E1M1 but still never reaches a shootable
 target. First-contact curriculum runs also report `visible_enemy_steps`,
 `first_visible_contacts`, `first_shootable_contacts`, and `contact_reward`.
+Snapshot-backed runs also report earned kill fields: `kill_delta`,
+`max_kill_gain`, `snapshot_kill_delta`, and `snapshot_max_kill_gain`. Use those
+fields, not absolute `max_kills`, when judging whether PPO earned a kill after
+restoring from a slot that may already contain prior kills.
 Topology-context runs report `topology_frontier_active_steps`,
 `mean_topology_current_cell_visits_norm`,
 `mean_topology_open_cell_min_visit_norm`, and
