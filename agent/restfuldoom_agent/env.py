@@ -534,6 +534,14 @@ class SkillController:
             self._remember_visible_contact(features)
         can_fire = shootable is not None and self.policy._can_shoot(features, shootable)
         recent_contact_active = self._recent_contact_active(features)
+        if (
+            features.health <= self.params.retreat_health
+            and (features.visible_enemies or recent_contact_active)
+        ):
+            mask["retreat"] = True
+            if stuck:
+                mask["recover_stuck"] = True
+            return [mask[skill] for skill in SKILL_ACTIONS]
         if can_fire:
             mask["fire"] = True
         elif self._contact_use_line_followthrough_active(features):
@@ -566,7 +574,10 @@ class SkillController:
                 mask["retreat"] = True
         elif recent_contact_active:
             mask["close_visible_contact"] = True
-            if self.policy._select_known_enemy(features) is not None:
+            if (
+                self.policy._select_known_enemy(features) is not None
+                and self._post_contact_seek_allowed(features)
+            ):
                 mask["seek_enemy"] = True
             contact_line = self._recent_contact_use_line_for(features)
             if (
@@ -1052,10 +1063,14 @@ class SkillController:
         if recent_contact_active is None:
             recent_contact_active = self._recent_contact_active(features)
         if recent_contact_active:
-            return True
+            return self._post_contact_seek_allowed(features)
         if self.policy._last_visible_enemy_id is not None:
             return True
         return any(self._recent_visible_enemy_flags)
+
+    def _post_contact_seek_allowed(self, features: Any) -> bool:
+        """Returns whether contact recovery has earned a broad known-enemy seek."""
+        return False
 
     def _recent_visible_contact_active(self, features: Any) -> bool:
         recent = self._recent_visible_contact

@@ -298,6 +298,22 @@ def test_skill_controller_action_mask_uses_affordances():
     assert quiet_mask["route_progression"]
 
 
+def test_skill_controller_low_health_contact_forces_retreat():
+    controller = SkillController()
+    combat_state = _state(enemy=True, combat=True, health=30)
+    visible_state = _state(enemy=True, combat=False, health=30)
+
+    combat_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(combat_state)))
+    visible_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(visible_state)))
+
+    assert combat_mask["retreat"]
+    assert not combat_mask["fire"]
+    assert not combat_mask["close_visible_contact"]
+    assert visible_mask["retreat"]
+    assert not visible_mask["seek_enemy"]
+    assert not visible_mask["close_visible_contact"]
+
+
 def test_skill_controller_suppresses_blind_seek_before_episode_contact(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     memory.data["enemies"] = {
@@ -313,18 +329,31 @@ def test_skill_controller_suppresses_blind_seek_before_episode_contact(tmp_path)
     quiet_spawn = _state(tick=10, enemy=False, combat=False)
     visible_contact = _state(tick=11, enemy=True, combat=False)
     lost_contact = _state(tick=20, enemy=True, enemy_line_of_sight=False, combat=False)
+    expired_contact = _state(tick=500, enemy=True, enemy_line_of_sight=False, combat=False)
 
     quiet_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(quiet_spawn)))
     quiet_heuristic = SKILL_ACTIONS[controller.heuristic_action_index(quiet_spawn)]
-    controller.action_mask(visible_contact)
+    controller.action_for(SKILL_ACTIONS.index("close_visible_contact"), visible_contact)
     lost_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(lost_contact)))
     lost_heuristic = SKILL_ACTIONS[controller.heuristic_action_index(lost_contact)]
+    for _ in range(16):
+        controller.record_action_history(
+            action_index=SKILL_ACTIONS.index("close_visible_contact"),
+            had_shootable_target=False,
+        )
+    recovered_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(lost_contact)))
+    recovered_heuristic = SKILL_ACTIONS[controller.heuristic_action_index(lost_contact)]
+    expired_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(expired_contact)))
 
     assert not quiet_mask["seek_enemy"]
     assert quiet_mask["route_progression"]
     assert quiet_heuristic == "route_progression"
-    assert lost_mask["seek_enemy"]
-    assert lost_heuristic == "seek_enemy"
+    assert lost_mask["close_visible_contact"]
+    assert not lost_mask["seek_enemy"]
+    assert lost_heuristic == "route_progression"
+    assert not recovered_mask["seek_enemy"]
+    assert recovered_heuristic == "route_progression"
+    assert expired_mask["seek_enemy"]
 
 
 def test_doom_agent_env_allowed_skill_filter_narrows_action_mask():
@@ -627,7 +656,7 @@ def test_skill_controller_contact_use_line_followthrough_releases_after_streak()
     assert not mask["open_use_line"]
     assert not mask["engage"]
     assert mask["close_visible_contact"]
-    assert mask["seek_enemy"]
+    assert not mask["seek_enemy"]
 
 
 def test_skill_controller_contact_use_line_allows_doorway_approach_range():
@@ -695,7 +724,7 @@ def test_skill_controller_recent_contact_mask_suppresses_generic_route():
 
     assert not mask["engage"]
     assert mask["close_visible_contact"]
-    assert mask["seek_enemy"]
+    assert not mask["seek_enemy"]
     assert not mask["open_use_line"]
     assert not mask["route_progression"]
 
@@ -722,7 +751,7 @@ def test_skill_controller_recent_visible_contact_suppresses_generic_route():
 
     assert not contact_mask["engage"]
     assert contact_mask["close_visible_contact"]
-    assert contact_mask["seek_enemy"]
+    assert not contact_mask["seek_enemy"]
     assert not contact_mask["route_progression"]
     assert expired_mask["route_progression"]
 
@@ -767,7 +796,7 @@ def test_skill_controller_recent_contact_route_failures_suppress_progression_lin
     assert before_failures["route_progression"]
     assert not after_failure["engage"]
     assert after_failure["close_visible_contact"]
-    assert after_failure["seek_enemy"]
+    assert not after_failure["seek_enemy"]
     assert not after_failure["route_progression"]
     assert combat_mask["fire"]
     assert not combat_mask["route_progression"]
@@ -1369,6 +1398,7 @@ def _state(
     enemy_line_of_sight=True,
     combat=False,
     enemy_distance=256,
+    health=100,
     hazard=False,
     route=False,
     contact_use=False,
@@ -1383,7 +1413,7 @@ def _state(
         position=position,
         angle_degrees=0,
         height_fp=0,
-        health=100,
+        health=health,
         type_id=0,
         internal_type=0,
         flags=0,
@@ -1392,7 +1422,7 @@ def _state(
     )
     player = SimpleNamespace(
         object=obj,
-        health=100,
+        health=health,
         armor=0,
         kills=kills,
         items=0,
