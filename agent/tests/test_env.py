@@ -247,6 +247,72 @@ def test_skill_controller_open_use_line_remembers_contact_line_after_los_drops()
     assert second_decision["skill"] != "ppo_use_ahead"
 
 
+def test_skill_controller_mask_remembers_contact_line_without_open_action():
+    controller = SkillController()
+    first = _state(tick=5, enemy=True, combat=False, contact_use=True)
+    second = _state(
+        tick=80,
+        enemy=True,
+        enemy_line_of_sight=False,
+        combat=False,
+        contact_use=True,
+    )
+
+    first_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(first)))
+    second_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(second)))
+    _action, decision = controller.action_for(SKILL_ACTIONS.index("open_use_line"), second)
+
+    assert first_mask["open_use_line"]
+    assert second_mask["open_use_line"]
+    assert decision["use_line"]["line_id"] == 151
+    assert decision["skill"] != "ppo_use_ahead"
+
+
+def test_skill_controller_contact_use_line_followthrough_masks_to_open_use_line():
+    controller = SkillController()
+    first = _state(tick=5, enemy=True, combat=False, contact_use=True)
+    second = _state(
+        tick=20,
+        enemy=True,
+        enemy_line_of_sight=False,
+        combat=False,
+        contact_use=True,
+    )
+
+    controller.action_mask(first)
+    controller.record_action_history(
+        action_index=SKILL_ACTIONS.index("open_use_line"),
+        had_shootable_target=False,
+    )
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(second)))
+
+    assert mask["open_use_line"]
+    assert not mask["engage"]
+    assert not mask["seek_enemy"]
+    assert not mask["route_progression"]
+
+
+def test_skill_controller_contact_use_line_allows_doorway_approach_range():
+    controller = SkillController()
+    state = _state(
+        enemy=True,
+        combat=False,
+        contact_use=True,
+        contact_use_distance_units=960,
+    )
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+    _action, decision = controller.action_for(SKILL_ACTIONS.index("open_use_line"), state)
+
+    assert mask["open_use_line"]
+    assert decision["use_line"]["line_id"] == 151
+    assert decision["skill"] in {
+        "approach_nearby_use_line",
+        "turn_to_nearby_use_line",
+        "use_nearby_line",
+    }
+
+
 def test_skill_controller_recent_contact_mask_suppresses_generic_route():
     controller = SkillController()
     first = _state(tick=5, enemy=True, combat=False, contact_use=True)
@@ -767,6 +833,7 @@ def _state(
     hazard=False,
     route=False,
     contact_use=False,
+    contact_use_distance_units=640,
     direction_probes=None,
     x_units=0,
     y_units=0,
@@ -850,17 +917,18 @@ def _state(
             for probe in direction_probes
         ]
     if contact_use:
+        contact_x_fp = int(contact_use_distance_units * 65536)
         navigation.use_lines = [
             SimpleNamespace(
                 line_id=151,
-                midpoint=SimpleNamespace(x_fp=640 * 65536, y_fp=0, z_fp=0),
-                start=SimpleNamespace(x_fp=640 * 65536, y_fp=-64 * 65536, z_fp=0),
-                end=SimpleNamespace(x_fp=640 * 65536, y_fp=64 * 65536, z_fp=0),
-                nearest_point=SimpleNamespace(x_fp=640 * 65536, y_fp=0, z_fp=0),
+                midpoint=SimpleNamespace(x_fp=contact_x_fp, y_fp=0, z_fp=0),
+                start=SimpleNamespace(x_fp=contact_x_fp, y_fp=-64 * 65536, z_fp=0),
+                end=SimpleNamespace(x_fp=contact_x_fp, y_fp=64 * 65536, z_fp=0),
+                nearest_point=SimpleNamespace(x_fp=contact_x_fp, y_fp=0, z_fp=0),
                 special=1,
                 tag=0,
-                distance_fp=640 * 65536,
-                nearest_distance_fp=640 * 65536,
+                distance_fp=contact_x_fp,
+                nearest_distance_fp=contact_x_fp,
             )
         ]
     if route:

@@ -171,6 +171,7 @@ The controller owns primitive mechanics:
 - movement amount and turn amount
 - aiming tolerance and firing cadence
 - door/switch use timing
+- short option follow-through for shot windows and recent contact use-lines
 - stuck recovery
 - route/contact fallbacks
 

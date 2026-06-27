@@ -389,6 +389,11 @@ class SkillController:
         recent_contact_active = self._recent_contact_active(features)
         if can_fire:
             mask["fire"] = True
+        elif self._contact_use_line_followthrough_active(features):
+            mask["open_use_line"] = True
+            if stuck:
+                mask["recover_stuck"] = True
+            return [mask[skill] for skill in SKILL_ACTIONS]
 
         if features.visible_enemies:
             if not can_fire:
@@ -410,6 +415,8 @@ class SkillController:
             mask["engage"] = True
             if self.policy._select_known_enemy(features) is not None:
                 mask["seek_enemy"] = True
+            if self._recent_contact_use_line_for(features) is not None:
+                mask["open_use_line"] = True
 
         if not features.visible_enemies and self.policy._select_known_enemy(features) is not None:
             mask["seek_enemy"] = True
@@ -597,9 +604,9 @@ class SkillController:
         for line in features.navigation.get("use_lines", []):
             if int(line.get("special", 0)) not in MANUAL_USE_LINE_SPECIALS:
                 continue
-            if float(line.get("distance", 999999.0)) > 800.0:
+            if float(line.get("distance", 999999.0)) > 1200.0:
                 continue
-            if abs(float(line.get("angle_delta", 999.0))) > 75.0:
+            if abs(float(line.get("angle_delta", 999.0))) > 120.0:
                 continue
             if self.policy._is_line_blocked(features, line):
                 continue
@@ -626,6 +633,14 @@ class SkillController:
             "map": int(features.map),
         }
 
+    def _contact_use_line_followthrough_active(self, features: Any) -> bool:
+        """Continue a contact use-line option long enough to activate it."""
+        if self._previous_action_index != SKILL_ACTIONS.index("open_use_line"):
+            return False
+        if self.policy._shootable_enemy(features) is not None:
+            return False
+        return self._recent_contact_use_line_for(features) is not None
+
     def _remember_visible_contact(self, features: Any) -> None:
         """Remember recent visible-but-not-shootable contact for recovery masks."""
         if not features.visible_enemies:
@@ -639,6 +654,9 @@ class SkillController:
             "episode": int(features.episode),
             "map": int(features.map),
         }
+        line = self._contact_use_line(features)
+        if line is not None:
+            self._remember_contact_use_line(features, line)
 
     def _recent_contact_use_line_for(self, features: Any) -> dict[str, Any] | None:
         recent = self._recent_contact_use_line
@@ -648,7 +666,7 @@ class SkillController:
             return None
         if int(recent.get("map", 0)) != int(features.map):
             return None
-        if int(features.tick) - int(recent.get("tick", 0)) > 120:
+        if int(features.tick) - int(recent.get("tick", 0)) > 420:
             return None
         line_id = int(recent.get("line_id", 0))
         for line in features.navigation.get("use_lines", []):
@@ -656,9 +674,9 @@ class SkillController:
                 continue
             if int(line.get("special", 0)) not in MANUAL_USE_LINE_SPECIALS:
                 return None
-            if float(line.get("distance", 999999.0)) > 1000.0:
+            if float(line.get("distance", 999999.0)) > 1400.0:
                 return None
-            if abs(float(line.get("angle_delta", 999.0))) > 120.0:
+            if abs(float(line.get("angle_delta", 999.0))) > 160.0:
                 return None
             if self.policy._is_line_blocked(features, line):
                 return None

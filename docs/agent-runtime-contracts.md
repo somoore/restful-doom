@@ -127,11 +127,13 @@ The important rule: PPO learns the selector, not the primitive. A future skill
 may become config-backed or internally learned only if the same index/name
 contract remains valid for old checkpoints.
 
-One current mask rule is intentionally controller-heavy: if the protobuf combat
-probe reports a shootable enemy and the controller can fire, the mask follows
-through to `fire` and suppresses normal engage/use/route actions. PPO still has
-to create the combat opportunity; the controller protects the short shot window
-once the opportunity exists.
+Two current mask rules are intentionally controller-heavy. If the protobuf
+combat probe reports a shootable enemy and the controller can fire, the mask
+follows through to `fire` and suppresses normal engage/use/route actions. If
+PPO selects `open_use_line` for a recent visible-contact manual line, the mask
+keeps that option active until the line is no longer valid or a shootable enemy
+appears. PPO still has to create those opportunities; the controller protects
+the short option windows once they exist.
 
 ## 4. Protobuf State To Learning Observation
 

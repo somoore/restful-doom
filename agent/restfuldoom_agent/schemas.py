@@ -994,6 +994,14 @@ ACTION_SCHEMA = {
                     "recovery is still available"
                 ),
             },
+            {
+                "name": "contact_use_line_followthrough",
+                "meaning": (
+                    "after PPO selects open_use_line for a recent visible-contact "
+                    "manual line, the mask keeps that option active until the line "
+                    "is no longer valid or a shootable enemy appears"
+                ),
+            },
         ],
     },
 }

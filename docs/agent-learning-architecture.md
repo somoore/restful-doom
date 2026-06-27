@@ -74,6 +74,9 @@ The bridge is an explicit macro-step handshake:
 1. `DoomAgentEnv.step(action_index)` receives one PPO skill action.
 2. `DoomAgentEnv.action_mask()` derives the feasible option set from the
    current protobuf state, memory, and transient controller state.
+   Some masks intentionally protect short-lived option follow-through, such as
+   firing during a shootable window or continuing a recent contact use-line
+   long enough to activate it.
 3. The PPO actor receives the observation plus mask and returns an action
    index. PPO also stores that same mask in the rollout buffer, then reuses it
    during the update when recomputing logprobs.
@@ -602,6 +605,17 @@ Recent PPO evidence:
   visible-contact starts still produced no shootable target, damage, or kills,
   so contact-to-damage is now proven for one stage but not reliable across the
   contact curriculum.
+- `ppo-contact-line-followthrough-route-probe`: after making recent contact
+  use-line pursuit an option-style follow-through, the previously failing
+  `visible_contact_route` stage reached first-shootable contact and damage in
+  2/3 updates. Best update: `shootable_target_steps=54`, `damage_delta=25`,
+  `max_kills=2`, and zero invalid actions.
+- `ppo-contact-line-followthrough-seek-probe`: resuming the best route-stage
+  checkpoint on the previously failing `visible_contact_seek` stage reached
+  first-shootable contact, `shootable_target_steps=62`, `damage_delta=30`,
+  `max_kills=2`, and zero invalid actions in its best update. The stage still
+  regressed on other updates, so contact-to-combat is improved but not yet
+  repeatable enough for full-level promotion.
 
 ## Next Architecture Work
 
