@@ -1,5 +1,10 @@
 # RESTful-DOOM
 
+This fork adds a protobuf + gRPC Agent Mode and Hellbox capsule surface for
+running DOOM as a headless, structured agent environment inside a cloud
+MicroVM. The original REST API is still available, but the main new path is a
+bidirectional 35 Hz observe-act stream for AI policies.
+
 An HTTP + JSON API hosted inside the 1993 DOOM engine!
 
 ![](http://1amstudios.com/img/restful-doom/header.jpg)
@@ -16,6 +21,16 @@ RESTFul-DOOM is built on top of the awesome [Chocolate Doom](https://github.com/
 
 ### More details in blog post:
 http://1amstudios.com/2017/08/01/restful-doom/
+
+## Fork Delta
+
+This fork keeps the original HTTP + JSON API and adds:
+
+- protobuf schema for agent-focused game state and actions
+- Rust `tonic` gRPC server linked into the Doom binary as a static library
+- C/Rust FFI bridge that publishes state after each `G_Ticker()` and overlays queued actions into `ticcmd`
+- Python async client, deterministic smoke agent, reward scoring, Bedrock policy hook, and JSONL trajectory logging
+- Hellbox-style headless capsule packaging for a MicroVM-ready agent environment
 
 ## API Spec
 
@@ -48,6 +63,18 @@ src/restful-doom -iwad <path/to/doom1.wad> -apiport 6666 ...
 RESTful-DOOM also includes a high-performance protobuf + gRPC bridge for AI agents. The
 bridge runs inside the Doom process, publishes structured state after every simulated tic, and
 accepts player actions over a bidirectional stream.
+
+```mermaid
+flowchart LR
+    Agent["Python Agent"] <-->|"gRPC :50051\nGameState / PlayerAction"| Doom["restful-doom process\nRust gRPC + C FFI"]
+    Doom <--> Sim["DOOM simulation\n35 Hz ticks"]
+    Doom -.-> Trace["JSONL trajectories\nstate / action / reward"]
+    subgraph Box["Hellbox MicroVM"]
+        Doom
+        Sim
+    end
+    Box -.->|"freeze / thaw"| Snapshot["resumable VM state"]
+```
 
 The shared schema lives at:
 
@@ -105,6 +132,14 @@ The Python package includes:
 The `capsule/` directory contains a Hellbox-style headless capsule that builds this repo,
 starts Doom in agent mode, exposes gRPC on `50051`, and uses the MicroVM ready hook on `9000`.
 See `docs/hellbox/agent-capsule.md`.
+
+The strongest demo loop is:
+
+1. Launch the headless RESTful-DOOM agent capsule in a Hellbox MicroVM.
+2. Mint short-lived access for gRPC port `50051`.
+3. Run the Python smoke agent and persist JSONL trajectories.
+4. Freeze the MicroVM mid-rollout.
+5. Thaw it and continue from the same simulation state.
 
 ## Thanks!
 [chocolate-doom](https://github.com/chocolate-doom/chocolate-doom) team  
