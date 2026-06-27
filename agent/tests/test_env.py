@@ -5,7 +5,7 @@ import pytest
 
 from restfuldoom_agent.client import EpisodeReset
 from restfuldoom_agent.client import agent_pb2
-from restfuldoom_agent.brain import AgentMemory
+from restfuldoom_agent.brain import AgentMemory, BT_USE
 from restfuldoom_agent.env import DoomAgentEnv, DoomEnvConfig, SKILL_ACTIONS, SkillController
 from restfuldoom_agent.schemas import OBSERVATION_SCHEMA
 
@@ -292,6 +292,31 @@ def test_skill_controller_contact_use_line_followthrough_masks_to_open_use_line(
     assert not mask["route_progression"]
 
 
+def test_skill_controller_contact_use_line_followthrough_releases_after_streak():
+    controller = SkillController()
+    first = _state(tick=5, enemy=True, combat=False, contact_use=True)
+    second = _state(
+        tick=80,
+        enemy=True,
+        enemy_line_of_sight=False,
+        combat=False,
+        contact_use=True,
+        contact_use_distance_units=640,
+    )
+
+    controller.action_mask(first)
+    for _ in range(16):
+        controller.record_action_history(
+            action_index=SKILL_ACTIONS.index("open_use_line"),
+            had_shootable_target=False,
+        )
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(second)))
+
+    assert mask["open_use_line"]
+    assert mask["engage"]
+    assert mask["seek_enemy"]
+
+
 def test_skill_controller_contact_use_line_allows_doorway_approach_range():
     controller = SkillController()
     state = _state(
@@ -307,10 +332,38 @@ def test_skill_controller_contact_use_line_allows_doorway_approach_range():
     assert mask["open_use_line"]
     assert decision["use_line"]["line_id"] == 151
     assert decision["skill"] in {
+        "contact_approach_use_line",
         "approach_nearby_use_line",
         "turn_to_nearby_use_line",
         "use_nearby_line",
     }
+
+
+def test_skill_controller_contact_use_line_bypasses_blacklisted_line_attempt():
+    controller = SkillController()
+    state = _state(enemy=True, combat=False, contact_use=True)
+    controller.policy._blocked_use_lines["0:0:151"] = state.tick + 1000
+
+    _action, decision = controller.action_for(SKILL_ACTIONS.index("open_use_line"), state)
+
+    assert decision["use_line"]["line_id"] == 151
+    assert decision["skill"] == "contact_approach_use_line"
+
+
+def test_skill_controller_contact_use_line_presses_use_when_close():
+    controller = SkillController()
+    state = _state(
+        enemy=True,
+        combat=False,
+        contact_use=True,
+        contact_use_distance_units=180,
+    )
+
+    action, decision = controller.action_for(SKILL_ACTIONS.index("open_use_line"), state)
+
+    assert decision["skill"] == "contact_use_line"
+    assert action.raw.buttons & BT_USE
+    assert action.raw.forward_move > 0
 
 
 def test_skill_controller_recent_contact_mask_suppresses_generic_route():

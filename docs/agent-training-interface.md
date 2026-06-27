@@ -63,6 +63,13 @@ Every live transition carries `info.decision_cycle`:
 That makes one JSONL row enough to audit which observation, mask, selected
 skill, controller decision, and Doom tick range produced a reward.
 
+Collected PPO rows also carry `info.learning_trace`, schema
+`restfuldoom.learning_trace.v1`. The trace is intentionally compact: it groups
+the important observation features by player/combat/navigation/use-line/route/
+memory/temporal/survival concerns, lists the feasible skills from the mask, and
+records the selected skill, executed controller decision, reward, route/contact
+outcomes, and transition deltas.
+
 ## 2. Memory Layer
 
 `AgentMemory` is an inspectable JSON ledger, not a neural hidden state. The
@@ -172,6 +179,8 @@ The controller owns primitive mechanics:
 - aiming tolerance and firing cadence
 - door/switch use timing
 - short option follow-through for shot windows and recent contact use-lines
+  with a same-skill streak guard unless the remembered line is close enough to
+  activate
 - stuck recovery
 - route/contact fallbacks
 

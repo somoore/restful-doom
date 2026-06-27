@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .env import DoomAgentEnv, EnvStep
+from .learning_trace import LEARNING_TRACE_SCHEMA, build_learning_trace
 from .schemas import ACTION_SCHEMA, DECISION_CYCLE_SCHEMA, MEMORY_CONTRACT, OBSERVATION_SCHEMA
 
 PPO_CHECKPOINT_SCHEMA = "restfuldoom.ppo_checkpoint.v1"
@@ -111,6 +112,7 @@ class RolloutBuffer:
                         "observation_schema": OBSERVATION_SCHEMA,
                         "action_schema": ACTION_SCHEMA,
                         "decision_cycle_schema": DECISION_CYCLE_SCHEMA,
+                        "learning_trace_schema": LEARNING_TRACE_SCHEMA,
                         "memory_contract": MEMORY_CONTRACT,
                     },
                     sort_keys=True,
@@ -263,6 +265,15 @@ class PPOTrainer:
             action_mask = env.action_mask()
             action, logprob, value = self.model.act(obs, action_mask=action_mask)
             transition: EnvStep = await env.step(action)
+            info = dict(transition.info)
+            info["learning_trace"] = build_learning_trace(
+                obs=obs,
+                action_mask=action_mask,
+                action=action,
+                reward=transition.reward,
+                done=transition.done,
+                info=info,
+            )
             buffer.add(
                 obs=obs,
                 action_mask=action_mask,
@@ -271,7 +282,7 @@ class PPOTrainer:
                 done=transition.done,
                 value=value,
                 logprob=logprob,
-                info=transition.info,
+                info=info,
             )
             obs = transition.observation
             if transition.done and len(buffer) < target_steps:
@@ -412,6 +423,7 @@ class PPOTrainer:
                 "observation_schema": OBSERVATION_SCHEMA,
                 "action_schema": ACTION_SCHEMA,
                 "decision_cycle_schema": DECISION_CYCLE_SCHEMA,
+                "learning_trace_schema": LEARNING_TRACE_SCHEMA,
                 "memory_contract": MEMORY_CONTRACT,
                 "reward_config": reward_config or {},
                 "eval_history": list(self.eval_history),

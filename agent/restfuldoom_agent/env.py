@@ -19,6 +19,7 @@ from .brain import (
     MANUAL_USE_LINE_SPECIALS,
     extract_features,
     raw_ticcmd_action,
+    raw_turn_for_delta,
 )
 from .client import DoomAgentClient, agent_pb2, semantic_action, summarize_state
 from .client import EpisodeStart as ClientEpisodeStart
@@ -523,14 +524,19 @@ class SkillController:
                 and bool(features.visible_enemies)
                 and self.policy._shootable_enemy(features) is None
             )
+            contact_line = remember_contact_line
             if line is None:
                 line = self._contact_use_line(features)
                 remember_contact_line = line is not None
+                contact_line = line is not None
             if line is None:
                 line = self._recent_contact_use_line_for(features)
+                contact_line = line is not None
             if line is not None:
-                if remember_contact_line:
+                if remember_contact_line or contact_line:
                     self._remember_contact_use_line(features, line)
+                if contact_line:
+                    return self._use_contact_line(features, line, stuck)
                 return self.policy._use_nearby_line(features, line, stuck)
             ray = self.policy._select_use_ray(features)
             if ray is not None:
@@ -608,8 +614,6 @@ class SkillController:
                 continue
             if abs(float(line.get("angle_delta", 999.0))) > 120.0:
                 continue
-            if self.policy._is_line_blocked(features, line):
-                continue
             candidates.append(line)
         if not candidates:
             return None
@@ -621,6 +625,50 @@ class SkillController:
                 float(line.get("distance", 999999.0)),
             ),
         )
+
+    def _use_contact_line(
+        self,
+        features: Any,
+        line: dict[str, Any],
+        stuck: bool,
+    ) -> tuple[Any, dict[str, Any]]:
+        """Approach or press a manual line selected as part of visible contact."""
+        angle_delta = self.policy._line_control_angle_delta(line)
+        distance = self.policy._line_control_distance(line)
+        line_record = self.policy._line_record(line)
+        if distance <= 220.0 and abs(angle_delta) <= 24.0:
+            self.policy._last_use_tick = features.tick
+            return (
+                raw_ticcmd_action(
+                    buttons=BT_USE,
+                    forward_move=max(6, self.params.move_amount // 2),
+                    angle_turn=raw_turn_for_delta(angle_delta),
+                    duration_tics=3,
+                    tick=features.tick,
+                ),
+                self.policy._decision(
+                    "contact_use_line",
+                    features,
+                    stuck=stuck,
+                    use_line=line_record,
+                ),
+            )
+        if abs(angle_delta) <= 70.0:
+            return (
+                raw_ticcmd_action(
+                    forward_move=self.params.move_amount,
+                    angle_turn=raw_turn_for_delta(angle_delta),
+                    duration_tics=4,
+                    tick=features.tick,
+                ),
+                self.policy._decision(
+                    "contact_approach_use_line",
+                    features,
+                    stuck=stuck,
+                    use_line=line_record,
+                ),
+            )
+        return self.policy._use_nearby_line(features, line, stuck)
 
     def _remember_contact_use_line(self, features: Any, line: dict[str, Any]) -> None:
         line_id = int(line.get("line_id", 0))
@@ -639,7 +687,15 @@ class SkillController:
             return False
         if self.policy._shootable_enemy(features) is not None:
             return False
-        return self._recent_contact_use_line_for(features) is not None
+        line = self._recent_contact_use_line_for(features)
+        if line is None:
+            return False
+        if (
+            self._same_skill_streak >= 16
+            and self.policy._line_control_distance(line) > 220.0
+        ):
+            return False
+        return True
 
     def _remember_visible_contact(self, features: Any) -> None:
         """Remember recent visible-but-not-shootable contact for recovery masks."""
@@ -677,8 +733,6 @@ class SkillController:
             if float(line.get("distance", 999999.0)) > 1400.0:
                 return None
             if abs(float(line.get("angle_delta", 999.0))) > 160.0:
-                return None
-            if self.policy._is_line_blocked(features, line):
                 return None
             return line
         return None

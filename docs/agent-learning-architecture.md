@@ -101,6 +101,13 @@ action schema, memory contract id, input tick, output tick, and macro tic
 count. A single JSONL trajectory row therefore tells us exactly how the
 decision layer, controller, memory, and Doom stream interacted.
 
+For training audits, PPO rollout rows additionally carry
+`info.learning_trace` (`restfuldoom.learning_trace.v1`). It names the relevant
+pre-action observation groups, action-mask availability, selected PPO skill,
+executed controller primitive, and reward/route/contact outcomes. The raw
+vector remains in `rollout_record.obs`; the trace makes failures explainable
+without changing model inputs.
+
 The concrete runtime payload is:
 
 | Step | Producer | Consumer | Payload |
@@ -152,7 +159,9 @@ and memory:
   door/switch target at exactly the contact boundary.
 - When a recent contact corridor or remembered contact use-line is active, the
   mask keeps contact actions available and suppresses generic route progression
-  until that contact context expires.
+  until that contact context expires. Contact use-line follow-through is
+  bounded by same-skill streak when the line is still distant; close remembered
+  lines can still be pressed with a small forward nudge.
 - `route_progression` is not advertised merely because a contact route waypoint
   exists. Live probes showed that made PPO over-sample route movement during
   contact without reaching first-shootable combat. It remains callable for
@@ -616,6 +625,13 @@ Recent PPO evidence:
   `max_kills=2`, and zero invalid actions in its best update. The stage still
   regressed on other updates, so contact-to-combat is improved but not yet
   repeatable enough for full-level promotion.
+- `ppo-contact-line-bypass-seek-probe` / `ppo-contact-line-guarded-seek-probe`:
+  simply bypassing ordinary line blacklisting for contact-selected manual lines
+  caused `open_use_line` overcommit and zero shootable-target steps. The guarded
+  version releases follow-through after a long streak unless the remembered line
+  is close enough to use; it recovered some damage and one kill in the last
+  update, but still over-sampled `open_use_line`. Treat this as partial control
+  hardening, not solved contact generalization.
 
 ## Next Architecture Work
 

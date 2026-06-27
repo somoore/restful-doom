@@ -703,6 +703,7 @@ DECISION_CYCLE_SCHEMA = {
         "rollout_record.action_mask": "feasible-skill mask used for sampling and PPO logprobs",
         "rollout_record.info.decision": "controller decision details and selected primitive",
         "rollout_record.info.decision_cycle": "tick range and schema markers for this macro-step",
+        "rollout_record.info.learning_trace": "compact named observation/mask/action/outcome trace for training audits",
         "rollout_record.info.route_outcome": "route waypoint attempt/reach/fail/progress metadata",
         "rollout_record.info.route_action_reward": "dense reward contribution from route-progress outcomes",
     },
@@ -999,7 +1000,8 @@ ACTION_SCHEMA = {
                 "meaning": (
                     "after PPO selects open_use_line for a recent visible-contact "
                     "manual line, the mask keeps that option active until the line "
-                    "is no longer valid or a shootable enemy appears"
+                    "is no longer valid, a shootable enemy appears, or a bounded "
+                    "same-skill streak expires while the line is still distant"
                 ),
             },
         ],

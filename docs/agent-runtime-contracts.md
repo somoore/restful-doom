@@ -40,6 +40,12 @@ The exported schema for this handshake is
 `info.decision_cycle` payload with input/output ticks and schema ids, so a
 training artifact can be audited without replaying the code.
 
+Rollout rows also include `info.learning_trace` using
+`restfuldoom.learning_trace.v1`. It names the important pre-action observation
+groups, feasible skills, selected skill, controller primitive, and reward
+outcome so contact/route/combat failures can be inspected without manually
+mapping vector indexes back to protobuf-derived features.
+
 ## 2. Memory Layer
 
 `AgentMemory` is not a hidden neural state. It is a JSON world ledger and
@@ -132,8 +138,11 @@ combat probe reports a shootable enemy and the controller can fire, the mask
 follows through to `fire` and suppresses normal engage/use/route actions. If
 PPO selects `open_use_line` for a recent visible-contact manual line, the mask
 keeps that option active until the line is no longer valid or a shootable enemy
-appears. PPO still has to create those opportunities; the controller protects
-the short option windows once they exist.
+appears. That contact-line follow-through is bounded: after a long same-skill
+streak the mask releases back to other contact actions unless the line is close
+enough to press. PPO still has to create those opportunities; the controller
+protects the short option windows once they exist without letting them become
+unbounded loops.
 
 ## 4. Protobuf State To Learning Observation
 

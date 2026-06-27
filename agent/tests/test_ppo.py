@@ -13,6 +13,7 @@ from restfuldoom_agent.ppo_agent import (
     _resolve_resume_checkpoint,
     _summarize_buffer,
 )
+from restfuldoom_agent.learning_trace import LEARNING_TRACE_SCHEMA, build_learning_trace
 from restfuldoom_agent.ppo import (
     PPOConfig,
     PPOTrainer,
@@ -54,10 +55,66 @@ def test_rollout_buffer_saves_jsonl(tmp_path):
     assert rows[0]["schema"] == "restfuldoom.ppo_rollout.v1"
     assert rows[0]["count"] == 1
     assert rows[0]["decision_cycle_schema"]["schema"] == "restfuldoom.decision_cycle.v1"
+    assert rows[0]["learning_trace_schema"] == "restfuldoom.learning_trace.v1"
     assert rows[0]["memory_contract"]["memory_schema"] == "restfuldoom.agent_memory.v1"
     assert rows[1]["action"] == 1
     assert rows[1]["action_mask"] == [False, True]
     assert rows[1]["info"]["skill"] == "fire"
+
+
+def test_learning_trace_names_observation_mask_and_outcome():
+    feature_names = OBSERVATION_SCHEMA["feature_names"]
+    obs = [0.0 for _ in feature_names]
+    obs[feature_names.index("health_norm")] = 0.75
+    obs[feature_names.index("combat_has_target")] = 1.0
+    obs[feature_names.index("route_waypoint_distance_norm")] = 0.25
+    obs[feature_names.index("remembered_enemies_norm")] = 0.5
+    obs[feature_names.index("visible_enemy_seen_recently")] = 1.0
+    action_mask = [False for _ in ACTION_SCHEMA["actions"]]
+    action_mask[1] = True
+    action_mask[3] = True
+
+    trace = build_learning_trace(
+        obs=obs,
+        action_mask=action_mask,
+        action=1,
+        reward=3.25,
+        done=False,
+        info={
+            "skill": "fire",
+            "had_shootable_target": True,
+            "action_reward": 0.5,
+            "decision": {
+                "skill": "ppo_fire",
+                "enemy": {"id": 7, "distance": 128.125, "health": 20},
+            },
+            "transition": {"damage_delta": 10, "enemy_distance_delta": 4.25},
+            "route_outcome": {
+                "attempted": True,
+                "reached": False,
+                "progress_units": 32.0,
+            },
+        },
+    )
+
+    assert trace["schema"] == LEARNING_TRACE_SCHEMA
+    assert trace["selected_action"] == {
+        "index": 1,
+        "skill": "fire",
+        "available": True,
+    }
+    assert trace["available_skills"] == ["fire", "open_use_line"]
+    assert trace["observation"]["groups"]["player"]["health_norm"] == 0.75
+    assert trace["observation"]["groups"]["combat"]["combat_has_target"] == 1.0
+    assert trace["observation"]["groups"]["route"]["route_waypoint_distance_norm"] == 0.25
+    assert trace["observation"]["groups"]["memory"]["remembered_enemies_norm"] == 0.5
+    assert trace["observation"]["groups"]["temporal"]["visible_enemy_seen_recently"] == 1.0
+    assert trace["controller"]["executed_skill"] == "fire"
+    assert trace["controller"]["decision"]["enemy"]["distance"] == 128.125
+    assert trace["outcome"]["reward"] == 3.25
+    assert trace["outcome"]["action_reward"] == 0.5
+    assert trace["outcome"]["transition"]["damage_delta"] == 10
+    assert trace["outcome"]["route_outcome"]["progress_units"] == 32.0
 
 
 def test_promotion_gate_blocks_regressions():
