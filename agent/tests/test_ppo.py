@@ -70,6 +70,8 @@ def test_learning_trace_names_observation_mask_and_outcome():
     obs[feature_names.index("route_waypoint_distance_norm")] = 0.25
     obs[feature_names.index("remembered_enemies_norm")] = 0.5
     obs[feature_names.index("visible_enemy_seen_recently")] = 1.0
+    obs[feature_names.index("contact_use_line_active")] = 1.0
+    obs[feature_names.index("contact_use_line_distance_norm")] = 0.4
     action_mask = [False for _ in ACTION_SCHEMA["actions"]]
     action_mask[1] = True
     action_mask[3] = True
@@ -109,6 +111,8 @@ def test_learning_trace_names_observation_mask_and_outcome():
     assert trace["observation"]["groups"]["route"]["route_waypoint_distance_norm"] == 0.25
     assert trace["observation"]["groups"]["memory"]["remembered_enemies_norm"] == 0.5
     assert trace["observation"]["groups"]["temporal"]["visible_enemy_seen_recently"] == 1.0
+    assert trace["observation"]["groups"]["contact"]["contact_use_line_active"] == 1.0
+    assert trace["observation"]["groups"]["contact"]["contact_use_line_distance_norm"] == 0.4
     assert trace["controller"]["executed_skill"] == "fire"
     assert trace["controller"]["decision"]["enemy"]["distance"] == 128.125
     assert trace["outcome"]["reward"] == 3.25
@@ -281,6 +285,7 @@ def test_training_schemas_describe_features_and_actions():
         "base_vector",
         "macro_history",
         "temporal_context",
+        "contact_context",
     ]
     assert "sector_damaging" in OBSERVATION_SCHEMA["feature_names"]
     assert "route_waypoint_distance_norm" in OBSERVATION_SCHEMA["feature_names"]
@@ -289,7 +294,12 @@ def test_training_schemas_describe_features_and_actions():
     assert "enemy_distance_delta_norm" in OBSERVATION_SCHEMA["feature_names"]
     assert "recent_route_failure_ratio" in OBSERVATION_SCHEMA["feature_names"]
     assert "topology_frontier_count_norm" in OBSERVATION_SCHEMA["feature_names"]
+    assert "contact_use_line_active" in OBSERVATION_SCHEMA["feature_names"]
+    assert "contact_use_line_followthrough_active" in OBSERVATION_SCHEMA["feature_names"]
     assert "temporal_context" in {
+        group["name"] for group in OBSERVATION_SCHEMA["source_groups"]
+    }
+    assert "contact_context" in {
         group["name"] for group in OBSERVATION_SCHEMA["source_groups"]
     }
     assert "no compact topological map graph" in OBSERVATION_SCHEMA["learning_readiness"]["known_gaps"]
@@ -339,13 +349,29 @@ def test_pad_observation_features_adds_neutral_frontier_to_old_ppo_rows():
     frontier_index = OBSERVATION_SCHEMA["feature_names"].index(
         "topology_frontier_count_norm"
     )
+    contact_start = len(OBSERVATION_SCHEMA["feature_names"]) - len(
+        OBSERVATION_SCHEMA["contact_context_feature_names"]
+    )
 
     padded = pad_observation_features(old_row)
 
     assert len(padded) == len(OBSERVATION_SCHEMA["feature_names"])
     assert padded[frontier_index] == 0.0
     assert padded[:frontier_index] == old_row[:frontier_index]
-    assert padded[frontier_index + 1 :] == old_row[frontier_index:]
+    assert padded[frontier_index + 1 : contact_start] == old_row[frontier_index:]
+    assert all(value == 0.0 for value in padded[contact_start:])
+
+
+def test_pad_observation_features_adds_neutral_contact_context_to_legacy_ppo_rows():
+    old_row = [0.25 for _ in OBSERVATION_SCHEMA["base_feature_names"]]
+    old_row.extend([0.5 for _ in OBSERVATION_SCHEMA["action_history_feature_names"]])
+    old_row.extend([0.75 for _ in OBSERVATION_SCHEMA["temporal_context_feature_names"]])
+
+    padded = pad_observation_features(old_row)
+
+    assert len(padded) == len(OBSERVATION_SCHEMA["feature_names"])
+    assert padded[: len(old_row)] == old_row
+    assert all(value == 0.0 for value in padded[len(old_row) :])
 
 
 def test_pad_observation_features_adds_neutral_temporal_context_to_legacy_rows():

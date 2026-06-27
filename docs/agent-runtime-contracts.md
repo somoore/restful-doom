@@ -157,6 +157,9 @@ learning observation. The current observation contract is
 - bounded temporal context: movement delta, enemy-distance trend,
   route-distance trend, cell streak, recent visible/shootable flags, route
   progress/failure
+- contact context: recent visible-contact activity plus current or remembered
+  contact use-line distance, angle, close-use readiness, follow-through state,
+  and age
 
 This is enough for local combat-start PPO: from-scratch masked PPO learned to
 kill from a validated combat reset. It is not enough yet for full spawn-to-exit
@@ -168,7 +171,7 @@ Observation gap register:
 | Gap | Current Signal | Missing Signal | Next Implementation |
 | --- | --- | --- | --- |
 | Spawn to first combat | route waypoint, temporal route progress, remembered enemies | compact route/topology state or progressed-map snapshot | add topology graph features or Hellbox/Shrink snapshot curriculum |
-| Contact to shootable | visible enemy distance, contact use-line memory, first-shootable reward | doorway/contact local geometry over time | validate shootable reset stage or add contact-ray/topology features |
+| Contact to shootable | visible enemy distance, contact use-line memory, first-shootable reward, explicit contact-line observation | doorway/contact local geometry over time | validate shootable reset stage or add contact-ray/topology features |
 | Combat target quality | shootable yes/no, target distance, enemy health | aim error, weapon range quality, cooldown window | extend protobuf combat probe |
 | Survival threat | sector hazard, health deltas | projectile and incoming-damage prediction | add projectile/threat affordances |
 | Replayability | reset label and fresh starts | deterministic RNG and progressed map state | wire `seed_applied=true` and snapshot restore |

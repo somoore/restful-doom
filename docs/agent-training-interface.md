@@ -200,7 +200,8 @@ learning observation. The current pipeline is:
    features.
 4. `SkillController` appends macro-action history.
 5. `SkillController` appends bounded temporal context.
-6. PPO consumes the final 81-feature `restfuldoom.observation.v1` vector.
+6. `SkillController` appends explicit recent-contact/use-line context.
+7. PPO consumes the final 89-feature `restfuldoom.observation.v1` vector.
 
 The current observation covers:
 
@@ -216,6 +217,8 @@ The current observation covers:
 - previous skill, shootable opportunity, and route outcome history
 - short temporal deltas for movement, enemy distance, route distance, contact,
   and route failure ratio
+- current or remembered contact use-line state: active flag, distance, angle,
+  close-use readiness, bounded follow-through flag, and age
 
 The remaining learning gap is real. Known missing pieces:
 

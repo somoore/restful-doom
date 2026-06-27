@@ -305,8 +305,8 @@ The memory lifecycle is:
 PPO receives the feature vector declared in
 `restfuldoom_agent.schemas.OBSERVATION_SCHEMA`. It is derived from protobuf
 state, memory, and macro-action history, not screenshots. The current schema has
-81 features: 55 base tactical features, 15 action-history features, and
-11 bounded temporal-context features.
+89 features: 55 base tactical features, 15 action-history features,
+11 bounded temporal-context features, and 8 contact-context features.
 
 The base feature groups are:
 
@@ -341,6 +341,14 @@ The temporal-context group is:
 - recent visible-enemy and shootable-target contact flags
 - rolling route-progress and route-failure ratio over recent macro-steps
 
+The contact-context group is:
+
+- whether recent visible-contact/corridor context is active
+- whether a current or remembered contact use-line is available
+- contact use-line distance, angle, and close-use readiness
+- whether bounded `open_use_line` follow-through is currently active
+- age of the remembered contact use-line within its expiry window
+
 The schema now also declares source groups:
 
 - `protobuf_state`: live player, enemy, combat, navigation, use-line, and level
@@ -350,6 +358,8 @@ The schema now also declares source groups:
 - `controller_state`: stuck detection and macro-action history.
 - `temporal_context`: bounded observation and route-outcome history maintained
   by `SkillController`.
+- `contact_context`: recent visible-contact and contact use-line state
+  maintained by `SkillController`.
 
 This is good enough for early skill learning, but it is not yet a complete
 learning observation. Known gaps:
@@ -632,6 +642,11 @@ Recent PPO evidence:
   is close enough to use; it recovered some damage and one kill in the last
   update, but still over-sampled `open_use_line`. Treat this as partial control
   hardening, not solved contact generalization.
+- Follow-up observation work appended 8 contact-context features so PPO can see
+  whether a contact use-line is active, close, angled, in bounded
+  follow-through, or aging out. This is observation-surface progress, not new
+  learning evidence until a live contact curriculum run shows better
+  repeatability.
 
 ## Next Architecture Work
 

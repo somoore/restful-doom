@@ -31,6 +31,7 @@ from .schemas import (
     OBSERVATION_SCHEMA,
     PPO_SKILL_ACTIONS,
     encode_action_history_features,
+    encode_contact_context_features,
     encode_temporal_context_features,
 )
 from .skill_policy import features_from_tactical
@@ -158,6 +159,7 @@ class SkillController:
                 failed_route_attempt_count=self._failed_route_attempt_count,
             ),
             *self._temporal_context_features(features),
+            *self._contact_context_features(features),
         ]
 
     def reset_episode_context(self) -> None:
@@ -318,6 +320,29 @@ class SkillController:
         values.append(value)
         if len(values) > max_length:
             del values[: len(values) - max_length]
+
+    def _contact_context_features(self, features: Any) -> list[float]:
+        """Returns explicit contact/use-line state for PPO observations."""
+        shootable = self.policy._shootable_enemy(features) is not None
+        current_visible_contact = bool(features.visible_enemies) and not shootable
+        line = self._recent_contact_use_line_for(features)
+        age_tics = 0
+        if line is not None:
+            recent = self._recent_contact_use_line or {}
+            age_tics = max(0, int(features.tick) - int(recent.get("tick", features.tick)))
+        elif current_visible_contact:
+            line = self._contact_use_line(features)
+        distance = self.policy._line_control_distance(line) if line is not None else 0.0
+        angle_delta = self.policy._line_control_angle_delta(line) if line is not None else 0.0
+        return encode_contact_context_features(
+            recent_contact_active=current_visible_contact or self._recent_contact_active(features),
+            contact_use_line_active=line is not None,
+            contact_use_line_distance_units=distance,
+            contact_use_line_angle_degrees=angle_delta,
+            contact_use_line_close=line is not None and distance <= 220.0 and abs(angle_delta) <= 24.0,
+            contact_use_line_followthrough_active=self._contact_use_line_followthrough_active(features),
+            contact_use_line_age_tics=age_tics,
+        )
 
     def action_for(self, action_index: int, state: Any) -> tuple[Any, dict[str, Any]]:
         """Returns the PlayerAction for a PPO skill index."""

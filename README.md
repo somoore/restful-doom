@@ -299,6 +299,9 @@ The training API is:
 - PPO observations also include bounded temporal context: recent movement
   delta, enemy-distance trend, route-distance trend, same-cell streak, recent
   visible/shootable contact, and rolling route failure/progress signals.
+- PPO observations append explicit contact-context fields for the current or
+  remembered visible-contact use line: active flag, distance, angle, close-use
+  readiness, bounded follow-through state, and age.
 - `--first-visible-bonus`, `--first-shootable-bonus`,
   `--visible-contact-progress-reward`, `--terminate-on-first-visible`, and
   `--terminate-on-first-shootable` enable first-contact and
@@ -397,8 +400,11 @@ closing distance to a visible but not yet shootable enemy. The visible-contact
 controller uses short graded movement rays, remembered contact corridors, and
 short-lived contact use-line memory; the PPO mask keeps this boundary focused
 on `engage`, `seek_enemy`, and usable line affordances instead of generic route
-progression. Use `--curriculum-mode fixed --curriculum-start-index <n>` when a
-single stage needs repeated training before mixing it back into the schedule.
+progression. The observation vector now exposes that contact use-line state
+directly, so PPO can distinguish a fresh contact candidate from a stale or
+over-forced line. Use `--curriculum-mode fixed --curriculum-start-index <n>`
+when a single stage needs repeated training before mixing it back into the
+schedule.
 
 ```
 PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \

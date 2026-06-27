@@ -140,6 +140,53 @@ def test_skill_controller_observation_tracks_recent_route_failures():
     assert features["recent_route_failure_ratio"] == 1.0
 
 
+def test_skill_controller_observation_includes_current_contact_use_line_context():
+    controller = SkillController()
+    state = _state(
+        enemy=True,
+        combat=False,
+        contact_use=True,
+        contact_use_distance_units=180,
+    )
+
+    features = dict(zip(OBSERVATION_SCHEMA["feature_names"], controller.observation(state)))
+
+    assert features["recent_contact_active"] == 1.0
+    assert features["contact_use_line_active"] == 1.0
+    assert features["contact_use_line_distance_norm"] == pytest.approx(180.0 / 1400.0)
+    assert features["contact_use_line_angle_cos"] == pytest.approx(1.0)
+    assert features["contact_use_line_close"] == 1.0
+    assert features["contact_use_line_followthrough_active"] == 0.0
+    assert features["contact_use_line_age_norm"] == 0.0
+
+
+def test_skill_controller_observation_includes_remembered_contact_use_line_context():
+    controller = SkillController()
+    first = _state(tick=5, enemy=True, combat=False, contact_use=True)
+    second = _state(
+        tick=80,
+        enemy=True,
+        enemy_line_of_sight=False,
+        combat=False,
+        contact_use=True,
+        contact_use_distance_units=640,
+    )
+
+    controller.action_mask(first)
+    controller.record_action_history(
+        action_index=SKILL_ACTIONS.index("open_use_line"),
+        had_shootable_target=False,
+    )
+    features = dict(zip(OBSERVATION_SCHEMA["feature_names"], controller.observation(second)))
+
+    assert features["recent_contact_active"] == 1.0
+    assert features["contact_use_line_active"] == 1.0
+    assert features["contact_use_line_distance_norm"] == pytest.approx(640.0 / 1400.0)
+    assert features["contact_use_line_close"] == 0.0
+    assert features["contact_use_line_followthrough_active"] == 1.0
+    assert features["contact_use_line_age_norm"] == pytest.approx(75.0 / 420.0)
+
+
 def test_skill_controller_action_mask_uses_affordances():
     controller = SkillController()
     combat_state = _state(enemy=True, combat=True)

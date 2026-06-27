@@ -98,6 +98,16 @@ _FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
         "visible_enemy_seen_recently",
         "shootable_target_seen_recently",
     ),
+    "contact": (
+        "recent_contact_active",
+        "contact_use_line_active",
+        "contact_use_line_distance_norm",
+        "contact_use_line_angle_sin",
+        "contact_use_line_angle_cos",
+        "contact_use_line_close",
+        "contact_use_line_followthrough_active",
+        "contact_use_line_age_norm",
+    ),
     "survival": (
         "stuck",
         "sector_damaging",

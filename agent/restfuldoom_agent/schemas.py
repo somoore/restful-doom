@@ -7,6 +7,7 @@ the observation/action contract without importing the controller code.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from .skill_policy import FEATURE_NAMES as TACTICAL_FEATURE_NAMES
@@ -51,10 +52,22 @@ TEMPORAL_CONTEXT_FEATURE_NAMES = [
     "recent_route_failure_ratio",
 ]
 
+CONTACT_CONTEXT_FEATURE_NAMES = [
+    "recent_contact_active",
+    "contact_use_line_active",
+    "contact_use_line_distance_norm",
+    "contact_use_line_angle_sin",
+    "contact_use_line_angle_cos",
+    "contact_use_line_close",
+    "contact_use_line_followthrough_active",
+    "contact_use_line_age_norm",
+]
+
 PPO_FEATURE_NAMES = [
     *TACTICAL_FEATURE_NAMES,
     *ACTION_HISTORY_FEATURE_NAMES,
     *TEMPORAL_CONTEXT_FEATURE_NAMES,
+    *CONTACT_CONTEXT_FEATURE_NAMES,
 ]
 
 EXPERT_TO_PPO_SKILL_ACTION = {
@@ -255,6 +268,30 @@ def encode_temporal_context_features(
     ]
 
 
+def encode_contact_context_features(
+    *,
+    recent_contact_active: bool = False,
+    contact_use_line_active: bool = False,
+    contact_use_line_distance_units: float = 0.0,
+    contact_use_line_angle_degrees: float = 0.0,
+    contact_use_line_close: bool = False,
+    contact_use_line_followthrough_active: bool = False,
+    contact_use_line_age_tics: int = 0,
+) -> list[float]:
+    """Encode recent visible-contact and contact use-line state."""
+    angle_radians = math.radians(float(contact_use_line_angle_degrees))
+    return [
+        1.0 if recent_contact_active else 0.0,
+        1.0 if contact_use_line_active else 0.0,
+        _clip(float(contact_use_line_distance_units) / 1400.0, minimum=0.0),
+        math.sin(angle_radians) if contact_use_line_active else 0.0,
+        math.cos(angle_radians) if contact_use_line_active else 0.0,
+        1.0 if contact_use_line_close else 0.0,
+        1.0 if contact_use_line_followthrough_active else 0.0,
+        _clip(float(contact_use_line_age_tics) / 420.0, minimum=0.0),
+    ]
+
+
 def _clip(value: float, *, minimum: float = -1.0, maximum: float = 1.0) -> float:
     return max(minimum, min(maximum, value))
 
@@ -277,6 +314,7 @@ def pad_observation_features(features: list[float]) -> list[float]:
                 failed_route_attempt_count=0,
             ),
             *encode_temporal_context_features(),
+            *encode_contact_context_features(),
         ]
     if len(features) == len(TACTICAL_FEATURE_NAMES):
         return [
@@ -292,6 +330,7 @@ def pad_observation_features(features: list[float]) -> list[float]:
                 failed_route_attempt_count=0,
             ),
             *encode_temporal_context_features(),
+            *encode_contact_context_features(),
         ]
     legacy_action_history_len = len(TACTICAL_FEATURE_NAMES) + len(ACTION_HISTORY_FEATURE_NAMES)
     pre_frontier_action_history_len = (
@@ -302,11 +341,23 @@ def pad_observation_features(features: list[float]) -> list[float]:
             *_insert_neutral_tactical_features(features[: len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)]),
             *features[len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES) :],
             *encode_temporal_context_features(),
+            *encode_contact_context_features(),
         ]
     if len(features) == legacy_action_history_len:
         return [
             *features,
             *encode_temporal_context_features(),
+            *encode_contact_context_features(),
+        ]
+    legacy_ppo_len = (
+        len(TACTICAL_FEATURE_NAMES)
+        + len(ACTION_HISTORY_FEATURE_NAMES)
+        + len(TEMPORAL_CONTEXT_FEATURE_NAMES)
+    )
+    if len(features) == legacy_ppo_len:
+        return [
+            *features,
+            *encode_contact_context_features(),
         ]
     pre_frontier_ppo_len = (
         len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)
@@ -317,13 +368,14 @@ def pad_observation_features(features: list[float]) -> list[float]:
         return [
             *_insert_neutral_tactical_features(features[: len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)]),
             *features[len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES) :],
+            *encode_contact_context_features(),
         ]
     raise ValueError(
         "feature vector length does not match tactical or PPO observation schema: "
         f"got {len(features)}, expected {len(TACTICAL_FEATURE_NAMES)}, "
         f"{len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)}, "
         f"{legacy_action_history_len}, {pre_frontier_action_history_len}, "
-        f"{pre_frontier_ppo_len}, or "
+        f"{legacy_ppo_len}, {pre_frontier_ppo_len}, or "
         f"{len(PPO_FEATURE_NAMES)}"
     )
 
@@ -425,6 +477,14 @@ def _feature_meaning(name: str) -> str:
         "shootable_target_seen_recently": "Flag that any recent encoded observation or macro-step had a shootable enemy target.",
         "recent_route_progress_norm": "Rolling route-progression gain over recent macro-steps normalized by 512 Doom units.",
         "recent_route_failure_ratio": "Fraction of recent route-progression attempts that failed.",
+        "recent_contact_active": "Recent visible-contact or contact-corridor state is still active.",
+        "contact_use_line_active": "A current or remembered visible-contact manual line is available.",
+        "contact_use_line_distance_norm": "Contact use-line control distance normalized by 1400 Doom units.",
+        "contact_use_line_angle_sin": "Sine of signed control angle to the contact use-line.",
+        "contact_use_line_angle_cos": "Cosine of signed control angle to the contact use-line.",
+        "contact_use_line_close": "Contact use-line is close and aligned enough for a use press.",
+        "contact_use_line_followthrough_active": "Controller is currently forcing bounded open_use_line follow-through.",
+        "contact_use_line_age_norm": "Age of the remembered contact use-line normalized by its 420-tic expiry window.",
     }
     return meanings.get(name, "PPO observation feature.")
 
@@ -436,6 +496,7 @@ OBSERVATION_SCHEMA = {
     "base_feature_names": TACTICAL_FEATURE_NAMES,
     "action_history_feature_names": ACTION_HISTORY_FEATURE_NAMES,
     "temporal_context_feature_names": TEMPORAL_CONTEXT_FEATURE_NAMES,
+    "contact_context_feature_names": CONTACT_CONTEXT_FEATURE_NAMES,
     "source_groups": [
         {
             "name": "protobuf_state",
@@ -496,6 +557,11 @@ OBSERVATION_SCHEMA = {
             "producer": "SkillController bounded observation and route-outcome history",
             "features": TEMPORAL_CONTEXT_FEATURE_NAMES,
         },
+        {
+            "name": "contact_context",
+            "producer": "SkillController recent visible-contact and contact use-line state",
+            "features": CONTACT_CONTEXT_FEATURE_NAMES,
+        },
     ],
     "protobuf_to_observation_pipeline": [
         {
@@ -529,6 +595,11 @@ OBSERVATION_SCHEMA = {
             "code": "encode_temporal_context_features(...)",
             "payload": "bounded movement, enemy-distance, route-distance, and contact trends",
         },
+        {
+            "phase": "contact_context",
+            "code": "encode_contact_context_features(...)",
+            "payload": "recent contact and contact use-line follow-through state",
+        },
     ],
     "learning_readiness": {
         "rich_observation_definition": [
@@ -548,6 +619,7 @@ OBSERVATION_SCHEMA = {
             "route-waypoint fields give spawn-to-contact training an explicit progression target",
             "route-outcome history tells PPO whether the last progression decision reached, stalled, or moved toward its waypoint",
             "bounded temporal features expose recent movement, enemy-distance, route-distance, and shootable-contact trends",
+            "contact-context features expose whether PPO is acting on a remembered visible-contact use line",
         ],
         "known_gaps": [
             "no compact topological map graph",
@@ -606,6 +678,7 @@ OBSERVATION_SCHEMA = {
         *_feature_descriptors(TACTICAL_FEATURE_NAMES, source="protobuf_or_memory"),
         *_feature_descriptors(ACTION_HISTORY_FEATURE_NAMES, source="macro_step_history"),
         *_feature_descriptors(TEMPORAL_CONTEXT_FEATURE_NAMES, source="temporal_context"),
+        *_feature_descriptors(CONTACT_CONTEXT_FEATURE_NAMES, source="contact_context"),
     ],
 }
 
