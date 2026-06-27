@@ -49,6 +49,14 @@ class DoomEnvConfig:
     required_kills: int = 1
     memory_path: Path | None = None
     reset_timeout_seconds: float = 5.0
+    max_action_tics: int = 8
+    reset_warmup_steps: int = 0
+    reset_warmup_max_tics: int = 0
+    reset_warmup_until_visible: bool = False
+    reset_warmup_until_shootable: bool = False
+    shootable_fire_reward: float = 0.5
+    missed_fire_penalty: float = 0.05
+    blind_fire_penalty: float = 0.02
 
     def reward_goal(self) -> Goal:
         """Returns the reward goal for the configured preset."""
@@ -116,6 +124,32 @@ class SkillController:
         self.policy.last_decision = decision
         self.last_decision = decision
         return action, decision
+
+    def heuristic_action_index(self, state: Any) -> int:
+        """Returns a deterministic skill baseline action index for a state."""
+        features = extract_features(state, self.memory, self.params)
+        stuck = self.policy._is_stuck(features)
+        if stuck:
+            return SKILL_ACTIONS.index("recover_stuck")
+        if self.policy._shootable_enemy(features) is not None:
+            return SKILL_ACTIONS.index("fire")
+        if features.visible_enemies:
+            if features.health <= self.params.retreat_health:
+                return SKILL_ACTIONS.index("retreat")
+            return SKILL_ACTIONS.index("engage")
+        if self.policy._select_local_exit_line(features) is not None:
+            return SKILL_ACTIONS.index("press_exit")
+        if (
+            self.policy._select_nearby_use_line(features) is not None
+            or self.policy._select_use_ray(features) is not None
+            or self.policy._should_use_ahead(features)
+        ):
+            return SKILL_ACTIONS.index("open_use_line")
+        if self.policy._select_progression_line(features) is not None:
+            return SKILL_ACTIONS.index("route_progression")
+        if self.policy._select_known_enemy(features) is not None:
+            return SKILL_ACTIONS.index("seek_enemy")
+        return SKILL_ACTIONS.index("route_progression")
 
     def _execute_skill(self, skill: str, features: Any, stuck: bool) -> tuple[Any, dict[str, Any]]:
         if features.visible_enemies:
@@ -243,6 +277,7 @@ class DoomAgentEnv:
         self._start_kills = 0
         self._steps = 0
         self._episode_index = 0
+        self._last_reset_warmup: dict[str, Any] = {}
 
     async def close(self) -> None:
         """Closes stream and channel resources."""
@@ -271,6 +306,14 @@ class DoomAgentEnv:
             run_id=f"{self.config.run_id}-{self._episode_index}",
         )
         state = await self._next_reset_state(reset.episode, reset.map)
+        self._last_reset_warmup = {
+            "enabled": False,
+            "steps": 0,
+            "tics": 0,
+            "episode_index": self._episode_index,
+        }
+        if self.config.reset_warmup_steps > 0:
+            state = await self._run_reset_warmup(state)
         self._reward_engine = RewardEngine(self.config.reward_goal())
         self._current_state = state
         self._start_level = (state.level.episode, state.level.map)
@@ -287,24 +330,61 @@ class DoomAgentEnv:
         previous = self._current_state
         action, decision = self.controller.action_for(action_index, previous)
         await self._action_queue.put(action)
-        current = await self._state_stream.__anext__()
-        self._steps += 1
-        transition = self._reward_engine.score(previous, current)
-        done, reason, reward = self._terminal_reward(previous, current, transition)
+        action_tics = max(
+            1,
+            min(
+                self.config.max_action_tics,
+                int(getattr(action, "duration_tics", 0) or 1),
+            ),
+        )
+        current = previous
+        total_reward = 0.0
+        action_reward = 0.0
+        done = False
+        reason = None
+        had_shootable_target = _has_shootable_enemy(previous)
+        transition_summaries: list[dict[str, Any]] = []
+        for _ in range(action_tics):
+            tick_previous = current
+            current = await self._state_stream.__anext__()
+            had_shootable_target = had_shootable_target or _has_shootable_enemy(current)
+            self._steps += 1
+            transition = self._reward_engine.score(tick_previous, current)
+            done, reason, reward = self._terminal_reward(tick_previous, current, transition)
+            total_reward += reward
+            transition_summaries.append(_transition_summary(transition))
+            if done:
+                break
+        skill = SKILL_ACTIONS[action_index]
+        action_reward = self._combat_action_reward(skill, had_shootable_target)
+        total_reward += action_reward
         self._current_state = current
         return EnvStep(
             observation=self.controller.observation(current),
-            reward=reward,
+            reward=total_reward,
             done=done,
             info={
-                "skill": SKILL_ACTIONS[action_index],
+                "skill": skill,
                 "action_index": action_index,
                 "decision": decision,
-                "transition": _transition_summary(transition),
+                "transition": _combine_transition_summaries(transition_summaries),
+                "macro_tics": len(transition_summaries),
+                "action_reward": action_reward,
+                "had_shootable_target": had_shootable_target,
+                "reset_warmup": dict(self._last_reset_warmup),
                 "state": summarize_state(current),
                 "done_reason": reason,
             },
         )
+
+    def _combat_action_reward(self, skill: str, had_shootable_target: bool) -> float:
+        if had_shootable_target and skill == "fire":
+            return self.config.shootable_fire_reward
+        if had_shootable_target and skill != "fire":
+            return -self.config.missed_fire_penalty
+        if skill == "fire":
+            return -self.config.blind_fire_penalty
+        return 0.0
 
     async def _ensure_stream(self) -> None:
         if self.client is None:
@@ -350,6 +430,68 @@ class DoomAgentEnv:
             + (f"; last_state={summarize_state(last_state)}" if last_state else "")
         )
 
+    async def _run_reset_warmup(self, state: Any) -> Any:
+        """Runs heuristic-only curriculum steps before PPO starts collecting."""
+        if self._action_queue is None or self._state_stream is None:
+            return state
+        current = state
+        warmup_info: dict[str, Any] = {
+            "enabled": True,
+            "steps": 0,
+            "tics": 0,
+            "stop_reason": "limit",
+            "episode_index": self._episode_index,
+        }
+        start_level = (state.level.episode, state.level.map)
+        for _ in range(self.config.reset_warmup_steps):
+            if self.config.reset_warmup_until_shootable and _has_shootable_enemy(current):
+                warmup_info["stop_reason"] = "shootable"
+                self._last_reset_warmup = warmup_info
+                return current
+            if self.config.reset_warmup_until_visible and _has_visible_enemy(current):
+                warmup_info["stop_reason"] = "visible"
+                self._last_reset_warmup = warmup_info
+                break
+            action_index = self.controller.heuristic_action_index(current)
+            action, _decision = self.controller.action_for(action_index, current)
+            await self._action_queue.put(action)
+            warmup_info["steps"] = int(warmup_info["steps"]) + 1
+            action_tics = max(
+                1,
+                min(
+                    self.config.max_action_tics,
+                    int(getattr(action, "duration_tics", 0) or 1),
+                ),
+            )
+            for _tick in range(action_tics):
+                current = await self._state_stream.__anext__()
+                warmup_info["tics"] = int(warmup_info["tics"]) + 1
+                if (
+                    self.config.reset_warmup_max_tics > 0
+                    and int(warmup_info["tics"]) >= self.config.reset_warmup_max_tics
+                ):
+                    warmup_info["stop_reason"] = "tic_limit"
+                    self._last_reset_warmup = warmup_info
+                    return current
+                if current.player.health <= 0:
+                    warmup_info["stop_reason"] = "death"
+                    self._last_reset_warmup = warmup_info
+                    return current
+                if (current.level.episode, current.level.map) != start_level:
+                    warmup_info["stop_reason"] = "level_changed"
+                    self._last_reset_warmup = warmup_info
+                    return current
+                if self.config.reset_warmup_until_shootable and _has_shootable_enemy(current):
+                    warmup_info["stop_reason"] = "shootable"
+                    self._last_reset_warmup = warmup_info
+                    return current
+                if self.config.reset_warmup_until_visible and _has_visible_enemy(current):
+                    warmup_info["stop_reason"] = "visible"
+                    self._last_reset_warmup = warmup_info
+                    return current
+        self._last_reset_warmup = warmup_info
+        return current
+
     def _terminal_reward(
         self,
         previous: Any,
@@ -383,3 +525,48 @@ def _transition_summary(transition: TransitionReward) -> dict[str, Any]:
         "progress_delta": transition.progress_delta,
         "done": transition.done,
     }
+
+
+def _combine_transition_summaries(transitions: list[dict[str, Any]]) -> dict[str, Any]:
+    if not transitions:
+        return {
+            "reward": 0.0,
+            "kill_delta": 0,
+            "damage_delta": 0,
+            "enemy_distance_delta": 0.0,
+            "item_delta": 0,
+            "secret_delta": 0,
+            "health_delta": 0,
+            "progress_delta": 0.0,
+            "done": False,
+        }
+    return {
+        "reward": sum(float(transition["reward"]) for transition in transitions),
+        "kill_delta": sum(int(transition["kill_delta"]) for transition in transitions),
+        "damage_delta": sum(int(transition["damage_delta"]) for transition in transitions),
+        "enemy_distance_delta": sum(
+            float(transition["enemy_distance_delta"]) for transition in transitions
+        ),
+        "item_delta": sum(int(transition["item_delta"]) for transition in transitions),
+        "secret_delta": sum(int(transition["secret_delta"]) for transition in transitions),
+        "health_delta": sum(int(transition["health_delta"]) for transition in transitions),
+        "progress_delta": sum(float(transition["progress_delta"]) for transition in transitions),
+        "done": any(bool(transition["done"]) for transition in transitions),
+    }
+
+
+def _has_shootable_enemy(state: Any) -> bool:
+    combat = getattr(state, "combat", None)
+    if combat is None:
+        return False
+    return bool(
+        getattr(combat, "has_shootable_target", False)
+        and getattr(combat, "target_is_enemy", False)
+    )
+
+
+def _has_visible_enemy(state: Any) -> bool:
+    for enemy in getattr(state, "enemies", []) or []:
+        if bool(getattr(enemy, "line_of_sight", False)):
+            return True
+    return False

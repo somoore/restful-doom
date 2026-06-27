@@ -25,6 +25,10 @@ FEATURE_NAMES = [
     "ammo_norm",
     "kills_norm",
     "items_norm",
+    "x_units_norm",
+    "y_units_norm",
+    "angle_sin",
+    "angle_cos",
     "visible_enemies_norm",
     "known_enemies_norm",
     "remembered_enemies_norm",
@@ -320,11 +324,17 @@ def features_from_decision(
     front_special = int(_to_float(navigation.get("front_blocking_line_special")))
     angle = _to_float(use_line.get("angle_delta"))
     enemy_angle = _to_float(enemy.get("angle_delta"))
+    x_units, y_units = _position_units(decision, state)
+    player_angle = _player_angle(decision, state)
     return [
         _norm(_first_number(decision, state, "health"), 100.0),
         _norm(_first_number(decision, state, "ammo_bullets"), 80.0),
         _norm(_first_number(decision, state, "kills"), 10.0),
         _norm(_first_number(decision, state, "items"), 20.0),
+        _norm(x_units, 4096.0),
+        _norm(y_units, 4096.0),
+        math.sin(math.radians(player_angle)),
+        math.cos(math.radians(player_angle)),
         _norm(_first_number(decision, state, "visible_enemies"), 8.0),
         _norm(_first_number(decision, state, "known_enemies"), 16.0),
         _norm(_first_number(decision, state, "remembered_enemies"), 16.0),
@@ -376,6 +386,9 @@ def features_from_tactical(features: Any) -> list[float]:
         "ammo_bullets": getattr(features, "ammo_bullets", 0),
         "kills": getattr(features, "kills", 0),
         "items": getattr(features, "items", 0),
+        "x_units": getattr(features, "x_units", 0.0),
+        "y_units": getattr(features, "y_units", 0.0),
+        "angle": getattr(features, "angle", 0.0),
         "visible_enemies": len(getattr(features, "visible_enemies", [])),
         "known_enemies": len(getattr(features, "known_enemies", [])),
         "remembered_enemies": len(getattr(features, "remembered_enemies", [])),
@@ -386,6 +399,33 @@ def features_from_tactical(features: Any) -> list[float]:
         "use_line": use_line,
     }
     return features_from_decision(decision)
+
+
+def _position_units(primary: dict[str, Any], fallback: dict[str, Any]) -> tuple[float, float]:
+    x = _first_number(primary, fallback, "x_units")
+    y = _first_number(primary, fallback, "y_units")
+    if x or y:
+        return x, y
+
+    position_fp = fallback.get("position_fp")
+    if isinstance(position_fp, list) and len(position_fp) >= 2:
+        return _to_float(position_fp[0]) / 65536.0, _to_float(position_fp[1]) / 65536.0
+
+    cell = primary.get("cell") or fallback.get("cell")
+    if isinstance(cell, str):
+        parts = cell.split(":", 1)
+        if len(parts) == 2:
+            return _to_float(parts[0]) * 128.0, _to_float(parts[1]) * 128.0
+    return 0.0, 0.0
+
+
+def _player_angle(primary: dict[str, Any], fallback: dict[str, Any]) -> float:
+    for key in ("angle", "angle_degrees", "player_angle"):
+        if key in primary:
+            return _to_float(primary.get(key)) % 360.0
+        if key in fallback:
+            return _to_float(fallback.get(key)) % 360.0
+    return 0.0
 
 
 def _load_samples(

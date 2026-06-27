@@ -12,6 +12,14 @@ from pathlib import Path
 from .brain import AgentMemory
 from .env import ACTION_SCHEMA, OBSERVATION_SCHEMA, DoomAgentEnv, DoomEnvConfig
 from .ppo import PPOConfig, PPOTrainer, require_torch
+from .ppo_eval import (
+    decide_promotion,
+    evaluate_checkpoint,
+    evaluate_heuristic_policy,
+    evaluate_random_policy,
+)
+from .schemas import map_expert_skill_to_ppo_action
+from .skill_policy import features_from_record
 
 
 async def train(args: argparse.Namespace) -> dict[str, object]:
@@ -36,6 +44,10 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
         kill_goal_bonus=args.kill_goal_bonus,
         required_kills=args.required_kills,
         memory_path=args.memory_path,
+        reset_warmup_steps=args.reset_warmup_steps,
+        reset_warmup_max_tics=args.reset_warmup_max_tics,
+        reset_warmup_until_visible=args.reset_warmup_until_visible,
+        reset_warmup_until_shootable=args.reset_warmup_until_shootable,
     )
     ppo_config = PPOConfig(
         learning_rate=args.learning_rate,
@@ -58,6 +70,17 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
         config=ppo_config,
         device=args.device,
     )
+    behavior_clone_summary = None
+    if args.bc_trajectory:
+        samples, behavior_clone_summary = _load_behavior_clone_samples(args)
+        behavior_clone_summary.update(
+            trainer.pretrain_actor(
+                samples,
+                epochs=args.bc_epochs,
+                minibatch_size=args.bc_batch_size,
+                learning_rate=args.bc_learning_rate,
+            )
+        )
     summaries = []
     try:
         for update_index in range(args.updates):
@@ -88,6 +111,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     "map": args.map,
                     "skill": args.skill,
                     "rollout_summary": rollout_summary,
+                    "behavior_clone": behavior_clone_summary or {},
                 },
             )
             if memory is not None:
@@ -124,8 +148,80 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
         "schema": "restfuldoom.ppo_training_run.v1",
         "run_id": args.run_id,
         "updates": summaries,
+        "behavior_clone": behavior_clone_summary or {},
         "observation_schema": OBSERVATION_SCHEMA,
         "action_schema": ACTION_SCHEMA,
+    }
+
+
+async def evaluate(args: argparse.Namespace) -> dict[str, object]:
+    """Evaluates a PPO checkpoint against a baseline."""
+    env_config = DoomEnvConfig(
+        endpoint=args.endpoint,
+        token=args.token,
+        agent_port=args.agent_port,
+        tls=args.tls,
+        authority=args.authority,
+        skill=args.skill,
+        episode=args.episode,
+        map=args.map,
+        seed=args.seed,
+        run_id=f"{args.run_id}-eval",
+        goal_preset=args.goal_preset,
+        target_x_fp=args.target_x_fp,
+        target_y_fp=args.target_y_fp,
+        max_steps=args.eval_max_steps,
+        level_complete_bonus=args.level_complete_bonus,
+        kill_goal_bonus=args.kill_goal_bonus,
+        required_kills=args.required_kills,
+        memory_path=args.memory_path,
+        reset_warmup_steps=args.reset_warmup_steps,
+        reset_warmup_max_tics=args.reset_warmup_max_tics,
+        reset_warmup_until_visible=args.reset_warmup_until_visible,
+        reset_warmup_until_shootable=args.reset_warmup_until_shootable,
+    )
+    candidate = await evaluate_checkpoint(
+        str(args.eval_checkpoint),
+        env_config,
+        episodes=args.eval_episodes,
+        max_steps=args.eval_max_steps,
+        seed=args.seed,
+        device=args.device,
+        deterministic=not args.eval_sample,
+    )
+    if args.eval_baseline == "random":
+        baseline = await evaluate_random_policy(
+            env_config,
+            episodes=args.eval_episodes,
+            max_steps=args.eval_max_steps,
+            seed=args.seed,
+        )
+    else:
+        baseline = await evaluate_heuristic_policy(
+            env_config,
+            episodes=args.eval_episodes,
+            max_steps=args.eval_max_steps,
+            seed=args.seed,
+        )
+    decision = decide_promotion(
+        candidate=candidate,
+        baseline=baseline,
+        min_completion_delta=args.promotion_min_completion_delta,
+        min_kill_delta=args.promotion_min_kill_delta,
+        min_reward_delta=args.promotion_min_reward_delta,
+        min_completion_rate=args.promotion_min_completion_rate,
+        min_mean_kills=args.promotion_min_mean_kills,
+    )
+    _record_eval_history(args, candidate.to_dict(), baseline.to_dict(), decision)
+    return {
+        "schema": "restfuldoom.ppo_eval.v1",
+        "checkpoint_path": str(args.eval_checkpoint),
+        "candidate": candidate.to_dict(),
+        "baseline": baseline.to_dict(),
+        "promotion": {
+            "promote": decision.promote,
+            "reasons": decision.reasons,
+        },
     }
 
 
@@ -166,6 +262,81 @@ def _record_ppo_checkpoint(
     memory.save()
 
 
+def _load_behavior_clone_samples(
+    args: argparse.Namespace,
+) -> tuple[list[tuple[list[float], int]], dict[str, object]]:
+    samples: list[tuple[list[float], int]] = []
+    label_counts: Counter[str] = Counter()
+    mapped_counts: Counter[str] = Counter()
+    skipped = 0
+    max_samples = max(1, int(args.bc_max_samples))
+    for path in args.bc_trajectory:
+        with Path(path).open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if len(samples) >= max_samples:
+                    break
+                if not line.strip():
+                    continue
+                record = json.loads(line)
+                decision = record.get("metadata", {}).get("policy_decision", {})
+                if not isinstance(decision, dict):
+                    skipped += 1
+                    continue
+                skill = decision.get("skill")
+                if not isinstance(skill, str):
+                    skipped += 1
+                    continue
+                label_counts[skill] += 1
+                action = map_expert_skill_to_ppo_action(skill)
+                if action is None:
+                    skipped += 1
+                    continue
+                samples.append((features_from_record(record), action))
+                mapped_counts[ACTION_SCHEMA["actions"][action]] += 1
+        if len(samples) >= max_samples:
+            break
+    if not samples:
+        raise ValueError("no usable behavior-cloning samples found")
+    return samples, {
+        "schema": "restfuldoom.ppo_behavior_clone.v1",
+        "trajectory_paths": [str(path) for path in args.bc_trajectory],
+        "samples": len(samples),
+        "skipped": skipped,
+        "expert_skill_counts": dict(sorted(label_counts.items())),
+        "ppo_skill_counts": dict(sorted(mapped_counts.items())),
+    }
+
+
+def _record_eval_history(
+    args: argparse.Namespace,
+    candidate: dict[str, object],
+    baseline: dict[str, object],
+    decision: object,
+) -> None:
+    if args.memory_path is None:
+        return
+    memory = AgentMemory.load(args.memory_path)
+    record = {
+        "schema": "restfuldoom.ppo_eval.v1",
+        "checkpoint_path": str(args.eval_checkpoint),
+        "baseline": args.eval_baseline,
+        "candidate": candidate,
+        "baseline_result": baseline,
+        "promotion": {
+            "promote": bool(getattr(decision, "promote", False)),
+            "reasons": list(getattr(decision, "reasons", [])),
+        },
+        "evaluated_at": _iso_now(),
+    }
+    history = memory.data.setdefault("ppo_eval_history", [])
+    history.append(record)
+    policy = memory.data.get("ppo_policy")
+    if isinstance(policy, dict) and policy.get("checkpoint_path") == str(args.eval_checkpoint):
+        policy["eval_history"] = history[-10:]
+    memory.data["updated_at"] = _iso_now()
+    memory.save()
+
+
 def _summarize_buffer(buffer: object) -> dict[str, object]:
     records = getattr(buffer, "records", [])
     skills = Counter(
@@ -183,9 +354,34 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         for record in records
         if isinstance(record.info, dict)
     ]
+    warmups = [
+        record.info.get("reset_warmup", {})
+        for record in records
+        if isinstance(record.info, dict) and record.info.get("reset_warmup")
+    ]
+    unique_warmups: dict[object, dict[str, object]] = {}
+    for index, warmup in enumerate(warmups):
+        key = warmup.get("episode_index", index)
+        unique_warmups.setdefault(key, warmup)
+    warmups = list(unique_warmups.values())
+    warmup_reasons = Counter(
+        str(warmup.get("stop_reason", "unknown"))
+        for warmup in warmups
+        if warmup.get("enabled")
+    )
     return {
         "records": len(records),
         "total_reward": round(sum(float(record.reward) for record in records), 4),
+        "action_reward": round(
+            sum(float(record.info.get("action_reward", 0.0)) for record in records),
+            4,
+        ),
+        "shootable_target_steps": sum(
+            1 for record in records if record.info.get("had_shootable_target")
+        ),
+        "reset_warmup_tics": sum(int(warmup.get("tics", 0)) for warmup in warmups),
+        "reset_warmup_steps": sum(int(warmup.get("steps", 0)) for warmup in warmups),
+        "reset_warmup_stop_reasons": dict(sorted(warmup_reasons.items())),
         "positive_reward_steps": sum(1 for record in records if record.reward > 0),
         "negative_reward_steps": sum(1 for record in records if record.reward < 0),
         "done_count": sum(1 for record in records if record.done),
@@ -225,6 +421,10 @@ def main() -> None:
     parser.add_argument("--level-complete-bonus", type=float, default=100.0)
     parser.add_argument("--kill-goal-bonus", type=float, default=10.0)
     parser.add_argument("--memory-path", type=Path, default=Path("agent_memory/e1m1.json"))
+    parser.add_argument("--reset-warmup-steps", type=int, default=0)
+    parser.add_argument("--reset-warmup-max-tics", type=int, default=0)
+    parser.add_argument("--reset-warmup-until-visible", action="store_true")
+    parser.add_argument("--reset-warmup-until-shootable", action="store_true")
     parser.add_argument("--updates", type=int, default=1)
     parser.add_argument("--rollout-steps", type=int, default=512)
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("agent_models/ppo"))
@@ -239,8 +439,26 @@ def main() -> None:
     parser.add_argument("--update-epochs", type=int, default=4)
     parser.add_argument("--minibatch-size", type=int, default=128)
     parser.add_argument("--hidden-size", type=int, default=128)
+    parser.add_argument("--bc-trajectory", type=Path, action="append", default=[])
+    parser.add_argument("--bc-epochs", type=int, default=3)
+    parser.add_argument("--bc-batch-size", type=int, default=128)
+    parser.add_argument("--bc-learning-rate", type=float)
+    parser.add_argument("--bc-max-samples", type=int, default=20000)
+    parser.add_argument("--eval-checkpoint", type=Path)
+    parser.add_argument("--eval-baseline", choices=["random", "heuristic"], default="heuristic")
+    parser.add_argument("--eval-episodes", type=int, default=1)
+    parser.add_argument("--eval-max-steps", type=int, default=256)
+    parser.add_argument("--eval-sample", action="store_true")
+    parser.add_argument("--promotion-min-completion-delta", type=float, default=0.0)
+    parser.add_argument("--promotion-min-kill-delta", type=float, default=0.0)
+    parser.add_argument("--promotion-min-reward-delta", type=float, default=0.0)
+    parser.add_argument("--promotion-min-completion-rate", type=float, default=1.0)
+    parser.add_argument("--promotion-min-mean-kills", type=float, default=1.0)
     args = parser.parse_args()
-    print(json.dumps(asyncio.run(train(args)), sort_keys=True))
+    if args.eval_checkpoint:
+        print(json.dumps(asyncio.run(evaluate(args)), sort_keys=True))
+    else:
+        print(json.dumps(asyncio.run(train(args)), sort_keys=True))
 
 
 if __name__ == "__main__":

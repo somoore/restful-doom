@@ -9,9 +9,11 @@ from restfuldoom_agent.brain import (
     train_skill_policy_from_memory,
 )
 from restfuldoom_agent.skill_policy import (
+    FEATURE_NAMES,
     SKILL_POLICY_SCHEMA,
     SkillPolicyModel,
     SkillPolicyTrainConfig,
+    features_from_record,
     train_skill_policy,
 )
 
@@ -127,6 +129,18 @@ def test_export_training_job_includes_ppo_checkpoint(tmp_path):
     assert manifest["eval_history"] == [{"policy_id": "ppo", "mean_kills": 1.0}]
 
 
+def test_features_include_position_and_facing_from_record():
+    record = _row("fire_on_shootable_target", health=100, enemy_count=1, combat=True)
+
+    vector = features_from_record(record)
+    values = dict(zip(FEATURE_NAMES, vector))
+
+    assert values["x_units_norm"] != 0.0
+    assert values["y_units_norm"] != 0.0
+    assert values["angle_sin"] == 0.0
+    assert values["angle_cos"] == 1.0
+
+
 def test_brain_policy_records_learned_skill_prediction(tmp_path):
     trajectory = tmp_path / "skill.jsonl"
     _write_skill_rows(trajectory)
@@ -229,6 +243,8 @@ def _row(skill, *, health, enemy_count, combat=False, line_special=0):
             "kills": 0,
             "items": 0,
             "enemy_count": enemy_count,
+            "position_fp": [1024 * 65536, -512 * 65536, 0],
+            "angle_degrees": 0,
         },
         "metadata": {
             "policy_decision": {

@@ -173,6 +173,10 @@ skill, and sends `PlayerAction` back over gRPC. Codex or another LLM can then
 act as the training operator: inspect failures, adjust goals/rewards, and
 promote better policies.
 
+For the concrete boundary between the fast controller, learned decision layer,
+memory file, skill action space, and PPO observation vector, see
+`docs/agent-learning-architecture.md`.
+
 Run the first trainable brain against a local Doom gRPC endpoint:
 
 ```
@@ -255,6 +259,11 @@ The training API is:
 - `DoomAgentEnv.reset()` calls that reset and returns a compact feature vector.
 - `DoomAgentEnv.step(action)` sends one PPO-selected skill action and returns
   `(observation, reward, done, info)`.
+- `--bc-trajectory` can warm-start the PPO actor from successful protobuf
+  trajectory decisions before live reward updates.
+- `--reset-warmup-*` can run bounded heuristic curriculum warmup before PPO
+  collection starts, with warmup tics and stop reasons reported in rollout
+  summaries.
 - `restfuldoom_agent.ppo` provides actor-critic PPO, GAE, clipped objective,
   entropy bonus, rollout JSONL buffers, checkpoint save/load, and a promotion
   gate.
@@ -275,6 +284,26 @@ PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
     --buffer-dir trajectories/ppo \
     --memory-path agent_memory/e1m1.json
 ```
+
+Warm-start from a known successful trajectory:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
+    --endpoint 127.0.0.1:50051 \
+    --goal-preset combat \
+    --updates 5 \
+    --rollout-steps 256 \
+    --bc-trajectory trajectories/brain-train-68-current-success.jsonl \
+    --bc-epochs 6 \
+    --checkpoint-dir agent_models/ppo \
+    --buffer-dir trajectories/ppo \
+    --memory-path agent_memory/e1m1.json
+```
+
+Bounded curriculum warmup is available for experiments, but current local
+evidence shows that repeatedly warming from the default E1M1 spawn is too slow
+for the PPO inner loop. The next training unlock is cached combat starts or
+server-side snapshot restore.
 
 The checkpoint schema is `restfuldoom.ppo_checkpoint.v1`. Each checkpoint
 stores model weights, optimizer state, PPO config, observation/action schemas,

@@ -311,6 +311,60 @@ class PPOTrainer:
         self.update_index += 1
         return {key: value / max(1, batches) for key, value in metrics.items()}
 
+    def pretrain_actor(
+        self,
+        samples: list[tuple[list[float], int]],
+        *,
+        epochs: int = 3,
+        minibatch_size: int = 128,
+        learning_rate: float | None = None,
+    ) -> dict[str, float | int]:
+        """Warm-starts the policy head from expert skill labels."""
+        require_torch()
+        if not samples:
+            raise ValueError("cannot pretrain PPO actor without samples")
+        rng = random.Random(self.config.seed)
+        optimizer = torch.optim.Adam(
+            self.model.parameters(),
+            lr=learning_rate or self.config.learning_rate,
+        )
+        metrics = {
+            "bc_loss": 0.0,
+            "bc_accuracy": 0.0,
+            "bc_samples": len(samples),
+            "bc_epochs": epochs,
+        }
+        batches = 0
+        for _ in range(epochs):
+            rng.shuffle(samples)
+            for start in range(0, len(samples), minibatch_size):
+                batch = samples[start : start + minibatch_size]
+                obs = torch.tensor(
+                    [features for features, _action in batch],
+                    dtype=torch.float32,
+                    device=self.device,
+                )
+                actions = torch.tensor(
+                    [action for _features, action in batch],
+                    dtype=torch.long,
+                    device=self.device,
+                )
+                logits, _values = self.model(obs)
+                loss = nn.functional.cross_entropy(logits, actions)
+                optimizer.zero_grad()
+                loss.backward()
+                nn.utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
+                optimizer.step()
+                with torch.no_grad():
+                    predictions = torch.argmax(logits, dim=-1)
+                    accuracy = (predictions == actions).float().mean()
+                metrics["bc_loss"] += float(loss.item())
+                metrics["bc_accuracy"] += float(accuracy.item())
+                batches += 1
+        metrics["bc_loss"] = float(metrics["bc_loss"]) / max(1, batches)
+        metrics["bc_accuracy"] = float(metrics["bc_accuracy"]) / max(1, batches)
+        return metrics
+
     def save_checkpoint(
         self,
         path: str | Path,
@@ -372,6 +426,7 @@ class EvaluationResult:
     mean_steps_to_exit: float
     mean_stuck_events: float
     episode_count: int
+    mean_reward: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -385,9 +440,20 @@ class PromotionDecision:
 class PromotionGate:
     """Compares PPO candidates against the current deterministic baseline."""
 
-    def __init__(self, *, min_completion_delta: float = 0.0, min_kill_delta: float = 0.0) -> None:
+    def __init__(
+        self,
+        *,
+        min_completion_delta: float = 0.0,
+        min_kill_delta: float = 0.0,
+        min_reward_delta: float = 0.0,
+        min_completion_rate: float = 1.0,
+        min_mean_kills: float = 1.0,
+    ) -> None:
         self.min_completion_delta = min_completion_delta
         self.min_kill_delta = min_kill_delta
+        self.min_reward_delta = min_reward_delta
+        self.min_completion_rate = min_completion_rate
+        self.min_mean_kills = min_mean_kills
 
     def decide(
         self,
@@ -402,8 +468,14 @@ class PromotionGate:
             < baseline.level_completion_rate + self.min_completion_delta
         ):
             reasons.append("completion rate did not beat baseline")
+        if candidate.level_completion_rate < self.min_completion_rate:
+            reasons.append("completion rate below promotion minimum")
         if candidate.mean_kills < baseline.mean_kills + self.min_kill_delta:
             reasons.append("mean kills did not beat baseline")
+        if candidate.mean_kills < self.min_mean_kills:
+            reasons.append("mean kills below promotion minimum")
+        if candidate.mean_reward < baseline.mean_reward + self.min_reward_delta:
+            reasons.append("mean reward did not beat baseline")
         if candidate.survival_rate < baseline.survival_rate:
             reasons.append("survival rate regressed")
         if (
@@ -413,6 +485,18 @@ class PromotionGate:
             reasons.append("time to exit regressed")
         if candidate.mean_stuck_events > baseline.mean_stuck_events:
             reasons.append("stuck events regressed")
+        improved = (
+            candidate.level_completion_rate > baseline.level_completion_rate
+            or candidate.mean_kills > baseline.mean_kills
+            or candidate.mean_reward > baseline.mean_reward
+            or (
+                baseline.mean_steps_to_exit > 0
+                and candidate.mean_steps_to_exit < baseline.mean_steps_to_exit
+            )
+            or candidate.mean_stuck_events < baseline.mean_stuck_events
+        )
+        if not reasons and not improved:
+            reasons.append("candidate did not improve any gate metric")
         return PromotionDecision(promote=not reasons, reasons=reasons)
 
 
