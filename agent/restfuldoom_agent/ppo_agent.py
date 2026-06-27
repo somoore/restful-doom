@@ -80,6 +80,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
             )
         )
     summaries = []
+    best_checkpoint: dict[str, object] | None = None
     try:
         for update_index in range(args.updates):
             curriculum_stage = stage_for_update(curriculum, update_index)
@@ -155,17 +156,26 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     curriculum=curriculum,
                     curriculum_stage=curriculum_stage,
                 )
-            summaries.append(
-                {
+            summary_record = {
+                "update": update_index,
+                "records": len(buffer),
+                "buffer_path": str(buffer_path),
+                "checkpoint_path": str(checkpoint_path),
+                "metrics": metrics,
+                "rollout_summary": rollout_summary,
+                "curriculum_stage": curriculum_stage,
+            }
+            summaries.append(summary_record)
+            score = float(rollout_summary.get("checkpoint_selection_score", 0.0))
+            if best_checkpoint is None or score > float(best_checkpoint["score"]):
+                best_checkpoint = {
                     "update": update_index,
-                    "records": len(buffer),
-                    "buffer_path": str(buffer_path),
+                    "score": score,
                     "checkpoint_path": str(checkpoint_path),
-                    "metrics": metrics,
+                    "buffer_path": str(buffer_path),
                     "rollout_summary": rollout_summary,
                     "curriculum_stage": curriculum_stage,
                 }
-            )
     finally:
         await env.close()
     return {
@@ -176,6 +186,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
         "reset_start": reset_start,
         "curriculum": curriculum,
         "resume_checkpoint": str(args.resume_checkpoint) if args.resume_checkpoint else None,
+        "best_checkpoint": best_checkpoint or {},
         "observation_schema": OBSERVATION_SCHEMA,
         "action_schema": ACTION_SCHEMA,
     }
@@ -355,6 +366,22 @@ def _record_ppo_checkpoint(
         "eval_history": [],
     }
     memory.data["ppo_policy"] = record
+    score = float(rollout_summary.get("checkpoint_selection_score", 0.0))
+    previous_best = memory.data.get("ppo_best_checkpoint")
+    if not isinstance(previous_best, dict) or score > float(
+        previous_best.get("checkpoint_selection_score", -1e12)
+    ):
+        memory.data["ppo_best_checkpoint"] = {
+            "schema": "restfuldoom.ppo_best_checkpoint.v1",
+            "checkpoint_path": str(checkpoint_path),
+            "checkpoint_selection_score": score,
+            "goal_preset": goal_preset,
+            "update_index": update_index,
+            "buffer_path": str(buffer_path),
+            "rollout_summary": rollout_summary,
+            "curriculum_stage": curriculum_stage or {},
+            "updated_at": _iso_now(),
+        }
     checkpoints = memory.data.setdefault("ppo_checkpoints", [])
     checkpoints.append(
         {
@@ -548,7 +575,7 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         for warmup in warmups
         if warmup.get("enabled")
     )
-    return {
+    summary = {
         "records": len(records),
         "total_reward": round(sum(float(record.reward) for record in records), 4),
         "action_reward": round(
@@ -565,6 +592,18 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         ),
         "shootable_target_steps": sum(
             1 for record in records if record.info.get("had_shootable_target")
+        ),
+        "fire_on_shootable_steps": sum(
+            1
+            for record in records
+            if record.info.get("had_shootable_target")
+            and record.info.get("skill") == "fire"
+        ),
+        "missed_shootable_fire_steps": sum(
+            1
+            for record in records
+            if record.info.get("had_shootable_target")
+            and record.info.get("skill") != "fire"
         ),
         "visible_enemy_steps": sum(
             1 for record in records if record.info.get("had_visible_enemy")
@@ -627,6 +666,29 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         "skill_counts": dict(sorted(skills.items())),
         "curriculum_stage_counts": dict(sorted(curriculum_stages.items())),
     }
+    summary["checkpoint_selection_score"] = _checkpoint_selection_score(summary)
+    return summary
+
+
+def _checkpoint_selection_score(summary: dict[str, object]) -> float:
+    """Scores a rollout for resume selection without changing promotion rules."""
+    total_reward = float(summary.get("total_reward", 0.0))
+    max_kills = int(summary.get("max_kills", 0))
+    damage_delta = int(summary.get("damage_delta", 0))
+    first_shootable_contacts = int(summary.get("first_shootable_contacts", 0))
+    fire_on_shootable = int(summary.get("fire_on_shootable_steps", 0))
+    missed_shootable_fire = int(summary.get("missed_shootable_fire_steps", 0))
+    route_failed = int(summary.get("route_failed_steps", 0))
+    return round(
+        total_reward
+        + max_kills * 75.0
+        + damage_delta * 2.0
+        + first_shootable_contacts * 25.0
+        + fire_on_shootable * 0.5
+        - missed_shootable_fire
+        - route_failed * 0.1,
+        4,
+    )
 
 
 def _iso_now() -> str:

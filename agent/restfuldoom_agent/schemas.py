@@ -640,6 +640,7 @@ MEMORY_CONTRACT = {
             "policy",
             "learned_policy",
             "ppo_policy",
+            "ppo_best_checkpoint",
             "ppo_checkpoints",
             "lessons",
         ],
@@ -737,7 +738,7 @@ MEMORY_CONTRACT = {
         {
             "method": "ppo_agent._record_ppo_checkpoint()",
             "writer": "ppo_agent train",
-            "updates": "ppo_policy and ppo_checkpoints",
+            "updates": "ppo_policy, ppo_best_checkpoint, and ppo_checkpoints",
         },
         {
             "method": "ppo_agent._record_eval_history()",

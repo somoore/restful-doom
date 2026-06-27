@@ -245,6 +245,9 @@ The important sections are:
 - `learned_policy`: behavior-cloned skill selector metadata.
 - `ppo_policy`: latest PPO checkpoint metadata, reward config, rollout summary,
   and eval history.
+- `ppo_best_checkpoint`: best resume candidate observed so far by rollout
+  selection score. This is not promotion; it is a guard against continuing from
+  a later PPO update that regressed during curriculum training.
 - `ppo_checkpoints`: exported PPO checkpoint lineage.
 
 The concrete contract is exported as
@@ -261,7 +264,7 @@ Memory has named update and query paths:
 | `AgentMemory.summary()` | query | `brain_agent --memory-summary`, MCP `brain_memory` | return compact diagnostics for operator inspection |
 | `AgentMemory.record_step(features, decision, reward, stats)` | update | `run_brain_episode()` | update cells, enemy sightings, damage events, and per-episode stats after each real transition |
 | `AgentMemory.finish_episode(stats, params, promoted)` | update | `run_brain_episode()` | append rollout summary, promote deterministic params when warranted, and store lessons |
-| `ppo_agent._record_ppo_checkpoint()` | update | PPO training | store the latest checkpoint, reward config, rollout summary, and checkpoint lineage |
+| `ppo_agent._record_ppo_checkpoint()` | update | PPO training | store latest checkpoint, best resume candidate, reward config, rollout summary, and checkpoint lineage |
 | `ppo_agent._record_eval_history()` | update | PPO evaluation | append candidate/baseline promotion-gate outcomes |
 | `train_skill_policy_from_memory()` | update | behavior-cloning bootstrap | write learned skill-selector metadata |
 

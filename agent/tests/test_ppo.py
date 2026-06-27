@@ -4,8 +4,11 @@ from types import SimpleNamespace
 import pytest
 
 from restfuldoom_agent.curriculum import build_curriculum, stage_for_update
+from restfuldoom_agent.brain import AgentMemory, _memory_ppo_checkpoint_paths
 from restfuldoom_agent.ppo_agent import (
     _annotate_buffer_curriculum,
+    _checkpoint_selection_score,
+    _record_ppo_checkpoint,
     _reset_start_from_trajectory,
     _summarize_buffer,
 )
@@ -187,6 +190,7 @@ def test_training_schemas_describe_features_and_actions():
     assert MEMORY_CONTRACT["write_frequency"]["ppo_collection"].startswith("read-only")
     assert "cells" in MEMORY_CONTRACT["persisted_shape"]
     assert "enemies" in MEMORY_CONTRACT["persisted_shape"]
+    assert "ppo_best_checkpoint" in MEMORY_CONTRACT["persisted_shape"]["training"]
     assert any(
         phase["phase"] == "learn" and "ppo_checkpoints" in phase["writes"]
         for phase in MEMORY_CONTRACT["query_update_lifecycle"]
@@ -490,16 +494,121 @@ def test_rollout_summary_counts_first_contact_events():
             "state": {"health": 100, "kills": 0},
         },
     )
+    buffer.add(
+        obs=[0.0, 1.0],
+        action_mask=[False, True],
+        action=1,
+        reward=1.0,
+        done=False,
+        value=0.0,
+        logprob=0.0,
+        info={
+            "skill": "fire",
+            "had_visible_enemy": True,
+            "had_shootable_target": True,
+            "first_visible_contact": False,
+            "first_shootable_contact": False,
+            "contact_reward": 0.0,
+            "visible_contact_distance_delta": 0.0,
+            "visible_contact_progress_reward": 0.0,
+            "transition": {},
+            "state": {"health": 100, "kills": 0},
+        },
+    )
 
     summary = _summarize_buffer(buffer)
 
-    assert summary["visible_enemy_steps"] == 2
-    assert summary["shootable_target_steps"] == 1
+    assert summary["visible_enemy_steps"] == 3
+    assert summary["shootable_target_steps"] == 2
+    assert summary["fire_on_shootable_steps"] == 1
+    assert summary["missed_shootable_fire_steps"] == 1
+    assert summary["checkpoint_selection_score"] > summary["total_reward"]
     assert summary["first_visible_contacts"] == 1
     assert summary["first_shootable_contacts"] == 1
     assert summary["contact_reward"] == 8.0
     assert summary["visible_contact_distance_delta"] == 24.0
     assert summary["visible_contact_progress_reward"] == 0.24
+
+
+def test_checkpoint_selection_score_prefers_damage_contact_and_fire():
+    weak = {
+        "total_reward": 3.0,
+        "max_kills": 0,
+        "damage_delta": 0,
+        "first_shootable_contacts": 0,
+        "fire_on_shootable_steps": 0,
+        "missed_shootable_fire_steps": 0,
+        "route_failed_steps": 1,
+    }
+    useful = {
+        "total_reward": 2.0,
+        "max_kills": 0,
+        "damage_delta": 10,
+        "first_shootable_contacts": 1,
+        "fire_on_shootable_steps": 4,
+        "missed_shootable_fire_steps": 0,
+        "route_failed_steps": 2,
+    }
+
+    assert _checkpoint_selection_score(useful) > _checkpoint_selection_score(weak)
+
+
+def test_record_ppo_checkpoint_preserves_best_resume_candidate(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    first_summary = {
+        "checkpoint_selection_score": 50.0,
+        "total_reward": 5.0,
+        "damage_delta": 10,
+    }
+    second_summary = {
+        "checkpoint_selection_score": -1.0,
+        "total_reward": -1.0,
+        "damage_delta": 0,
+    }
+
+    _record_ppo_checkpoint(
+        memory,
+        tmp_path / "good.pt",
+        goal_preset="combat",
+        reward_config={"goal_preset": "combat"},
+        metrics={"policy_loss": 0.1},
+        rollout_summary=first_summary,
+        update_index=0,
+        buffer_path=tmp_path / "good.jsonl",
+        curriculum_stage={"name": "visible_contact_fast"},
+    )
+    _record_ppo_checkpoint(
+        memory,
+        tmp_path / "bad.pt",
+        goal_preset="combat",
+        reward_config={"goal_preset": "combat"},
+        metrics={"policy_loss": 0.2},
+        rollout_summary=second_summary,
+        update_index=1,
+        buffer_path=tmp_path / "bad.jsonl",
+        curriculum_stage={"name": "visible_contact_fast"},
+    )
+
+    assert memory.data["ppo_policy"]["checkpoint_path"].endswith("bad.pt")
+    assert memory.data["ppo_best_checkpoint"]["checkpoint_path"].endswith("good.pt")
+    assert memory.data["ppo_best_checkpoint"]["checkpoint_selection_score"] == 50.0
+
+
+def test_ppo_export_paths_include_best_checkpoint(tmp_path):
+    latest = tmp_path / "latest.pt"
+    best = tmp_path / "best.pt"
+    lineage = tmp_path / "lineage.pt"
+    latest.write_text("latest", encoding="utf-8")
+    best.write_text("best", encoding="utf-8")
+    lineage.write_text("lineage", encoding="utf-8")
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    memory.data["ppo_policy"] = {"checkpoint_path": str(latest)}
+    memory.data["ppo_best_checkpoint"] = {"checkpoint_path": str(best)}
+    memory.data["ppo_checkpoints"] = [{"checkpoint_path": str(lineage)}]
+
+    paths = _memory_ppo_checkpoint_paths(memory)
+
+    assert paths == [latest, best, lineage]
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")

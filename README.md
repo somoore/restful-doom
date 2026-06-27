@@ -241,8 +241,9 @@ The bundle uses schema `restfuldoom.training_job.v1` and includes a manifest,
 memory, promoted parameters, `agent-notes.md`, learned model checkpoints, and
 referenced JSONL trajectories. When PPO checkpoints exist in memory, the same
 bundle also includes `agent_models/ppo/*.pt`, optimizer state, observation
-schema, action schema, reward config, and eval history. A cloud worker can
-import it and continue training against a new gRPC endpoint:
+schema, action schema, reward config, eval history, and the best PPO resume
+candidate recorded in `ppo_best_checkpoint`. A cloud worker can import it and
+continue training against a new gRPC endpoint:
 
 ```
 PYTHONPATH=agent python -m restfuldoom_agent.brain_agent \

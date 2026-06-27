@@ -3181,6 +3181,13 @@ def _memory_ppo_checkpoint_paths(memory: AgentMemory) -> list[Path]:
             path = Path(checkpoint)
             if path.exists():
                 paths.append(path)
+    best = memory.data.get("ppo_best_checkpoint")
+    if isinstance(best, dict):
+        checkpoint = best.get("checkpoint_path")
+        if isinstance(checkpoint, str) and checkpoint:
+            path = Path(checkpoint)
+            if path.exists() and path not in paths:
+                paths.append(path)
     for entry in memory.data.get("ppo_checkpoints", []):
         if isinstance(entry, str):
             path = Path(entry)

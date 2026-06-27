@@ -68,6 +68,7 @@ Concrete persisted shape:
   "policy": {},
   "learned_policy": {},
   "ppo_policy": {},
+  "ppo_best_checkpoint": {},
   "ppo_checkpoints": []
 }
 ```
@@ -86,7 +87,7 @@ Concrete update paths:
 | --- | --- | --- |
 | `AgentMemory.record_step(...)` | deterministic `run_brain_episode()` | write cells, enemy sightings, damage events, and lessons |
 | `AgentMemory.finish_episode(...)` | deterministic `run_brain_episode()` | append compact episode summary and promote params |
-| `ppo_agent._record_ppo_checkpoint(...)` | PPO training | write checkpoint lineage and rollout summary |
+| `ppo_agent._record_ppo_checkpoint(...)` | PPO training | write latest checkpoint, best resume candidate, checkpoint lineage, and rollout summary |
 | `ppo_agent._record_eval_history(...)` | PPO eval | write promotion-gate outcomes |
 | `train_skill_policy_from_memory(...)` | behavior cloning | write learned selector metadata |
 
