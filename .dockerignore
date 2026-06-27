@@ -1,7 +1,10 @@
 .git
+.venv-mcp
 **/target
 **/__pycache__
 **/*.pyc
+agent/restfuldoom_agent/generated
+trajectories
 *.wad
 *.WAD
 *.lmp

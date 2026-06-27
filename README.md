@@ -164,6 +164,23 @@ The Python package includes:
 - JSONL trajectory logging
 - JSON rollout config for goal injection, auth metadata, and demo budgets
 
+### Local Docker + Codex MCP
+
+For local Mac testing without Hellbox/Shrink, build the gRPC image and drive it
+from Codex through the included MCP server:
+
+```
+docker build -f capsule/Dockerfile -t restful-doom-agent:local .
+scripts/install-codex-mcp.sh
+```
+
+Restart Codex or open a new thread after installation. The `restful_doom` MCP
+server exposes tools to build/start/stop the Dockerized Doom process, observe
+one protobuf `GameState`, open real in-game footage at `http://127.0.0.1:6080`,
+and run a deterministic rollout that writes JSONL trajectories. The optional
+protobuf spectator remains available at `http://127.0.0.1:8765` for debugging.
+See `docs/codex-mcp.md`.
+
 ### Resilient Rollout Demo
 
 Run a long-lived rollout with a narratable goal and incremental trajectory log:

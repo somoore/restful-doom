@@ -24,7 +24,9 @@ packages
 target
 __pycache__
 .pytest_cache
+.venv-mcp
 agent/restfuldoom_agent/generated
+trajectories/
 
 # These are the default patterns globally ignored by Subversion:
 *.o

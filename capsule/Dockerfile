@@ -11,8 +11,12 @@ ARG DOOM1_WAD_COMMIT=fcf22d9773c62835724f2d25c40933ef051f6600
 ARG DOOM1_WAD_SHA256=1d7d43be501e67d927e415e0b8f3e29c3bf33075e859721816f652a526cac771
 
 RUN dnf install -y \
-        autoconf automake binutils cargo curl gcc make pkgconfig protobuf-compiler rust tar gzip \
+        autoconf automake binutils cargo gcc libtool make pkgconfig protobuf-compiler rust tar gzip \
         alsa-lib-devel pulseaudio-libs-devel which xz \
+        ImageMagick xorg-x11-server-Xvfb \
+        libX11-devel libXcursor-devel libXext-devel libXfixes-devel libXi-devel \
+        libXinerama-devel libXrandr-devel libXrender-devel libXScrnSaver-devel \
+        libXxf86vm-devel \
     && dnf clean all
 
 WORKDIR /tmp/sdl
@@ -45,8 +49,7 @@ RUN curl -fsSL --retry 3 -o net.tgz "https://github.com/libsdl-org/SDL_net/relea
 
 COPY . /opt/restful-doom
 WORKDIR /opt/restful-doom
-RUN ./autogen.sh \
-    && ./configure --disable-sdltest CFLAGS="-O2 -fcommon" \
+RUN ACLOCAL_PATH=/usr/local/share/aclocal ./autogen.sh --disable-sdltest CFLAGS="-O2 -fcommon" \
     && make -j"$(nproc)" \
     && install -m 0755 src/restful-doom /usr/local/bin/restful-doom
 
@@ -62,7 +65,7 @@ RUN set -e; \
     chown -R app:app /home/app/app
 
 COPY capsule/rootfs/ /
-RUN chmod +x /opt/capsule/start.sh
+RUN chmod +x /opt/capsule/start.sh /opt/capsule/video_stream.py
 
-EXPOSE 50051 9000
+EXPOSE 50051 6666 9000 6080
 CMD ["/opt/capsule/start.sh"]
