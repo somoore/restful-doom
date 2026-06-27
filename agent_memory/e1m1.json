@@ -27838,6 +27838,262 @@
         "reasons": []
       },
       "schema": "restfuldoom.ppo_eval.v1"
+    },
+    {
+      "baseline": "heuristic",
+      "baseline_result": {
+        "episodes": [
+          {
+            "damage_delta": 0,
+            "death": false,
+            "done_reason": "max_steps",
+            "end_episode": 1,
+            "end_map": 1,
+            "fire_on_shootable_steps": 0,
+            "first_shootable_contacts": 0,
+            "first_visible_contacts": 0,
+            "invalid_action_steps": 0,
+            "item_delta": 0,
+            "kill_delta": 0,
+            "level_completed": false,
+            "level_transition_delta": 0,
+            "max_item_gain": 0,
+            "max_items": 0,
+            "max_kill_gain": 0,
+            "max_kills": 0,
+            "max_secret_gain": 0,
+            "max_secrets": 0,
+            "min_health": 100,
+            "missed_shootable_fire_steps": 0,
+            "reset_source": "episode",
+            "secret_delta": 0,
+            "seed": 7,
+            "shootable_target_steps": 0,
+            "skill_counts": {
+              "seek_enemy": 1605
+            },
+            "snapshot_verification_failures": 0,
+            "start_episode": 1,
+            "start_items": 0,
+            "start_kills": 0,
+            "start_map": 1,
+            "start_secrets": 0,
+            "steps": 1605,
+            "steps_to_exit": 4096,
+            "stuck_events": 0,
+            "total_reward": 4.0008,
+            "visible_enemy_steps": 0
+          }
+        ],
+        "result": {
+          "episode_count": 1,
+          "level_completion_rate": 0.0,
+          "mean_kills": 0.0,
+          "mean_reward": 4.0008,
+          "mean_steps_to_exit": 4096.0,
+          "mean_stuck_events": 0.0,
+          "policy_id": "heuristic_skill",
+          "survival_rate": 1.0
+        }
+      },
+      "candidate": {
+        "episodes": [
+          {
+            "damage_delta": 0,
+            "death": false,
+            "done_reason": "max_steps",
+            "end_episode": 1,
+            "end_map": 1,
+            "fire_on_shootable_steps": 0,
+            "first_shootable_contacts": 0,
+            "first_visible_contacts": 0,
+            "invalid_action_steps": 0,
+            "item_delta": 0,
+            "kill_delta": 0,
+            "level_completed": false,
+            "level_transition_delta": 0,
+            "max_item_gain": 0,
+            "max_items": 0,
+            "max_kill_gain": 0,
+            "max_kills": 0,
+            "max_secret_gain": 0,
+            "max_secrets": 0,
+            "min_health": 100,
+            "missed_shootable_fire_steps": 0,
+            "reset_source": "episode",
+            "secret_delta": 0,
+            "seed": 7,
+            "shootable_target_steps": 0,
+            "skill_counts": {
+              "seek_enemy": 1605
+            },
+            "snapshot_verification_failures": 0,
+            "start_episode": 1,
+            "start_items": 0,
+            "start_kills": 0,
+            "start_map": 1,
+            "start_secrets": 0,
+            "steps": 1605,
+            "steps_to_exit": 4096,
+            "stuck_events": 0,
+            "total_reward": 4.001,
+            "visible_enemy_steps": 0
+          }
+        ],
+        "result": {
+          "episode_count": 1,
+          "level_completion_rate": 0.0,
+          "mean_kills": 0.0,
+          "mean_reward": 4.001,
+          "mean_steps_to_exit": 4096.0,
+          "mean_stuck_events": 0.0,
+          "policy_id": "ppo:agent_models/ppo/ppo-mixed-reset-clean-bridge-ppo-0000.pt",
+          "survival_rate": 1.0
+        }
+      },
+      "checkpoint_path": "agent_models/ppo/ppo-mixed-reset-clean-bridge-ppo-0000.pt",
+      "evaluated_at": "2026-06-27T23:18:19Z",
+      "promotion": {
+        "promote": false,
+        "reasons": [
+          "completion rate below promotion minimum",
+          "mean kills below promotion minimum"
+        ]
+      },
+      "schema": "restfuldoom.ppo_eval.v1"
+    },
+    {
+      "baseline": "heuristic",
+      "baseline_result": {
+        "episodes": [
+          {
+            "damage_delta": 85,
+            "death": false,
+            "done_reason": "max_steps",
+            "end_episode": 1,
+            "end_map": 1,
+            "fire_on_shootable_steps": 151,
+            "first_shootable_contacts": 1,
+            "first_visible_contacts": 1,
+            "invalid_action_steps": 87,
+            "item_delta": 0,
+            "kill_delta": 4,
+            "level_completed": false,
+            "level_transition_delta": 0,
+            "max_item_gain": 0,
+            "max_items": 0,
+            "max_kill_gain": 4,
+            "max_kills": 4,
+            "max_secret_gain": 0,
+            "max_secrets": 0,
+            "min_health": 59,
+            "missed_shootable_fire_steps": 15,
+            "reset_source": "episode",
+            "secret_delta": 0,
+            "seed": 7,
+            "shootable_target_steps": 166,
+            "skill_counts": {
+              "close_visible_contact": 210,
+              "fire": 151,
+              "open_use_line": 486,
+              "press_exit": 30,
+              "recover_stuck": 33,
+              "route_progression": 329,
+              "seek_enemy": 171
+            },
+            "snapshot_verification_failures": 0,
+            "start_episode": 1,
+            "start_items": 0,
+            "start_kills": 0,
+            "start_map": 1,
+            "start_secrets": 0,
+            "steps": 1410,
+            "steps_to_exit": 4096,
+            "stuck_events": 33,
+            "total_reward": 148.1762,
+            "visible_enemy_steps": 372
+          }
+        ],
+        "result": {
+          "episode_count": 1,
+          "level_completion_rate": 0.0,
+          "mean_kills": 4.0,
+          "mean_reward": 148.1762,
+          "mean_steps_to_exit": 4096.0,
+          "mean_stuck_events": 33.0,
+          "policy_id": "heuristic_skill",
+          "survival_rate": 1.0
+        }
+      },
+      "candidate": {
+        "episodes": [
+          {
+            "damage_delta": 0,
+            "death": false,
+            "done_reason": "max_steps",
+            "end_episode": 1,
+            "end_map": 1,
+            "fire_on_shootable_steps": 0,
+            "first_shootable_contacts": 0,
+            "first_visible_contacts": 1,
+            "invalid_action_steps": 0,
+            "item_delta": 0,
+            "kill_delta": 0,
+            "level_completed": false,
+            "level_transition_delta": 0,
+            "max_item_gain": 0,
+            "max_items": 0,
+            "max_kill_gain": 0,
+            "max_kills": 0,
+            "max_secret_gain": 0,
+            "max_secrets": 0,
+            "min_health": 100,
+            "missed_shootable_fire_steps": 0,
+            "reset_source": "episode",
+            "secret_delta": 0,
+            "seed": 7,
+            "shootable_target_steps": 0,
+            "skill_counts": {
+              "close_visible_contact": 6,
+              "route_progression": 152,
+              "seek_enemy": 1372
+            },
+            "snapshot_verification_failures": 0,
+            "start_episode": 1,
+            "start_items": 0,
+            "start_kills": 0,
+            "start_map": 1,
+            "start_secrets": 0,
+            "steps": 1530,
+            "steps_to_exit": 4096,
+            "stuck_events": 0,
+            "total_reward": 8.183,
+            "visible_enemy_steps": 19
+          }
+        ],
+        "result": {
+          "episode_count": 1,
+          "level_completion_rate": 0.0,
+          "mean_kills": 0.0,
+          "mean_reward": 8.183,
+          "mean_steps_to_exit": 4096.0,
+          "mean_stuck_events": 0.0,
+          "policy_id": "ppo:agent_models/ppo/ppo-mixed-reset-clean-bridge-ppo-0000.pt",
+          "survival_rate": 1.0
+        }
+      },
+      "checkpoint_path": "agent_models/ppo/ppo-mixed-reset-clean-bridge-ppo-0000.pt",
+      "evaluated_at": "2026-06-27T23:25:01Z",
+      "promotion": {
+        "promote": false,
+        "reasons": [
+          "completion rate below promotion minimum",
+          "mean kills did not beat baseline",
+          "mean kills below promotion minimum",
+          "mean reward did not beat baseline"
+        ]
+      },
+      "schema": "restfuldoom.ppo_eval.v1"
     }
   ],
   "ppo_policy": {
@@ -28918,7 +29174,806 @@
         "1453-first-damage_snapshot"
       ]
     },
-    "eval_history": [],
+    "eval_history": [
+      {
+        "baseline": "heuristic",
+        "baseline_result": {
+          "episodes": [
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 0,
+              "min_health": 100,
+              "seed": 7,
+              "steps": 96,
+              "steps_to_exit": 256,
+              "stuck_events": 0,
+              "total_reward": 3.976
+            }
+          ],
+          "result": {
+            "episode_count": 1,
+            "level_completion_rate": 0.0,
+            "mean_kills": 0.0,
+            "mean_steps_to_exit": 256.0,
+            "mean_stuck_events": 0.0,
+            "policy_id": "heuristic_skill",
+            "survival_rate": 1.0
+          }
+        },
+        "candidate": {
+          "episodes": [
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 0,
+              "min_health": 100,
+              "seed": 7,
+              "steps": 70,
+              "steps_to_exit": 256,
+              "stuck_events": 0,
+              "total_reward": 3.0841
+            }
+          ],
+          "result": {
+            "episode_count": 1,
+            "level_completion_rate": 0.0,
+            "mean_kills": 0.0,
+            "mean_steps_to_exit": 256.0,
+            "mean_stuck_events": 0.0,
+            "policy_id": "ppo:agent_models/ppo/ppo-learning-smoke-ppo-0002.pt",
+            "survival_rate": 1.0
+          }
+        },
+        "checkpoint_path": "agent_models/ppo/ppo-learning-smoke-ppo-0002.pt",
+        "evaluated_at": "2026-06-27T13:08:10Z",
+        "promotion": {
+          "promote": true,
+          "reasons": []
+        },
+        "schema": "restfuldoom.ppo_eval.v1"
+      },
+      {
+        "baseline": "heuristic",
+        "baseline_result": {
+          "episodes": [
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 0,
+              "min_health": 100,
+              "seed": 7,
+              "steps": 96,
+              "steps_to_exit": 256,
+              "stuck_events": 0,
+              "total_reward": 3.976
+            }
+          ],
+          "result": {
+            "episode_count": 1,
+            "level_completion_rate": 0.0,
+            "mean_kills": 0.0,
+            "mean_reward": 3.976,
+            "mean_steps_to_exit": 256.0,
+            "mean_stuck_events": 0.0,
+            "policy_id": "heuristic_skill",
+            "survival_rate": 1.0
+          }
+        },
+        "candidate": {
+          "episodes": [
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 0,
+              "min_health": 100,
+              "seed": 7,
+              "steps": 67,
+              "steps_to_exit": 256,
+              "stuck_events": 0,
+              "total_reward": 4.817
+            }
+          ],
+          "result": {
+            "episode_count": 1,
+            "level_completion_rate": 0.0,
+            "mean_kills": 0.0,
+            "mean_reward": 4.817,
+            "mean_steps_to_exit": 256.0,
+            "mean_stuck_events": 0.0,
+            "policy_id": "ppo:agent_models/ppo/ppo-learning-smoke-ppo-0002.pt",
+            "survival_rate": 1.0
+          }
+        },
+        "checkpoint_path": "agent_models/ppo/ppo-learning-smoke-ppo-0002.pt",
+        "evaluated_at": "2026-06-27T13:09:22Z",
+        "promotion": {
+          "promote": true,
+          "reasons": []
+        },
+        "schema": "restfuldoom.ppo_eval.v1"
+      },
+      {
+        "baseline": "heuristic",
+        "baseline_result": {
+          "episodes": [
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 0,
+              "min_health": 100,
+              "seed": 7,
+              "steps": 96,
+              "steps_to_exit": 256,
+              "stuck_events": 0,
+              "total_reward": 3.976
+            }
+          ],
+          "result": {
+            "episode_count": 1,
+            "level_completion_rate": 0.0,
+            "mean_kills": 0.0,
+            "mean_reward": 3.976,
+            "mean_steps_to_exit": 256.0,
+            "mean_stuck_events": 0.0,
+            "policy_id": "heuristic_skill",
+            "survival_rate": 1.0
+          }
+        },
+        "candidate": {
+          "episodes": [
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 0,
+              "min_health": 100,
+              "seed": 7,
+              "steps": 68,
+              "steps_to_exit": 256,
+              "stuck_events": 0,
+              "total_reward": 2.1836
+            }
+          ],
+          "result": {
+            "episode_count": 1,
+            "level_completion_rate": 0.0,
+            "mean_kills": 0.0,
+            "mean_reward": 2.1836,
+            "mean_steps_to_exit": 256.0,
+            "mean_stuck_events": 0.0,
+            "policy_id": "ppo:agent_models/ppo/ppo-learning-smoke-ppo-0002.pt",
+            "survival_rate": 1.0
+          }
+        },
+        "checkpoint_path": "agent_models/ppo/ppo-learning-smoke-ppo-0002.pt",
+        "evaluated_at": "2026-06-27T13:10:27Z",
+        "promotion": {
+          "promote": false,
+          "reasons": [
+            "completion rate below promotion minimum",
+            "mean kills below promotion minimum",
+            "mean reward did not beat baseline"
+          ]
+        },
+        "schema": "restfuldoom.ppo_eval.v1"
+      },
+      {
+        "baseline": "heuristic",
+        "baseline_result": {
+          "episodes": [
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 0,
+              "min_health": 100,
+              "seed": 7,
+              "steps": 96,
+              "steps_to_exit": 256,
+              "stuck_events": 0,
+              "total_reward": 3.976
+            }
+          ],
+          "result": {
+            "episode_count": 1,
+            "level_completion_rate": 0.0,
+            "mean_kills": 0.0,
+            "mean_reward": 3.976,
+            "mean_steps_to_exit": 256.0,
+            "mean_stuck_events": 0.0,
+            "policy_id": "heuristic_skill",
+            "survival_rate": 1.0
+          }
+        },
+        "candidate": {
+          "episodes": [
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 0,
+              "min_health": 100,
+              "seed": 7,
+              "steps": 67,
+              "steps_to_exit": 256,
+              "stuck_events": 0,
+              "total_reward": 0.9062
+            }
+          ],
+          "result": {
+            "episode_count": 1,
+            "level_completion_rate": 0.0,
+            "mean_kills": 0.0,
+            "mean_reward": 0.9062,
+            "mean_steps_to_exit": 256.0,
+            "mean_stuck_events": 0.0,
+            "policy_id": "ppo:agent_models/ppo/ppo-macro-smoke-ppo-0002.pt",
+            "survival_rate": 1.0
+          }
+        },
+        "checkpoint_path": "agent_models/ppo/ppo-macro-smoke-ppo-0002.pt",
+        "evaluated_at": "2026-06-27T13:12:09Z",
+        "promotion": {
+          "promote": false,
+          "reasons": [
+            "completion rate below promotion minimum",
+            "mean kills below promotion minimum",
+            "mean reward did not beat baseline"
+          ]
+        },
+        "schema": "restfuldoom.ppo_eval.v1"
+      },
+      {
+        "baseline": "heuristic",
+        "baseline_result": {
+          "episodes": [
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 0,
+              "min_health": 100,
+              "seed": 7,
+              "steps": 197,
+              "steps_to_exit": 512,
+              "stuck_events": 0,
+              "total_reward": 3.989
+            }
+          ],
+          "result": {
+            "episode_count": 1,
+            "level_completion_rate": 0.0,
+            "mean_kills": 0.0,
+            "mean_reward": 3.989,
+            "mean_steps_to_exit": 512.0,
+            "mean_stuck_events": 0.0,
+            "policy_id": "heuristic_skill",
+            "survival_rate": 1.0
+          }
+        },
+        "candidate": {
+          "episodes": [
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 0,
+              "min_health": 100,
+              "seed": 7,
+              "steps": 197,
+              "steps_to_exit": 512,
+              "stuck_events": 0,
+              "total_reward": 3.0822
+            }
+          ],
+          "result": {
+            "episode_count": 1,
+            "level_completion_rate": 0.0,
+            "mean_kills": 0.0,
+            "mean_reward": 3.0822,
+            "mean_steps_to_exit": 512.0,
+            "mean_stuck_events": 0.0,
+            "policy_id": "ppo:agent_models/ppo/ppo-bc-live-smoke-ppo-0004.pt",
+            "survival_rate": 1.0
+          }
+        },
+        "checkpoint_path": "agent_models/ppo/ppo-bc-live-smoke-ppo-0004.pt",
+        "evaluated_at": "2026-06-27T13:19:37Z",
+        "promotion": {
+          "promote": false,
+          "reasons": [
+            "completion rate below promotion minimum",
+            "mean kills below promotion minimum",
+            "mean reward did not beat baseline"
+          ]
+        },
+        "schema": "restfuldoom.ppo_eval.v1"
+      },
+      {
+        "baseline": "random",
+        "baseline_result": {
+          "episodes": [
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 1,
+              "min_health": 82,
+              "seed": 7,
+              "steps": 116,
+              "steps_to_exit": 128,
+              "stuck_events": 0,
+              "total_reward": 40.7339
+            },
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 1,
+              "min_health": 65,
+              "seed": 8,
+              "steps": 122,
+              "steps_to_exit": 128,
+              "stuck_events": 0,
+              "total_reward": 42.4058
+            },
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 1,
+              "min_health": 80,
+              "seed": 9,
+              "steps": 128,
+              "steps_to_exit": 128,
+              "stuck_events": 0,
+              "total_reward": 42.0699
+            }
+          ],
+          "result": {
+            "episode_count": 3,
+            "level_completion_rate": 0.0,
+            "mean_kills": 1.0,
+            "mean_reward": 41.736533333333334,
+            "mean_steps_to_exit": 128.0,
+            "mean_stuck_events": 0.0,
+            "policy_id": "random_skill",
+            "survival_rate": 1.0
+          }
+        },
+        "candidate": {
+          "episodes": [
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 1,
+              "min_health": 65,
+              "seed": 7,
+              "steps": 114,
+              "steps_to_exit": 128,
+              "stuck_events": 81,
+              "total_reward": 72.254
+            },
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 1,
+              "min_health": 65,
+              "seed": 8,
+              "steps": 122,
+              "steps_to_exit": 128,
+              "stuck_events": 81,
+              "total_reward": 68.0185
+            },
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 1,
+              "min_health": 80,
+              "seed": 9,
+              "steps": 128,
+              "steps_to_exit": 128,
+              "stuck_events": 81,
+              "total_reward": 72.9148
+            }
+          ],
+          "result": {
+            "episode_count": 3,
+            "level_completion_rate": 0.0,
+            "mean_kills": 1.0,
+            "mean_reward": 71.06243333333333,
+            "mean_steps_to_exit": 128.0,
+            "mean_stuck_events": 81.0,
+            "policy_id": "ppo:agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0007.pt",
+            "survival_rate": 1.0
+          }
+        },
+        "checkpoint_path": "agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0007.pt",
+        "evaluated_at": "2026-06-27T14:05:00Z",
+        "promotion": {
+          "promote": false,
+          "reasons": [
+            "stuck events regressed"
+          ]
+        },
+        "schema": "restfuldoom.ppo_eval.v1"
+      },
+      {
+        "baseline": "random",
+        "baseline_result": {
+          "episodes": [
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 1,
+              "min_health": 82,
+              "seed": 7,
+              "steps": 116,
+              "steps_to_exit": 128,
+              "stuck_events": 0,
+              "total_reward": 40.7339
+            },
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 1,
+              "min_health": 65,
+              "seed": 8,
+              "steps": 122,
+              "steps_to_exit": 128,
+              "stuck_events": 0,
+              "total_reward": 42.4058
+            },
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 1,
+              "min_health": 80,
+              "seed": 9,
+              "steps": 128,
+              "steps_to_exit": 128,
+              "stuck_events": 0,
+              "total_reward": 42.0699
+            }
+          ],
+          "result": {
+            "episode_count": 3,
+            "level_completion_rate": 0.0,
+            "mean_kills": 1.0,
+            "mean_reward": 41.736533333333334,
+            "mean_steps_to_exit": 128.0,
+            "mean_stuck_events": 0.0,
+            "policy_id": "random_skill",
+            "survival_rate": 1.0
+          }
+        },
+        "candidate": {
+          "episodes": [
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 1,
+              "min_health": 65,
+              "seed": 7,
+              "steps": 114,
+              "steps_to_exit": 128,
+              "stuck_events": 0,
+              "total_reward": 72.2087
+            },
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 1,
+              "min_health": 65,
+              "seed": 8,
+              "steps": 122,
+              "steps_to_exit": 128,
+              "stuck_events": 0,
+              "total_reward": 67.4557
+            },
+            {
+              "death": false,
+              "done_reason": "max_steps",
+              "level_completed": false,
+              "max_kills": 1,
+              "min_health": 80,
+              "seed": 9,
+              "steps": 128,
+              "steps_to_exit": 128,
+              "stuck_events": 0,
+              "total_reward": 72.9148
+            }
+          ],
+          "result": {
+            "episode_count": 3,
+            "level_completion_rate": 0.0,
+            "mean_kills": 1.0,
+            "mean_reward": 70.85973333333332,
+            "mean_steps_to_exit": 128.0,
+            "mean_stuck_events": 0.0,
+            "policy_id": "ppo:agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0007.pt",
+            "survival_rate": 1.0
+          }
+        },
+        "checkpoint_path": "agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0007.pt",
+        "evaluated_at": "2026-06-27T14:05:55Z",
+        "promotion": {
+          "promote": true,
+          "reasons": []
+        },
+        "schema": "restfuldoom.ppo_eval.v1"
+      },
+      {
+        "baseline": "heuristic",
+        "baseline_result": {
+          "episodes": [
+            {
+              "damage_delta": 0,
+              "death": false,
+              "done_reason": "max_steps",
+              "end_episode": 1,
+              "end_map": 1,
+              "fire_on_shootable_steps": 0,
+              "first_shootable_contacts": 0,
+              "first_visible_contacts": 0,
+              "invalid_action_steps": 0,
+              "item_delta": 0,
+              "kill_delta": 0,
+              "level_completed": false,
+              "level_transition_delta": 0,
+              "max_item_gain": 0,
+              "max_items": 0,
+              "max_kill_gain": 0,
+              "max_kills": 0,
+              "max_secret_gain": 0,
+              "max_secrets": 0,
+              "min_health": 100,
+              "missed_shootable_fire_steps": 0,
+              "reset_source": "episode",
+              "secret_delta": 0,
+              "seed": 7,
+              "shootable_target_steps": 0,
+              "skill_counts": {
+                "seek_enemy": 1605
+              },
+              "snapshot_verification_failures": 0,
+              "start_episode": 1,
+              "start_items": 0,
+              "start_kills": 0,
+              "start_map": 1,
+              "start_secrets": 0,
+              "steps": 1605,
+              "steps_to_exit": 4096,
+              "stuck_events": 0,
+              "total_reward": 4.0008,
+              "visible_enemy_steps": 0
+            }
+          ],
+          "result": {
+            "episode_count": 1,
+            "level_completion_rate": 0.0,
+            "mean_kills": 0.0,
+            "mean_reward": 4.0008,
+            "mean_steps_to_exit": 4096.0,
+            "mean_stuck_events": 0.0,
+            "policy_id": "heuristic_skill",
+            "survival_rate": 1.0
+          }
+        },
+        "candidate": {
+          "episodes": [
+            {
+              "damage_delta": 0,
+              "death": false,
+              "done_reason": "max_steps",
+              "end_episode": 1,
+              "end_map": 1,
+              "fire_on_shootable_steps": 0,
+              "first_shootable_contacts": 0,
+              "first_visible_contacts": 0,
+              "invalid_action_steps": 0,
+              "item_delta": 0,
+              "kill_delta": 0,
+              "level_completed": false,
+              "level_transition_delta": 0,
+              "max_item_gain": 0,
+              "max_items": 0,
+              "max_kill_gain": 0,
+              "max_kills": 0,
+              "max_secret_gain": 0,
+              "max_secrets": 0,
+              "min_health": 100,
+              "missed_shootable_fire_steps": 0,
+              "reset_source": "episode",
+              "secret_delta": 0,
+              "seed": 7,
+              "shootable_target_steps": 0,
+              "skill_counts": {
+                "seek_enemy": 1605
+              },
+              "snapshot_verification_failures": 0,
+              "start_episode": 1,
+              "start_items": 0,
+              "start_kills": 0,
+              "start_map": 1,
+              "start_secrets": 0,
+              "steps": 1605,
+              "steps_to_exit": 4096,
+              "stuck_events": 0,
+              "total_reward": 4.001,
+              "visible_enemy_steps": 0
+            }
+          ],
+          "result": {
+            "episode_count": 1,
+            "level_completion_rate": 0.0,
+            "mean_kills": 0.0,
+            "mean_reward": 4.001,
+            "mean_steps_to_exit": 4096.0,
+            "mean_stuck_events": 0.0,
+            "policy_id": "ppo:agent_models/ppo/ppo-mixed-reset-clean-bridge-ppo-0000.pt",
+            "survival_rate": 1.0
+          }
+        },
+        "checkpoint_path": "agent_models/ppo/ppo-mixed-reset-clean-bridge-ppo-0000.pt",
+        "evaluated_at": "2026-06-27T23:18:19Z",
+        "promotion": {
+          "promote": false,
+          "reasons": [
+            "completion rate below promotion minimum",
+            "mean kills below promotion minimum"
+          ]
+        },
+        "schema": "restfuldoom.ppo_eval.v1"
+      },
+      {
+        "baseline": "heuristic",
+        "baseline_result": {
+          "episodes": [
+            {
+              "damage_delta": 85,
+              "death": false,
+              "done_reason": "max_steps",
+              "end_episode": 1,
+              "end_map": 1,
+              "fire_on_shootable_steps": 151,
+              "first_shootable_contacts": 1,
+              "first_visible_contacts": 1,
+              "invalid_action_steps": 87,
+              "item_delta": 0,
+              "kill_delta": 4,
+              "level_completed": false,
+              "level_transition_delta": 0,
+              "max_item_gain": 0,
+              "max_items": 0,
+              "max_kill_gain": 4,
+              "max_kills": 4,
+              "max_secret_gain": 0,
+              "max_secrets": 0,
+              "min_health": 59,
+              "missed_shootable_fire_steps": 15,
+              "reset_source": "episode",
+              "secret_delta": 0,
+              "seed": 7,
+              "shootable_target_steps": 166,
+              "skill_counts": {
+                "close_visible_contact": 210,
+                "fire": 151,
+                "open_use_line": 486,
+                "press_exit": 30,
+                "recover_stuck": 33,
+                "route_progression": 329,
+                "seek_enemy": 171
+              },
+              "snapshot_verification_failures": 0,
+              "start_episode": 1,
+              "start_items": 0,
+              "start_kills": 0,
+              "start_map": 1,
+              "start_secrets": 0,
+              "steps": 1410,
+              "steps_to_exit": 4096,
+              "stuck_events": 33,
+              "total_reward": 148.1762,
+              "visible_enemy_steps": 372
+            }
+          ],
+          "result": {
+            "episode_count": 1,
+            "level_completion_rate": 0.0,
+            "mean_kills": 4.0,
+            "mean_reward": 148.1762,
+            "mean_steps_to_exit": 4096.0,
+            "mean_stuck_events": 33.0,
+            "policy_id": "heuristic_skill",
+            "survival_rate": 1.0
+          }
+        },
+        "candidate": {
+          "episodes": [
+            {
+              "damage_delta": 0,
+              "death": false,
+              "done_reason": "max_steps",
+              "end_episode": 1,
+              "end_map": 1,
+              "fire_on_shootable_steps": 0,
+              "first_shootable_contacts": 0,
+              "first_visible_contacts": 1,
+              "invalid_action_steps": 0,
+              "item_delta": 0,
+              "kill_delta": 0,
+              "level_completed": false,
+              "level_transition_delta": 0,
+              "max_item_gain": 0,
+              "max_items": 0,
+              "max_kill_gain": 0,
+              "max_kills": 0,
+              "max_secret_gain": 0,
+              "max_secrets": 0,
+              "min_health": 100,
+              "missed_shootable_fire_steps": 0,
+              "reset_source": "episode",
+              "secret_delta": 0,
+              "seed": 7,
+              "shootable_target_steps": 0,
+              "skill_counts": {
+                "close_visible_contact": 6,
+                "route_progression": 152,
+                "seek_enemy": 1372
+              },
+              "snapshot_verification_failures": 0,
+              "start_episode": 1,
+              "start_items": 0,
+              "start_kills": 0,
+              "start_map": 1,
+              "start_secrets": 0,
+              "steps": 1530,
+              "steps_to_exit": 4096,
+              "stuck_events": 0,
+              "total_reward": 8.183,
+              "visible_enemy_steps": 19
+            }
+          ],
+          "result": {
+            "episode_count": 1,
+            "level_completion_rate": 0.0,
+            "mean_kills": 0.0,
+            "mean_reward": 8.183,
+            "mean_steps_to_exit": 4096.0,
+            "mean_stuck_events": 0.0,
+            "policy_id": "ppo:agent_models/ppo/ppo-mixed-reset-clean-bridge-ppo-0000.pt",
+            "survival_rate": 1.0
+          }
+        },
+        "checkpoint_path": "agent_models/ppo/ppo-mixed-reset-clean-bridge-ppo-0000.pt",
+        "evaluated_at": "2026-06-27T23:25:01Z",
+        "promotion": {
+          "promote": false,
+          "reasons": [
+            "completion rate below promotion minimum",
+            "mean kills did not beat baseline",
+            "mean kills below promotion minimum",
+            "mean reward did not beat baseline"
+          ]
+        },
+        "schema": "restfuldoom.ppo_eval.v1"
+      }
+    ],
     "goal_preset": "combat",
     "metrics": {
       "approx_kl": 0.017664146868305072,
@@ -29244,5 +30299,5 @@
       "visited_cells": 62
     }
   ],
-  "updated_at": "2026-06-27T23:13:23Z"
+  "updated_at": "2026-06-27T23:25:01Z"
 }

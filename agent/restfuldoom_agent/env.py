@@ -519,7 +519,7 @@ class SkillController:
             return SKILL_ACTIONS.index("open_use_line")
         if self.policy._select_progression_line(features) is not None:
             return SKILL_ACTIONS.index("route_progression")
-        if self.policy._select_known_enemy(features) is not None:
+        if self.policy._select_known_enemy(features) is not None and self._blind_seek_allowed(features):
             return SKILL_ACTIONS.index("seek_enemy")
         return SKILL_ACTIONS.index("route_progression")
 
@@ -575,7 +575,11 @@ class SkillController:
             ):
                 mask["open_use_line"] = True
 
-        if not features.visible_enemies and self.policy._select_known_enemy(features) is not None:
+        if (
+            not features.visible_enemies
+            and self.policy._select_known_enemy(features) is not None
+            and self._blind_seek_allowed(features, recent_contact_active=recent_contact_active)
+        ):
             mask["seek_enemy"] = True
 
         if (
@@ -1037,6 +1041,21 @@ class SkillController:
             if 0 <= age <= 90 and self.policy._select_known_enemy(features) is not None:
                 return True
         return self._recent_visible_contact_active(features)
+
+    def _blind_seek_allowed(
+        self,
+        features: Any,
+        *,
+        recent_contact_active: bool | None = None,
+    ) -> bool:
+        """Allows known-enemy seeking only after current-episode contact evidence."""
+        if recent_contact_active is None:
+            recent_contact_active = self._recent_contact_active(features)
+        if recent_contact_active:
+            return True
+        if self.policy._last_visible_enemy_id is not None:
+            return True
+        return any(self._recent_visible_enemy_flags)
 
     def _recent_visible_contact_active(self, features: Any) -> bool:
         recent = self._recent_visible_contact

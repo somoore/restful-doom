@@ -298,6 +298,35 @@ def test_skill_controller_action_mask_uses_affordances():
     assert quiet_mask["route_progression"]
 
 
+def test_skill_controller_suppresses_blind_seek_before_episode_contact(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    memory.data["enemies"] = {
+        "7": {
+            "last_seen_tick": 10,
+            "last_position": [512.0, 0.0],
+            "last_distance": 512.0,
+            "last_health": 20,
+            "line_of_sight": True,
+        }
+    }
+    controller = SkillController(memory=memory)
+    quiet_spawn = _state(tick=10, enemy=False, combat=False)
+    visible_contact = _state(tick=11, enemy=True, combat=False)
+    lost_contact = _state(tick=20, enemy=True, enemy_line_of_sight=False, combat=False)
+
+    quiet_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(quiet_spawn)))
+    quiet_heuristic = SKILL_ACTIONS[controller.heuristic_action_index(quiet_spawn)]
+    controller.action_mask(visible_contact)
+    lost_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(lost_contact)))
+    lost_heuristic = SKILL_ACTIONS[controller.heuristic_action_index(lost_contact)]
+
+    assert not quiet_mask["seek_enemy"]
+    assert quiet_mask["route_progression"]
+    assert quiet_heuristic == "route_progression"
+    assert lost_mask["seek_enemy"]
+    assert lost_heuristic == "seek_enemy"
+
+
 def test_doom_agent_env_allowed_skill_filter_narrows_action_mask():
     env = DoomAgentEnv(
         DoomEnvConfig(allowed_skills=("close_visible_contact", "fire")),
