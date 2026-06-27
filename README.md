@@ -282,6 +282,11 @@ The training API is:
 - `--resume-best-checkpoint` continues PPO from `ppo_best_checkpoint` in
   `--memory-path`, which is useful when the latest curriculum update regressed
   but an earlier update in the same lineage had better rollout evidence.
+- `--checkpoint-eval-curriculum` evaluates each saved checkpoint across every
+  active curriculum stage and uses the aggregate cross-stage score for
+  `ppo_best_checkpoint`. This is slower than rollout-only selection, but it
+  helps avoid preserving a checkpoint that overfit one contact stage while
+  regressing combat-start or another visible-contact start.
 - `restfuldoom_agent.ppo` provides actor-critic PPO, GAE, clipped objective,
   entropy bonus, rollout JSONL buffers, checkpoint save/load, and a promotion
   gate.
@@ -406,6 +411,15 @@ over-forced line. Use `--curriculum-mode fixed --curriculum-start-index <n>`
 when a single stage needs repeated training before mixing it back into the
 schedule.
 
+For longer curriculum runs, add `--checkpoint-eval-curriculum` with small
+`--checkpoint-eval-max-steps` first. The eval result is stored in checkpoint
+extras, training output, and memory as
+`restfuldoom.ppo_checkpoint_curriculum_eval.v1`; best-checkpoint selection then
+uses the cross-stage score instead of only the active rollout's local reward.
+Because those scores are not on the same scale, the first curriculum-evaluated
+checkpoint intentionally starts a new best-checkpoint comparison lineage over
+older rollout-only bests.
+
 ```
 PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
     --endpoint 127.0.0.1:50051 \
@@ -420,7 +434,9 @@ PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
     --curriculum-mode round_robin \
     --first-shootable-bonus 20 \
     --visible-contact-progress-reward 0.01 \
-    --terminate-on-first-shootable
+    --terminate-on-first-shootable \
+    --checkpoint-eval-curriculum \
+    --checkpoint-eval-max-steps 128
 ```
 
 Continue from an existing PPO checkpoint:

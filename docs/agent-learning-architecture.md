@@ -258,9 +258,11 @@ The important sections are:
 - `learned_policy`: behavior-cloned skill selector metadata.
 - `ppo_policy`: latest PPO checkpoint metadata, reward config, rollout summary,
   and eval history.
-- `ppo_best_checkpoint`: best resume candidate observed so far by rollout
-  selection score. This is not promotion; it is a guard against continuing from
-  a later PPO update that regressed during curriculum training.
+- `ppo_best_checkpoint`: best resume candidate observed so far. By default this
+  uses rollout selection score; when checkpoint curriculum eval is enabled it
+  uses the cross-stage eval score instead. This is not promotion; it is a guard
+  against continuing from a later PPO update that regressed during curriculum
+  training.
 - `ppo_checkpoints`: exported PPO checkpoint lineage.
 
 The concrete contract is exported as
@@ -470,6 +472,17 @@ resolves `ppo_best_checkpoint.checkpoint_path` from memory and resumes that
 checkpoint. This is intentionally separate from promotion: it only chooses the
 best continuation point for more training, while promotion still requires the
 baseline evaluation gate.
+
+`ppo_agent --checkpoint-eval-curriculum` runs a short deterministic eval of
+each saved checkpoint across every active curriculum stage. The result uses
+schema `restfuldoom.ppo_checkpoint_curriculum_eval.v1` and is stored in
+checkpoint extras, training output, and memory. Best-checkpoint selection then
+uses the aggregate eval score instead of a single rollout's local score, which
+is specifically meant to catch the contact-curriculum failure mode where one
+fixed-stage run improves while `combat_start` or another visible-contact stage
+regresses. Because rollout-only and curriculum-eval scores are not comparable,
+the first eval-scored checkpoint supersedes older rollout-only bests; later
+eval-scored checkpoints compare against each other by the eval score.
 
 ## Reset Curriculum
 

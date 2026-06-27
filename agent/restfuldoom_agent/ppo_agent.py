@@ -100,6 +100,22 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
             rollout_summary = _summarize_buffer(buffer)
             metrics = trainer.update(buffer)
             checkpoint_path = args.checkpoint_dir / f"{args.run_id}-ppo-{update_index:04d}.pt"
+            checkpoint_extra = {
+                "buffer_path": str(buffer_path),
+                "endpoint": args.endpoint,
+                "episode": args.episode,
+                "map": args.map,
+                "skill": args.skill,
+                "rollout_summary": rollout_summary,
+                "behavior_clone": behavior_clone_summary or {},
+                "reset_start": curriculum_stage.get("reset_start", {}),
+                "curriculum": curriculum,
+                "curriculum_stage": curriculum_stage,
+                "resume_checkpoint": str(resume_checkpoint)
+                if resume_checkpoint is not None
+                else None,
+                "resume_migration": trainer.resume_migration,
+            }
             trainer.save_checkpoint(
                 checkpoint_path,
                 reward_config={
@@ -115,23 +131,34 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     "terminate_on_first_visible": args.terminate_on_first_visible,
                     "terminate_on_first_shootable": args.terminate_on_first_shootable,
                 },
-                extra={
-                    "buffer_path": str(buffer_path),
-                    "endpoint": args.endpoint,
-                    "episode": args.episode,
-                    "map": args.map,
-                    "skill": args.skill,
-                    "rollout_summary": rollout_summary,
-                    "behavior_clone": behavior_clone_summary or {},
-                    "reset_start": curriculum_stage.get("reset_start", {}),
-                    "curriculum": curriculum,
-                    "curriculum_stage": curriculum_stage,
-                    "resume_checkpoint": str(resume_checkpoint)
-                    if resume_checkpoint is not None
-                    else None,
-                    "resume_migration": trainer.resume_migration,
-                },
+                extra=checkpoint_extra,
             )
+            checkpoint_eval = None
+            if args.checkpoint_eval_curriculum:
+                checkpoint_eval = await _evaluate_checkpoint_curriculum(
+                    checkpoint_path,
+                    args,
+                    curriculum=curriculum,
+                    update_index=update_index,
+                )
+                checkpoint_extra["checkpoint_curriculum_eval"] = checkpoint_eval
+                trainer.save_checkpoint(
+                    checkpoint_path,
+                    reward_config={
+                        "goal_preset": args.goal_preset,
+                        "target_x_fp": args.target_x_fp,
+                        "target_y_fp": args.target_y_fp,
+                        "level_complete_bonus": args.level_complete_bonus,
+                        "kill_goal_bonus": args.kill_goal_bonus,
+                        "required_kills": args.required_kills,
+                        "first_visible_bonus": args.first_visible_bonus,
+                        "first_shootable_bonus": args.first_shootable_bonus,
+                        "visible_contact_progress_reward": args.visible_contact_progress_reward,
+                        "terminate_on_first_visible": args.terminate_on_first_visible,
+                        "terminate_on_first_shootable": args.terminate_on_first_shootable,
+                    },
+                    extra=checkpoint_extra,
+                )
             if memory is not None:
                 _record_ppo_checkpoint(
                     memory,
@@ -156,6 +183,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     buffer_path=buffer_path,
                     curriculum=curriculum,
                     curriculum_stage=curriculum_stage,
+                    checkpoint_eval=checkpoint_eval,
                 )
             summary_record = {
                 "update": update_index,
@@ -165,17 +193,20 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                 "metrics": metrics,
                 "rollout_summary": rollout_summary,
                 "curriculum_stage": curriculum_stage,
+                "checkpoint_eval": checkpoint_eval or {},
             }
             summaries.append(summary_record)
-            score = float(rollout_summary.get("checkpoint_selection_score", 0.0))
+            score = _checkpoint_resume_score(rollout_summary, checkpoint_eval)
             if best_checkpoint is None or score > float(best_checkpoint["score"]):
                 best_checkpoint = {
                     "update": update_index,
                     "score": score,
+                    "score_source": _checkpoint_resume_score_source(checkpoint_eval),
                     "checkpoint_path": str(checkpoint_path),
                     "buffer_path": str(buffer_path),
                     "rollout_summary": rollout_summary,
                     "curriculum_stage": curriculum_stage,
+                    "checkpoint_eval": checkpoint_eval or {},
                 }
     finally:
         await env.close()
@@ -357,6 +388,7 @@ def _record_ppo_checkpoint(
     buffer_path: Path,
     curriculum: dict[str, object] | None = None,
     curriculum_stage: dict[str, object] | None = None,
+    checkpoint_eval: dict[str, object] | None = None,
 ) -> None:
     """Records the latest PPO checkpoint for export/resume."""
     record = {
@@ -370,23 +402,25 @@ def _record_ppo_checkpoint(
         "buffer_path": str(buffer_path),
         "curriculum": curriculum or {},
         "curriculum_stage": curriculum_stage or {},
+        "checkpoint_eval": checkpoint_eval or {},
         "eval_history": [],
     }
     memory.data["ppo_policy"] = record
-    score = float(rollout_summary.get("checkpoint_selection_score", 0.0))
+    score = _checkpoint_resume_score(rollout_summary, checkpoint_eval)
+    score_source = _checkpoint_resume_score_source(checkpoint_eval)
     previous_best = memory.data.get("ppo_best_checkpoint")
-    if not isinstance(previous_best, dict) or score > float(
-        previous_best.get("checkpoint_selection_score", -1e12)
-    ):
+    if _should_replace_best_checkpoint(previous_best, score, score_source):
         memory.data["ppo_best_checkpoint"] = {
             "schema": "restfuldoom.ppo_best_checkpoint.v1",
             "checkpoint_path": str(checkpoint_path),
             "checkpoint_selection_score": score,
+            "checkpoint_selection_source": score_source,
             "goal_preset": goal_preset,
             "update_index": update_index,
             "buffer_path": str(buffer_path),
             "rollout_summary": rollout_summary,
             "curriculum_stage": curriculum_stage or {},
+            "checkpoint_eval": checkpoint_eval or {},
             "updated_at": _iso_now(),
         }
     checkpoints = memory.data.setdefault("ppo_checkpoints", [])
@@ -397,10 +431,136 @@ def _record_ppo_checkpoint(
             "buffer_path": str(buffer_path),
             "rollout_summary": rollout_summary,
             "curriculum_stage": curriculum_stage or {},
+            "checkpoint_eval": checkpoint_eval or {},
         }
     )
     memory.data["updated_at"] = _iso_now()
     memory.save()
+
+
+async def _evaluate_checkpoint_curriculum(
+    checkpoint_path: Path,
+    args: argparse.Namespace,
+    *,
+    curriculum: dict[str, object],
+    update_index: int,
+) -> dict[str, object]:
+    """Evaluates one checkpoint across every reset stage in the active curriculum."""
+    stages = curriculum.get("stages", [])
+    if not isinstance(stages, list) or not stages:
+        stages = [
+            {
+                "index": 0,
+                "name": "fresh_spawn",
+                "reset_start": {},
+            }
+        ]
+
+    stage_records: list[dict[str, object]] = []
+    for stage_index, stage in enumerate(stages):
+        stage_dict = dict(stage) if isinstance(stage, dict) else {}
+        stage_name = str(stage_dict.get("name", f"stage_{stage_index}"))
+        env_config = replace(
+            _env_config_for_start(args, stage_dict.get("reset_start", {})),
+            run_id=f"{args.run_id}-checkpoint-eval-{update_index:04d}-{stage_name}",
+            max_steps=args.checkpoint_eval_max_steps,
+        )
+        result = await evaluate_checkpoint(
+            str(checkpoint_path),
+            env_config,
+            episodes=args.checkpoint_eval_episodes,
+            max_steps=args.checkpoint_eval_max_steps,
+            seed=args.seed + update_index * 1000 + stage_index * 100,
+            device=args.device,
+            deterministic=not args.checkpoint_eval_sample,
+        )
+        stage_score = _policy_eval_selection_score(result)
+        stage_records.append(
+            {
+                "stage": stage_dict,
+                "selection_score": stage_score,
+                "result": result.to_dict(),
+            }
+        )
+
+    stage_scores = [float(record["selection_score"]) for record in stage_records]
+    mean_score = sum(stage_scores) / max(1, len(stage_scores))
+    worst_score = min(stage_scores) if stage_scores else 0.0
+    aggregate_score = round(mean_score * 0.7 + worst_score * 0.3, 4)
+    return {
+        "schema": "restfuldoom.ppo_checkpoint_curriculum_eval.v1",
+        "checkpoint_path": str(checkpoint_path),
+        "curriculum": {
+            "schema": curriculum.get("schema"),
+            "name": curriculum.get("name"),
+            "mode": curriculum.get("mode"),
+            "start_index": curriculum.get("start_index"),
+        },
+        "episodes_per_stage": int(args.checkpoint_eval_episodes),
+        "max_steps": int(args.checkpoint_eval_max_steps),
+        "sample": bool(args.checkpoint_eval_sample),
+        "stage_count": len(stage_records),
+        "mean_stage_score": round(mean_score, 4),
+        "worst_stage_score": round(worst_score, 4),
+        "selection_score": aggregate_score,
+        "score_formula": "0.7 * mean_stage_score + 0.3 * worst_stage_score",
+        "stages": stage_records,
+    }
+
+
+def _policy_eval_selection_score(eval_result: object) -> float:
+    """Scores deterministic eval results for resume selection, not promotion."""
+    result = getattr(eval_result, "result", eval_result)
+    return round(
+        float(getattr(result, "mean_reward", 0.0))
+        + float(getattr(result, "mean_kills", 0.0)) * 100.0
+        + float(getattr(result, "level_completion_rate", 0.0)) * 500.0
+        + float(getattr(result, "survival_rate", 0.0)) * 20.0
+        - float(getattr(result, "mean_stuck_events", 0.0)) * 2.0,
+        4,
+    )
+
+
+def _checkpoint_resume_score(
+    rollout_summary: dict[str, object],
+    checkpoint_eval: dict[str, object] | None = None,
+) -> float:
+    """Returns the score used for best-checkpoint resume selection."""
+    if isinstance(checkpoint_eval, dict) and checkpoint_eval.get("selection_score") is not None:
+        return float(checkpoint_eval["selection_score"])
+    return float(rollout_summary.get("checkpoint_selection_score", 0.0))
+
+
+def _checkpoint_resume_score_source(checkpoint_eval: dict[str, object] | None = None) -> str:
+    """Returns the source of the best-checkpoint resume score."""
+    if isinstance(checkpoint_eval, dict) and checkpoint_eval.get("selection_score") is not None:
+        return "checkpoint_curriculum_eval"
+    return "rollout_summary"
+
+
+def _should_replace_best_checkpoint(
+    previous_best: object,
+    score: float,
+    score_source: str,
+) -> bool:
+    """Returns whether a checkpoint should become the memory resume candidate."""
+    if not isinstance(previous_best, dict):
+        return True
+    previous_source = _best_checkpoint_score_source(previous_best)
+    if previous_source != score_source:
+        return score_source == "checkpoint_curriculum_eval"
+    return score > float(previous_best.get("checkpoint_selection_score", -1e12))
+
+
+def _best_checkpoint_score_source(best: dict[str, object]) -> str:
+    """Returns the score source for a stored best checkpoint, including legacy rows."""
+    explicit = best.get("checkpoint_selection_source")
+    if isinstance(explicit, str) and explicit:
+        return explicit
+    checkpoint_eval = best.get("checkpoint_eval", {})
+    if isinstance(checkpoint_eval, dict) and checkpoint_eval.get("selection_score") is not None:
+        return "checkpoint_curriculum_eval"
+    return "rollout_summary"
 
 
 def _resolve_resume_checkpoint(
@@ -875,6 +1035,17 @@ def main() -> None:
     parser.add_argument("--eval-episodes", type=int, default=1)
     parser.add_argument("--eval-max-steps", type=int, default=256)
     parser.add_argument("--eval-sample", action="store_true")
+    parser.add_argument(
+        "--checkpoint-eval-curriculum",
+        action="store_true",
+        help=(
+            "After each PPO update, evaluate the checkpoint across every active "
+            "curriculum stage and use that aggregate score for best-checkpoint resume."
+        ),
+    )
+    parser.add_argument("--checkpoint-eval-episodes", type=int, default=1)
+    parser.add_argument("--checkpoint-eval-max-steps", type=int, default=256)
+    parser.add_argument("--checkpoint-eval-sample", action="store_true")
     parser.add_argument("--promotion-min-completion-delta", type=float, default=0.0)
     parser.add_argument("--promotion-min-kill-delta", type=float, default=0.0)
     parser.add_argument("--promotion-min-reward-delta", type=float, default=0.0)

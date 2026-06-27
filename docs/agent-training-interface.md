@@ -145,6 +145,12 @@ memory-derived features, mutates only `SkillController` episode-local history,
 then writes memory at checkpoint or evaluation boundaries. That keeps the inner
 loop fast and keeps resume/export state auditable.
 
+When `--checkpoint-eval-curriculum` is enabled, checkpoint-boundary writes also
+include `checkpoint_eval` with schema
+`restfuldoom.ppo_checkpoint_curriculum_eval.v1`. `ppo_best_checkpoint` records
+`checkpoint_selection_source` so resume/export consumers can distinguish a
+rollout-only choice from a cross-stage curriculum-evaluated choice.
+
 Export and cloud resume copy:
 
 - `agent_memory/e1m1.json`

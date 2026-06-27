@@ -8,9 +8,13 @@ from restfuldoom_agent.brain import AgentMemory, _memory_ppo_checkpoint_paths
 from restfuldoom_agent.ppo_agent import (
     _annotate_buffer_curriculum,
     _checkpoint_selection_score,
+    _checkpoint_resume_score,
+    _checkpoint_resume_score_source,
+    _policy_eval_selection_score,
     _record_ppo_checkpoint,
     _reset_start_from_trajectory,
     _resolve_resume_checkpoint,
+    _should_replace_best_checkpoint,
     _summarize_buffer,
 )
 from restfuldoom_agent.learning_trace import LEARNING_TRACE_SCHEMA, build_learning_trace
@@ -764,6 +768,83 @@ def test_checkpoint_selection_score_prefers_damage_contact_and_fire():
     assert _checkpoint_selection_score(useful) > _checkpoint_selection_score(weak)
 
 
+def test_policy_eval_selection_score_rewards_cross_stage_competence():
+    weak = PolicyEval(
+        result=EvaluationResult(
+            policy_id="ppo:weak",
+            level_completion_rate=0.0,
+            mean_kills=0.0,
+            survival_rate=1.0,
+            mean_steps_to_exit=256,
+            mean_stuck_events=4.0,
+            episode_count=1,
+            mean_reward=20.0,
+        ),
+        episodes=[],
+    )
+    useful = PolicyEval(
+        result=EvaluationResult(
+            policy_id="ppo:useful",
+            level_completion_rate=0.0,
+            mean_kills=1.0,
+            survival_rate=1.0,
+            mean_steps_to_exit=256,
+            mean_stuck_events=1.0,
+            episode_count=1,
+            mean_reward=15.0,
+        ),
+        episodes=[],
+    )
+
+    assert _policy_eval_selection_score(useful) > _policy_eval_selection_score(weak)
+
+
+def test_checkpoint_resume_score_prefers_curriculum_eval_when_present():
+    rollout_summary = {"checkpoint_selection_score": 500.0}
+    checkpoint_eval = {
+        "schema": "restfuldoom.ppo_checkpoint_curriculum_eval.v1",
+        "selection_score": 42.5,
+    }
+
+    assert _checkpoint_resume_score(rollout_summary, checkpoint_eval) == 42.5
+    assert _checkpoint_resume_score_source(checkpoint_eval) == "checkpoint_curriculum_eval"
+    assert _checkpoint_resume_score(rollout_summary, None) == 500.0
+    assert _checkpoint_resume_score_source(None) == "rollout_summary"
+
+
+def test_curriculum_eval_best_replaces_legacy_rollout_best():
+    legacy_best = {
+        "checkpoint_selection_score": 890.0,
+        "checkpoint_path": "old-rollout.pt",
+    }
+    eval_best = {
+        "checkpoint_selection_score": 80.0,
+        "checkpoint_selection_source": "checkpoint_curriculum_eval",
+        "checkpoint_path": "old-eval.pt",
+    }
+
+    assert _should_replace_best_checkpoint(
+        legacy_best,
+        score=24.0,
+        score_source="checkpoint_curriculum_eval",
+    )
+    assert not _should_replace_best_checkpoint(
+        eval_best,
+        score=500.0,
+        score_source="rollout_summary",
+    )
+    assert _should_replace_best_checkpoint(
+        eval_best,
+        score=90.0,
+        score_source="checkpoint_curriculum_eval",
+    )
+    assert not _should_replace_best_checkpoint(
+        eval_best,
+        score=70.0,
+        score_source="checkpoint_curriculum_eval",
+    )
+
+
 def test_record_ppo_checkpoint_preserves_best_resume_candidate(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     first_summary = {
@@ -803,6 +884,60 @@ def test_record_ppo_checkpoint_preserves_best_resume_candidate(tmp_path):
     assert memory.data["ppo_policy"]["checkpoint_path"].endswith("bad.pt")
     assert memory.data["ppo_best_checkpoint"]["checkpoint_path"].endswith("good.pt")
     assert memory.data["ppo_best_checkpoint"]["checkpoint_selection_score"] == 50.0
+
+
+def test_record_ppo_checkpoint_uses_curriculum_eval_for_best_candidate(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    high_rollout_low_eval = {
+        "checkpoint_selection_score": 500.0,
+        "total_reward": 200.0,
+        "damage_delta": 30,
+    }
+    lower_rollout_higher_eval = {
+        "checkpoint_selection_score": 100.0,
+        "total_reward": 80.0,
+        "damage_delta": 10,
+    }
+
+    _record_ppo_checkpoint(
+        memory,
+        tmp_path / "overfit.pt",
+        goal_preset="combat",
+        reward_config={"goal_preset": "combat"},
+        metrics={"policy_loss": 0.1},
+        rollout_summary=high_rollout_low_eval,
+        update_index=0,
+        buffer_path=tmp_path / "overfit.jsonl",
+        curriculum_stage={"name": "visible_contact_seek"},
+        checkpoint_eval={
+            "schema": "restfuldoom.ppo_checkpoint_curriculum_eval.v1",
+            "selection_score": 10.0,
+            "stages": [],
+        },
+    )
+    _record_ppo_checkpoint(
+        memory,
+        tmp_path / "general.pt",
+        goal_preset="combat",
+        reward_config={"goal_preset": "combat"},
+        metrics={"policy_loss": 0.2},
+        rollout_summary=lower_rollout_higher_eval,
+        update_index=1,
+        buffer_path=tmp_path / "general.jsonl",
+        curriculum_stage={"name": "visible_contact_route"},
+        checkpoint_eval={
+            "schema": "restfuldoom.ppo_checkpoint_curriculum_eval.v1",
+            "selection_score": 80.0,
+            "stages": [],
+        },
+    )
+
+    best = memory.data["ppo_best_checkpoint"]
+    assert memory.data["ppo_policy"]["checkpoint_path"].endswith("general.pt")
+    assert best["checkpoint_path"].endswith("general.pt")
+    assert best["checkpoint_selection_score"] == 80.0
+    assert best["checkpoint_selection_source"] == "checkpoint_curriculum_eval"
+    assert best["checkpoint_eval"]["schema"] == "restfuldoom.ppo_checkpoint_curriculum_eval.v1"
 
 
 def test_ppo_export_paths_include_best_checkpoint(tmp_path):
