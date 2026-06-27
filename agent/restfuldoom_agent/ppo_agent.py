@@ -7,9 +7,11 @@ import asyncio
 import json
 import time
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 
 from .brain import AgentMemory
+from .curriculum import build_curriculum, curriculum_names, stage_for_update
 from .env import ACTION_SCHEMA, OBSERVATION_SCHEMA, DoomAgentEnv, DoomEnvConfig
 from .ppo import PPOConfig, PPOTrainer, require_torch
 from .ppo_eval import (
@@ -26,38 +28,16 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
     """Runs PPO collection and update batches."""
     require_torch()
     reset_start = _resolve_reset_start(args)
-    env_config = DoomEnvConfig(
-        endpoint=args.endpoint,
-        token=args.token,
-        agent_port=args.agent_port,
-        tls=args.tls,
-        authority=args.authority,
-        skill=args.skill,
-        episode=args.episode,
-        map=args.map,
+    curriculum = build_curriculum(
+        name=args.curriculum,
+        manual_reset_start=reset_start,
+        mode=args.curriculum_mode,
+        start_index=args.curriculum_start_index,
         seed=args.seed,
-        run_id=args.run_id,
-        goal_preset=args.goal_preset,
-        target_x_fp=args.target_x_fp,
-        target_y_fp=args.target_y_fp,
-        max_steps=args.max_steps,
-        level_complete_bonus=args.level_complete_bonus,
-        kill_goal_bonus=args.kill_goal_bonus,
-        required_kills=args.required_kills,
-        memory_path=args.memory_path,
-        reset_timeout_seconds=args.reset_timeout_seconds,
-        reset_attempts=args.reset_attempts,
-        reset_start_x_fp=reset_start.get("x_fp"),
-        reset_start_y_fp=reset_start.get("y_fp"),
-        reset_start_angle_degrees=int(reset_start.get("angle_degrees", 0)),
-        reset_start_face_nearest_enemy=bool(reset_start.get("face_nearest_enemy", False)),
-        reset_start_health=reset_start.get("health"),
-        reset_start_armor=reset_start.get("armor"),
-        reset_start_ammo_bullets=reset_start.get("ammo_bullets"),
-        reset_warmup_steps=args.reset_warmup_steps,
-        reset_warmup_max_tics=args.reset_warmup_max_tics,
-        reset_warmup_until_visible=args.reset_warmup_until_visible,
-        reset_warmup_until_shootable=args.reset_warmup_until_shootable,
+    )
+    env_config = _env_config_for_start(
+        args,
+        stage_for_update(curriculum, 0).get("reset_start", {}),
     )
     ppo_config = PPOConfig(
         learning_rate=args.learning_rate,
@@ -102,11 +82,17 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
     summaries = []
     try:
         for update_index in range(args.updates):
+            curriculum_stage = stage_for_update(curriculum, update_index)
+            env.config = replace(
+                _env_config_for_start(args, curriculum_stage.get("reset_start", {})),
+                run_id=f"{args.run_id}-{curriculum_stage['name']}",
+            )
             buffer = await trainer.collect_rollout(
                 env,
                 steps=args.rollout_steps,
                 seed=args.seed + update_index,
             )
+            _annotate_buffer_curriculum(buffer, curriculum, curriculum_stage)
             buffer_path = args.buffer_dir / f"{args.run_id}-buffer-{update_index:04d}.jsonl"
             buffer.save_jsonl(buffer_path)
             rollout_summary = _summarize_buffer(buffer)
@@ -130,7 +116,9 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     "skill": args.skill,
                     "rollout_summary": rollout_summary,
                     "behavior_clone": behavior_clone_summary or {},
-                    "reset_start": reset_start,
+                    "reset_start": curriculum_stage.get("reset_start", {}),
+                    "curriculum": curriculum,
+                    "curriculum_stage": curriculum_stage,
                     "resume_checkpoint": str(args.resume_checkpoint)
                     if args.resume_checkpoint is not None
                     else None,
@@ -154,6 +142,8 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     rollout_summary=rollout_summary,
                     update_index=update_index,
                     buffer_path=buffer_path,
+                    curriculum=curriculum,
+                    curriculum_stage=curriculum_stage,
                 )
             summaries.append(
                 {
@@ -163,6 +153,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     "checkpoint_path": str(checkpoint_path),
                     "metrics": metrics,
                     "rollout_summary": rollout_summary,
+                    "curriculum_stage": curriculum_stage,
                 }
             )
     finally:
@@ -173,6 +164,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
         "updates": summaries,
         "behavior_clone": behavior_clone_summary or {},
         "reset_start": reset_start,
+        "curriculum": curriculum,
         "resume_checkpoint": str(args.resume_checkpoint) if args.resume_checkpoint else None,
         "observation_schema": OBSERVATION_SCHEMA,
         "action_schema": ACTION_SCHEMA,
@@ -260,6 +252,61 @@ async def evaluate(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+def _env_config_for_start(
+    args: argparse.Namespace,
+    reset_start: object,
+) -> DoomEnvConfig:
+    start = reset_start if isinstance(reset_start, dict) else {}
+    return DoomEnvConfig(
+        endpoint=args.endpoint,
+        token=args.token,
+        agent_port=args.agent_port,
+        tls=args.tls,
+        authority=args.authority,
+        skill=args.skill,
+        episode=args.episode,
+        map=args.map,
+        seed=args.seed,
+        run_id=args.run_id,
+        goal_preset=args.goal_preset,
+        target_x_fp=args.target_x_fp,
+        target_y_fp=args.target_y_fp,
+        max_steps=args.max_steps,
+        level_complete_bonus=args.level_complete_bonus,
+        kill_goal_bonus=args.kill_goal_bonus,
+        required_kills=args.required_kills,
+        memory_path=args.memory_path,
+        reset_timeout_seconds=args.reset_timeout_seconds,
+        reset_attempts=args.reset_attempts,
+        reset_start_x_fp=start.get("x_fp"),
+        reset_start_y_fp=start.get("y_fp"),
+        reset_start_angle_degrees=int(start.get("angle_degrees", 0)),
+        reset_start_face_nearest_enemy=bool(start.get("face_nearest_enemy", False)),
+        reset_start_health=start.get("health"),
+        reset_start_armor=start.get("armor"),
+        reset_start_ammo_bullets=start.get("ammo_bullets"),
+        reset_warmup_steps=args.reset_warmup_steps,
+        reset_warmup_max_tics=args.reset_warmup_max_tics,
+        reset_warmup_until_visible=args.reset_warmup_until_visible,
+        reset_warmup_until_shootable=args.reset_warmup_until_shootable,
+    )
+
+
+def _annotate_buffer_curriculum(
+    buffer: object,
+    curriculum: dict[str, object],
+    curriculum_stage: dict[str, object],
+) -> None:
+    for record in getattr(buffer, "records", []):
+        if isinstance(getattr(record, "info", None), dict):
+            record.info["curriculum"] = {
+                "schema": curriculum.get("schema"),
+                "name": curriculum.get("name"),
+                "mode": curriculum.get("mode"),
+            }
+            record.info["curriculum_stage"] = dict(curriculum_stage)
+
+
 def _record_ppo_checkpoint(
     memory: AgentMemory,
     checkpoint_path: Path,
@@ -270,6 +317,8 @@ def _record_ppo_checkpoint(
     rollout_summary: dict[str, object],
     update_index: int,
     buffer_path: Path,
+    curriculum: dict[str, object] | None = None,
+    curriculum_stage: dict[str, object] | None = None,
 ) -> None:
     """Records the latest PPO checkpoint for export/resume."""
     record = {
@@ -281,6 +330,8 @@ def _record_ppo_checkpoint(
         "rollout_summary": rollout_summary,
         "update_index": update_index,
         "buffer_path": str(buffer_path),
+        "curriculum": curriculum or {},
+        "curriculum_stage": curriculum_stage or {},
         "eval_history": [],
     }
     memory.data["ppo_policy"] = record
@@ -291,6 +342,7 @@ def _record_ppo_checkpoint(
             "update_index": update_index,
             "buffer_path": str(buffer_path),
             "rollout_summary": rollout_summary,
+            "curriculum_stage": curriculum_stage or {},
         }
     )
     memory.data["updated_at"] = _iso_now()
@@ -428,6 +480,11 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         for record in records
         if isinstance(record.info, dict)
     )
+    curriculum_stages = Counter(
+        str(record.info.get("curriculum_stage", {}).get("name", "unknown"))
+        for record in records
+        if isinstance(record.info, dict) and record.info.get("curriculum_stage")
+    )
     transitions = [
         record.info.get("transition", {})
         for record in records
@@ -495,6 +552,7 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         "max_kills": max((int(state.get("kills", 0)) for state in states), default=0),
         "min_health": min((int(state.get("health", 0)) for state in states), default=0),
         "skill_counts": dict(sorted(skills.items())),
+        "curriculum_stage_counts": dict(sorted(curriculum_stages.items())),
     }
 
 
@@ -534,6 +592,19 @@ def main() -> None:
     parser.add_argument("--reset-start-ammo-bullets", type=int)
     parser.add_argument("--reset-start-trajectory", type=Path)
     parser.add_argument("--reset-start-index", type=int, default=0)
+    parser.add_argument(
+        "--curriculum",
+        choices=["none", *curriculum_names()],
+        default="none",
+        help="Named reset-start curriculum for PPO training.",
+    )
+    parser.add_argument(
+        "--curriculum-mode",
+        choices=["round_robin", "progressive", "random"],
+        default="round_robin",
+        help="How training updates select curriculum stages.",
+    )
+    parser.add_argument("--curriculum-start-index", type=int, default=0)
     parser.add_argument("--reset-warmup-steps", type=int, default=0)
     parser.add_argument("--reset-warmup-max-tics", type=int, default=0)
     parser.add_argument("--reset-warmup-until-visible", action="store_true")

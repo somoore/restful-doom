@@ -335,6 +335,21 @@ mutations from a later trajectory are not replayed. It is useful for cheap
 combat starts and should eventually be replaced or complemented by true
 snapshot restore for long-route curriculum.
 
+The PPO CLI also has named reset-start schedules. The first one,
+`e1m1-spawn-to-combat`, uses `restfuldoom.ppo_curriculum.v1` metadata and
+rotates fresh-reset starts from easiest to hardest:
+
+1. `combat_start`: known legal combat start with immediate enemy line-of-sight.
+2. `first_visible_enemy`: trajectory-derived first-contact neighborhood.
+3. `opening_route`: trajectory-derived pre-contact navigation state.
+4. `fresh_spawn`: true E1M1 spawn with no teleport override.
+
+Modes are `round_robin`, `progressive`, and `random`. Rollout records,
+checkpoint extras, and memory checkpoint entries carry both the curriculum
+descriptor and the active stage. This makes spawn-to-contact transfer auditable:
+we can see whether an update trained combat, first contact, route approach, or
+fresh spawn.
+
 Second, the environment can optionally run heuristic-only warmup after reset and
 before PPO starts collecting transitions. Warmup can stop on:
 

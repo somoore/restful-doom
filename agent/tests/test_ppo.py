@@ -3,7 +3,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from restfuldoom_agent.ppo_agent import _reset_start_from_trajectory, _summarize_buffer
+from restfuldoom_agent.curriculum import build_curriculum, stage_for_update
+from restfuldoom_agent.ppo_agent import (
+    _annotate_buffer_curriculum,
+    _reset_start_from_trajectory,
+    _summarize_buffer,
+)
 from restfuldoom_agent.ppo import (
     PPOConfig,
     PPOTrainer,
@@ -251,6 +256,71 @@ def test_reset_start_from_trajectory_row(tmp_path):
         "armor": 7,
         "ammo_bullets": 37,
     }
+
+
+def test_named_curriculum_selects_e1m1_stages():
+    curriculum = build_curriculum(
+        name="e1m1-spawn-to-combat",
+        manual_reset_start={},
+        mode="round_robin",
+        start_index=0,
+        seed=7,
+    )
+
+    first = stage_for_update(curriculum, 0)
+    second = stage_for_update(curriculum, 1)
+    spawn = stage_for_update(curriculum, 3)
+
+    assert curriculum["schema"] == "restfuldoom.ppo_curriculum.v1"
+    assert first["name"] == "combat_start"
+    assert first["reset_start"]["face_nearest_enemy"] is True
+    assert second["name"] == "first_visible_enemy"
+    assert spawn["name"] == "fresh_spawn"
+    assert spawn["reset_start"] == {}
+
+
+def test_curriculum_rejects_manual_start_mix():
+    with pytest.raises(ValueError, match="cannot be combined"):
+        build_curriculum(
+            name="e1m1-spawn-to-combat",
+            manual_reset_start={"x_fp": 1},
+            mode="round_robin",
+            start_index=0,
+            seed=7,
+        )
+
+
+def test_rollout_summary_counts_curriculum_stages():
+    buffer = RolloutBuffer()
+    buffer.add(
+        obs=[0.0, 1.0],
+        action_mask=[True, False],
+        action=0,
+        reward=1.0,
+        done=False,
+        value=0.0,
+        logprob=0.0,
+        info={
+            "skill": "engage",
+            "transition": {},
+            "state": {"health": 100, "kills": 0},
+        },
+    )
+    curriculum = build_curriculum(
+        name="e1m1-spawn-to-combat",
+        manual_reset_start={},
+        mode="round_robin",
+        start_index=0,
+        seed=7,
+    )
+    stage = stage_for_update(curriculum, 0)
+
+    _annotate_buffer_curriculum(buffer, curriculum, stage)
+    summary = _summarize_buffer(buffer)
+
+    assert buffer.records[0].info["curriculum"]["name"] == "e1m1-spawn-to-combat"
+    assert buffer.records[0].info["curriculum_stage"]["name"] == "combat_start"
+    assert summary["curriculum_stage_counts"] == {"combat_start": 1}
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")

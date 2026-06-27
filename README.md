@@ -346,6 +346,28 @@ PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
     --reset-start-ammo-bullets 50
 ```
 
+A named reset-start curriculum can rotate from proven combat starts back toward
+normal spawn-to-contact navigation without restarting Docker:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
+    --endpoint 127.0.0.1:50051 \
+    --goal-preset navigation \
+    --updates 8 \
+    --rollout-steps 128 \
+    --checkpoint-dir agent_models/ppo \
+    --buffer-dir trajectories/ppo \
+    --memory-path agent_memory/e1m1.json \
+    --resume-checkpoint agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0007.pt \
+    --curriculum e1m1-spawn-to-combat \
+    --curriculum-mode round_robin
+```
+
+The current `e1m1-spawn-to-combat` stages are fresh-level `EpisodeStart`
+teleports ordered from easiest to hardest: combat start, first visible enemy,
+opening route, then real E1M1 spawn. Each rollout row and checkpoint records the
+active `restfuldoom.ppo_curriculum.v1` stage.
+
 Continue from an existing PPO checkpoint:
 
 ```
