@@ -21,6 +21,7 @@ AUTO_SELECTORS = frozenset(
     {
         "first-visible",
         "first-shootable",
+        "first-enemy-shootable",
         "first-damage",
         "first-kill",
         "level-transition",
@@ -192,6 +193,8 @@ def _first_matching_record(
         if selector == "first-visible" and _has_visible_enemy(record):
             return entry
         if selector == "first-shootable" and _has_shootable_target(record):
+            return entry
+        if selector == "first-enemy-shootable" and _has_enemy_shootable_target(record):
             return entry
         if selector == "first-damage" and _damage_delta(record) > 0:
             return entry
@@ -468,6 +471,19 @@ def _has_shootable_target(record: dict[str, Any]) -> bool:
     )
 
 
+def _has_enemy_shootable_target(record: dict[str, Any]) -> bool:
+    if not _has_shootable_target(record):
+        return False
+    state = _record_state(record)
+    combat = state.get("combat")
+    if isinstance(combat, dict) and "target_is_enemy" in combat:
+        return bool(combat.get("target_is_enemy"))
+    decision_combat = _policy_decision(record).get("combat")
+    if isinstance(decision_combat, dict) and "target_is_enemy" in decision_combat:
+        return bool(decision_combat.get("target_is_enemy"))
+    return False
+
+
 def _damage_delta(record: dict[str, Any]) -> int:
     info_transition = _record_info(record).get("transition")
     if isinstance(info_transition, dict):
@@ -523,7 +539,8 @@ def _stage_note(selector: str) -> str:
     notes = {
         "explicit": "Restore an exact progressed state selected from a trajectory row.",
         "first-visible": "Restore the first trajectory state with visible enemy contact.",
-        "first-shootable": "Restore the first trajectory state with a shootable enemy.",
+        "first-shootable": "Restore the first trajectory state with any shootable target.",
+        "first-enemy-shootable": "Restore the first trajectory state with a shootable enemy target.",
         "first-damage": "Restore the first trajectory state where the agent dealt damage.",
         "first-kill": "Restore the first trajectory state where the agent scored a kill.",
         "level-transition": "Restore the trajectory state around level transition.",

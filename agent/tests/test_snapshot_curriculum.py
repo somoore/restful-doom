@@ -32,6 +32,14 @@ def test_snapshot_builder_generates_manifest_from_trajectory_rows(tmp_path):
                 2,
                 visible=True,
                 shootable=True,
+                target_is_enemy=False,
+                skill="open_use_line",
+            ),
+            _trajectory_row(
+                3,
+                visible=True,
+                shootable=True,
+                target_is_enemy=True,
                 skill="fire",
                 damage_delta=20,
             ),
@@ -43,7 +51,7 @@ def test_snapshot_builder_generates_manifest_from_trajectory_rows(tmp_path):
         output_path=tmp_path / "snapshot-curriculum.json",
         name="e1m1-progressed",
         indexes=[1],
-        auto_selectors=["first-shootable", "first-damage"],
+        auto_selectors=["first-enemy-shootable", "first-damage"],
         snapshot_dir=Path("snapshots"),
         save_slot_base=3,
     )
@@ -51,11 +59,11 @@ def test_snapshot_builder_generates_manifest_from_trajectory_rows(tmp_path):
     assert manifest["schema"] == "restfuldoom.snapshot_curriculum.v1"
     assert manifest["source"]["selection"] == {
         "indexes": [1],
-        "auto": ["first-shootable", "first-damage"],
+        "auto": ["first-enemy-shootable", "first-damage"],
     }
     assert [stage["evidence"]["source_record_index"] for stage in manifest["stages"]] == [
         1,
-        2,
+        3,
     ]
     first, second = manifest["stages"]
     assert first["name"] == "0001-explicit_snapshot"
@@ -65,7 +73,7 @@ def test_snapshot_builder_generates_manifest_from_trajectory_rows(tmp_path):
     assert first["expected_state"]["target_is_enemy"] is False
     assert first["snapshot"]["slot"] == 3
     assert first["snapshot"]["ref"] == "save_slot:3"
-    assert second["evidence"]["selectors"] == ["first-shootable", "first-damage"]
+    assert second["evidence"]["selectors"] == ["first-enemy-shootable", "first-damage"]
     assert second["expected_state"]["shootable_target"] is True
     assert second["expected_state"]["target_is_enemy"] is True
     assert second["expected_state"]["damage_delta"] == 20
@@ -76,7 +84,7 @@ def test_snapshot_builder_generates_manifest_from_trajectory_rows(tmp_path):
     assert validation["stage_count"] == 2
     assert validation["missing_artifacts"] == [
         "0001-explicit_snapshot",
-        "0002-first-shootable_snapshot",
+        "0003-first-enemy-shootable_snapshot",
     ]
 
 
@@ -187,15 +195,25 @@ def test_snapshot_capture_command_redacts_tokens():
 
 def test_native_snapshot_capture_tracker_groups_same_record_selectors():
     tracker = SnapshotMilestoneTracker(
-        ("first-visible", "first-shootable", "first-damage")
+        ("first-visible", "first-enemy-shootable", "first-damage")
     )
 
     first = tracker.observe(_trajectory_row(0, visible=False, shootable=False))
-    second = tracker.observe(
+    non_enemy = tracker.observe(
         _trajectory_row(
             1,
             visible=True,
             shootable=True,
+            target_is_enemy=False,
+        )
+    )
+    tracker.mark_captured(non_enemy)
+    second = tracker.observe(
+        _trajectory_row(
+            2,
+            visible=True,
+            shootable=True,
+            target_is_enemy=True,
             damage_delta=20,
         )
     )
@@ -205,14 +223,44 @@ def test_native_snapshot_capture_tracker_groups_same_record_selectors():
             2,
             visible=True,
             shootable=True,
+            target_is_enemy=True,
             damage_delta=20,
         )
     )
 
     assert first == []
-    assert second == ["first-visible", "first-shootable", "first-damage"]
+    assert non_enemy == ["first-visible"]
+    assert second == ["first-enemy-shootable", "first-damage"]
     assert tracker.complete is True
     assert third == []
+
+
+def test_snapshot_builder_first_enemy_shootable_skips_non_enemy_target(tmp_path):
+    trajectory = tmp_path / "run.jsonl"
+    _write_jsonl(
+        trajectory,
+        [
+            _trajectory_row(0, visible=True, shootable=True, target_is_enemy=False),
+            _trajectory_row(1, visible=True, shootable=True, target_is_enemy=True),
+        ],
+    )
+
+    manifest = build_snapshot_curriculum_from_trajectory(
+        trajectory,
+        output_path=tmp_path / "snapshot-curriculum.json",
+        name="enemy-shootable",
+        auto_selectors=["first-shootable", "first-enemy-shootable"],
+        save_slot_base=1,
+    )
+
+    assert [stage["evidence"]["source_record_index"] for stage in manifest["stages"]] == [
+        0,
+        1,
+    ]
+    assert manifest["stages"][0]["evidence"]["selectors"] == ["first-shootable"]
+    assert manifest["stages"][0]["expected_state"]["target_is_enemy"] is False
+    assert manifest["stages"][1]["evidence"]["selectors"] == ["first-enemy-shootable"]
+    assert manifest["stages"][1]["expected_state"]["target_is_enemy"] is True
 
 
 def test_native_snapshot_capture_stage_queues_save_slot(tmp_path):
@@ -326,7 +374,7 @@ def test_snapshot_capture_rejects_native_slot_range_exhaustion(tmp_path, capsys)
                 "--auto",
                 "first-visible",
                 "--auto",
-                "first-shootable",
+                "first-enemy-shootable",
                 "--auto",
                 "first-damage",
             ]
@@ -426,10 +474,13 @@ def _trajectory_row(
     *,
     visible: bool,
     shootable: bool,
+    target_is_enemy: bool | None = None,
     skill: str = "route_progression",
     damage_delta: int = 0,
     kill_delta: int = 0,
 ) -> dict:
+    if target_is_enemy is None:
+        target_is_enemy = bool(shootable)
     return {
         "index": index,
         "state": {
@@ -444,7 +495,7 @@ def _trajectory_row(
             "position_fp": [(100 + index) * 65536, -200 * 65536, 0],
             "combat": {
                 "has_shootable_target": shootable,
-                "target_is_enemy": shootable,
+                "target_is_enemy": target_is_enemy,
             },
         },
         "reward": {
@@ -456,7 +507,10 @@ def _trajectory_row(
             "policy_decision": {
                 "skill": skill,
                 "visible_enemies": 1 if visible else 0,
-                "combat": {"has_shootable_target": shootable},
+                "combat": {
+                    "has_shootable_target": shootable,
+                    "target_is_enemy": target_is_enemy,
+                },
             }
         },
     }

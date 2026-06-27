@@ -26,6 +26,7 @@ from .snapshot_builder import (
     AUTO_SELECTORS,
     _damage_delta,
     _episode_map,
+    _has_enemy_shootable_target,
     _has_shootable_target,
     _has_visible_enemy,
     _int_or_none,
@@ -58,7 +59,7 @@ class SnapshotCaptureConfig:
     snapshot_dir: Path = Path("snapshots")
     auto_selectors: tuple[str, ...] = (
         "first-visible",
-        "first-shootable",
+        "first-enemy-shootable",
         "first-damage",
     )
     save_slot_base: int = 0
@@ -117,6 +118,8 @@ class SnapshotMilestoneTracker:
             if selector == "first-visible" and _has_visible_enemy(record):
                 matches.append(selector)
             elif selector == "first-shootable" and _has_shootable_target(record):
+                matches.append(selector)
+            elif selector == "first-enemy-shootable" and _has_enemy_shootable_target(record):
                 matches.append(selector)
             elif selector == "first-damage" and _damage_delta(record) > 0:
                 matches.append(selector)

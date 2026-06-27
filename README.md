@@ -562,7 +562,7 @@ PYTHONPATH=agent python -m restfuldoom_agent.snapshot_builder \
     --snapshot-dir snapshots \
     --save-slot-base 3 \
     --auto first-visible \
-    --auto first-shootable \
+    --auto first-enemy-shootable \
     --auto first-damage
 ```
 
@@ -589,7 +589,7 @@ PYTHONPATH=agent python -m restfuldoom_agent.snapshot_capture \
     --reset-before-attempt \
     --reset-seed-base 31 \
     --auto first-visible \
-    --auto first-shootable \
+    --auto first-enemy-shootable \
     --auto first-damage \
     --auto first-kill \
     --verify-loads
@@ -606,6 +606,10 @@ fresh capture attempts until all requested milestones are found; with
 instead of relying on Docker restart. Native Doom agent saves currently expose
 slots `0..9`, so choose `--save-slot-base` such that the highest requested
 milestone fits that range.
+
+Prefer `--auto first-enemy-shootable` for combat curriculum. The older
+`first-shootable` selector intentionally means any shootable target and may
+capture barrels or other non-enemy targets when `combat.target_is_enemy=false`.
 
 During PPO training, snapshot resets verify the first restored protobuf state
 against the stage `expected_state` before collecting rollout records. The check

@@ -712,6 +712,17 @@ Recent PPO evidence:
   start-vs-earned counters for kills, items, secrets, and map transitions. Live
   smoke `ppo-snapshot-eval-fields-smoke` confirmed the `first-kill` slot
   reported `start_kills=1`, `max_kills=1`, but earned `mean_kills=0.0`.
+- Native snapshot capture now has an enemy-specific
+  `first-enemy-shootable` selector. The previous `first-shootable` milestone
+  can match non-enemy targets, which made one early snapshot curriculum stage
+  poor training data for combat. Future combat captures should prefer the
+  enemy-specific selector.
+- Live capture `e1m1-enemy-shootable-bottlenecks` verified the new selector on
+  native slots 0..2. Follow-up PPO run `ppo-enemy-slot-train` resumed the prior
+  contact checkpoint and earned kills from both `first-enemy-shootable` and
+  `first-damage` eval stages, lifting the corrected snapshot eval score to
+  roughly `78.44`. It still earned nothing useful from `first-visible`, so the
+  remaining stage gap is visible-contact-to-shootable.
 
 ## Next Architecture Work
 

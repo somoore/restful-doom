@@ -288,7 +288,7 @@ PYTHONPATH=agent python -m restfuldoom_agent.snapshot_builder \
     --snapshot-dir snapshots \
     --save-slot-base 3 \
     --auto first-visible \
-    --auto first-shootable \
+    --auto first-enemy-shootable \
     --auto first-damage
 ```
 
@@ -324,7 +324,7 @@ PYTHONPATH=agent python -m restfuldoom_agent.snapshot_capture \
     --reset-before-attempt \
     --reset-seed-base 31 \
     --auto first-visible \
-    --auto first-shootable \
+    --auto first-enemy-shootable \
     --auto first-damage \
     --auto first-kill \
     --verify-loads
@@ -341,6 +341,9 @@ fast gRPC `ResetEpisode` before streaming. Multi-attempt captures write
 per-attempt trajectory files and record `source.attempt_reports` plus
 per-stage `capture_attempt` metadata. Native save slots are limited to `0..9`,
 so `--save-slot-base + requested_milestones - 1` must stay inside that range.
+Use `first-enemy-shootable` for combat curriculum; plain `first-shootable`
+matches any shootable target and can capture non-enemy targets when the protobuf
+combat probe reports `target_is_enemy=false`.
 
 Snapshot resets are verified by default. After an external restore or native
 `LoadSnapshot`, `DoomAgentEnv.reset()` observes the first protobuf state and
