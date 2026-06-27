@@ -4,6 +4,10 @@ This document answers four implementation questions that matter for training
 and cloud resume. Every contract below maps to code, JSONL fields, or exported
 schemas.
 
+For the fuller operator-facing interface spec, including exact data ownership,
+clock boundaries, skill option semantics, and the protobuf-to-observation gap
+register, see `docs/agent-training-interface.md`.
+
 ## 1. Decision Layer To Fast Controller
 
 The learned decision layer does not drive raw Doom input. It chooses one

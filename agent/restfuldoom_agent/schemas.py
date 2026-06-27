@@ -447,7 +447,47 @@ OBSERVATION_SCHEMA = {
             "features": TEMPORAL_CONTEXT_FEATURE_NAMES,
         },
     ],
+    "protobuf_to_observation_pipeline": [
+        {
+            "phase": "protobuf",
+            "code": "Doom gRPC GameState",
+            "payload": (
+                "player, enemy, level, combat, navigation, sector, and "
+                "route-waypoint affordances"
+            ),
+        },
+        {
+            "phase": "tactical_features",
+            "code": "extract_features(state, memory, params)",
+            "payload": (
+                "normalized current state plus AgentMemory.remembered_enemies() "
+                "query results"
+            ),
+        },
+        {
+            "phase": "base_vector",
+            "code": "features_from_tactical(features)",
+            "payload": "base protobuf/memory feature vector",
+        },
+        {
+            "phase": "macro_history",
+            "code": "encode_action_history_features(...)",
+            "payload": "previous skill, shootable opportunity, and route outcome features",
+        },
+        {
+            "phase": "temporal_context",
+            "code": "encode_temporal_context_features(...)",
+            "payload": "bounded movement, enemy-distance, route-distance, and contact trends",
+        },
+    ],
     "learning_readiness": {
+        "rich_observation_definition": [
+            "current live state must expose local combat and navigation affordances",
+            "memory queries must preserve useful target context after line of sight drops",
+            "macro-action history must show whether the last selected skill helped or failed",
+            "temporal context must distinguish progress from stationary loops",
+            "reset metadata must say whether a state is fresh, warmed up, or snapshot-restored",
+        ],
         "strengths": [
             "combat and navigation affordances are structured protobuf fields",
             "memory-derived enemy recall gives PPO a target when line of sight is lost",
@@ -468,6 +508,24 @@ OBSERVATION_SCHEMA = {
             "enemy_projectile_threat_norm",
             "topology_frontier_count_norm",
             "route_waypoint_repeat_count_norm",
+        ],
+        "upgrade_queue": [
+            {
+                "name": "topology_graph_features",
+                "reason": "spawn-to-contact PPO needs map structure beyond a single local waypoint",
+            },
+            {
+                "name": "snapshot_restore_context",
+                "reason": "mid-trajectory curriculum requires progressed doors, enemies, and map mutations",
+            },
+            {
+                "name": "combat_target_quality",
+                "reason": "shootable yes/no is too coarse for learning aim margin and fire timing",
+            },
+            {
+                "name": "recurrent_actor",
+                "reason": "use only if bounded temporal features still cannot bridge contact state",
+            },
         ],
         "gap_register": [
             {
@@ -597,6 +655,14 @@ DECISION_CYCLE_SCHEMA = {
         "rollout_record.info.route_outcome": "route waypoint attempt/reach/fail/progress metadata",
         "rollout_record.info.route_action_reward": "dense reward contribution from route-progress outcomes",
     },
+    "interface_invariants": [
+        "decision layer chooses exactly one integer skill index per macro-step",
+        "fast controller converts that skill into one protobuf PlayerAction",
+        "controller does not consume PPO gradients, logits, or optimizer state",
+        "PPO does not emit raw ticcmd values directly",
+        "the action mask used for sampling is stored and reused for PPO logprob recomputation",
+        "persistent AgentMemory is not mutated during PPO collection macro-steps",
+    ],
 }
 
 MEMORY_CONTRACT = {
@@ -645,6 +711,29 @@ MEMORY_CONTRACT = {
             "lessons",
         ],
     },
+    "access_rules": [
+        {
+            "rule": "ppo_inner_loop_read_only",
+            "meaning": (
+                "PPO rollout collection may read memory-derived features but must not "
+                "write the persistent JSON ledger on every macro-step"
+            ),
+        },
+        {
+            "rule": "episode_local_controller_state",
+            "meaning": (
+                "SkillController may mutate short-lived action/contact/route history "
+                "between reset() and terminal state"
+            ),
+        },
+        {
+            "rule": "checkpoint_boundary_writes",
+            "meaning": (
+                "PPO writes memory only after checkpoint, eval, or export boundaries "
+                "so cloud resume remains auditable"
+            ),
+        },
+    ],
     "query_update_lifecycle": [
         {
             "phase": "reset",
@@ -724,6 +813,26 @@ MEMORY_CONTRACT = {
             "returns": "compact diagnostics for Codex/operator inspection",
         },
     ],
+    "query_examples": [
+        {
+            "method": "AgentMemory.remembered_enemies",
+            "input": {
+                "x_units": 1024.0,
+                "y_units": -2048.0,
+                "tick": 12345,
+                "max_age_tics": "BrainPolicyParams.enemy_memory_tics",
+            },
+            "output": [
+                {
+                    "id": 57,
+                    "x": 1526.1,
+                    "y": -2538.7,
+                    "distance": 701.2,
+                    "last_seen_tick": 12301,
+                }
+            ],
+        }
+    ],
     "update_paths": [
         {
             "method": "AgentMemory.record_step(features, decision, reward, stats)",
@@ -767,6 +876,29 @@ ACTION_SCHEMA = {
         "current": "code-defined options implemented by SkillController._execute_skill",
         "learned_now": "PPO learns when to choose each option",
         "learned_later": "movement primitives can become learned/subpolicy-backed after the option set stabilizes",
+    },
+    "option_contract": {
+        "skill_is": (
+            "a stable option descriptor plus a SkillController dispatch branch "
+            "that can emit one safe PlayerAction"
+        ),
+        "skill_is_not": [
+            "an LLM-selected free-form function",
+            "external configuration yet",
+            "a learned per-tic movement primitive yet",
+        ],
+        "selector_learns": [
+            "action probability",
+            "value estimate",
+            "advantage/reward signal for choosing the option",
+        ],
+        "controller_owns": [
+            "movement amount and turn amount",
+            "aiming tolerance and firing cadence",
+            "door/switch use timing",
+            "stuck recovery",
+            "fallback primitive",
+        ],
     },
     "skill_definition_contract": {
         "storage": "Python schema plus SkillController code branch; not external config yet",

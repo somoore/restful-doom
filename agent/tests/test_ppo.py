@@ -171,6 +171,13 @@ def test_training_schemas_describe_features_and_actions():
     assert ACTION_SCHEMA["representation"]["learned_now"] == (
         "PPO learns when to choose each option"
     )
+    assert ACTION_SCHEMA["option_contract"]["skill_is"].startswith(
+        "a stable option descriptor"
+    )
+    assert "action probability" in ACTION_SCHEMA["option_contract"]["selector_learns"]
+    assert "aiming tolerance and firing cadence" in ACTION_SCHEMA["option_contract"][
+        "controller_owns"
+    ]
     assert ACTION_SCHEMA["skill_definition_contract"]["storage"].startswith("Python schema")
     assert ACTION_SCHEMA["current_model"]["learned_object"] == (
         "top-level selector over stable skill indexes"
@@ -187,17 +194,32 @@ def test_training_schemas_describe_features_and_actions():
     assert "controller_input" in DECISION_CYCLE_SCHEMA["controller_decision_interface"]
     assert "rollout_record.action_mask" in DECISION_CYCLE_SCHEMA["trace_fields"]
     assert "rollout_record.info.route_outcome" in DECISION_CYCLE_SCHEMA["trace_fields"]
+    assert "PPO does not emit raw ticcmd values directly" in DECISION_CYCLE_SCHEMA[
+        "interface_invariants"
+    ]
     assert MEMORY_CONTRACT["memory_schema"] == "restfuldoom.agent_memory.v1"
     assert MEMORY_CONTRACT["write_frequency"]["ppo_collection"].startswith("read-only")
     assert "cells" in MEMORY_CONTRACT["persisted_shape"]
     assert "enemies" in MEMORY_CONTRACT["persisted_shape"]
     assert "ppo_best_checkpoint" in MEMORY_CONTRACT["persisted_shape"]["training"]
     assert any(
+        rule["rule"] == "ppo_inner_loop_read_only"
+        for rule in MEMORY_CONTRACT["access_rules"]
+    )
+    assert any(
         phase["phase"] == "learn" and "ppo_checkpoints" in phase["writes"]
         for phase in MEMORY_CONTRACT["query_update_lifecycle"]
     )
     assert any(path["method"].startswith("AgentMemory.remembered_enemies") for path in MEMORY_CONTRACT["query_paths"])
+    assert MEMORY_CONTRACT["query_examples"][0]["method"] == "AgentMemory.remembered_enemies"
     assert any(group["name"] == "memory_queries" for group in OBSERVATION_SCHEMA["source_groups"])
+    assert [phase["phase"] for phase in OBSERVATION_SCHEMA["protobuf_to_observation_pipeline"]] == [
+        "protobuf",
+        "tactical_features",
+        "base_vector",
+        "macro_history",
+        "temporal_context",
+    ]
     assert "sector_damaging" in OBSERVATION_SCHEMA["feature_names"]
     assert "route_waypoint_distance_norm" in OBSERVATION_SCHEMA["feature_names"]
     assert "prev_route_progress_norm" in OBSERVATION_SCHEMA["feature_names"]
@@ -208,6 +230,13 @@ def test_training_schemas_describe_features_and_actions():
         group["name"] for group in OBSERVATION_SCHEMA["source_groups"]
     }
     assert "no compact topological map graph" in OBSERVATION_SCHEMA["learning_readiness"]["known_gaps"]
+    assert "reset metadata must say whether a state is fresh, warmed up, or snapshot-restored" in (
+        OBSERVATION_SCHEMA["learning_readiness"]["rich_observation_definition"]
+    )
+    assert any(
+        item["name"] == "snapshot_restore_context"
+        for item in OBSERVATION_SCHEMA["learning_readiness"]["upgrade_queue"]
+    )
     assert any(
         gap["name"] == "spawn_to_first_combat"
         for gap in OBSERVATION_SCHEMA["learning_readiness"]["gap_register"]
