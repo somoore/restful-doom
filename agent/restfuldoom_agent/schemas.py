@@ -371,26 +371,49 @@ OBSERVATION_SCHEMA = {
         },
     ],
     "learning_readiness": {
-            "strengths": [
-                "combat and navigation affordances are structured protobuf fields",
-                "memory-derived enemy recall gives PPO a target when line of sight is lost",
-                "macro-action history tells PPO whether it just ignored or used a shootable target",
-                "current-sector hazard fields tell PPO when navigation is causing floor damage",
-                "route-waypoint fields give spawn-to-contact training an explicit progression target",
-                "route-outcome history tells PPO whether the last progression decision reached, stalled, or moved toward its waypoint",
-            ],
-            "known_gaps": [
-                "no compact topological map graph",
-                "no recurrent state beyond one previous macro action",
-                "no projectile or incoming-damage predictor",
+        "strengths": [
+            "combat and navigation affordances are structured protobuf fields",
+            "memory-derived enemy recall gives PPO a target when line of sight is lost",
+            "macro-action history tells PPO whether it just ignored or used a shootable target",
+            "current-sector hazard fields tell PPO when navigation is causing floor damage",
+            "route-waypoint fields give spawn-to-contact training an explicit progression target",
+            "route-outcome history tells PPO whether the last progression decision reached, stalled, or moved toward its waypoint",
+        ],
+        "known_gaps": [
+            "no compact topological map graph",
+            "no recurrent state beyond one previous macro action",
+            "no projectile or incoming-damage predictor",
             "reset seeds are labels until the server reports seed_applied=true",
         ],
         "next_feature_candidates": [
-                "recent_damage_window_norm",
-                "enemy_projectile_threat_norm",
-                "topology_frontier_count_norm",
-                "route_waypoint_repeat_count_norm",
-            ],
+            "recent_damage_window_norm",
+            "enemy_projectile_threat_norm",
+            "topology_frontier_count_norm",
+            "route_waypoint_repeat_count_norm",
+        ],
+        "gap_register": [
+            {
+                "name": "spawn_to_first_combat",
+                "status": "open",
+                "evidence": (
+                    "spawn-only PPO buffers show route progress and positive route reward, "
+                    "but zero shootable-target steps, damage, or kills"
+                ),
+                "needed_signal": (
+                    "either true progressed-state snapshot restore or richer route/topology "
+                    "observations that bridge from spawn to the first valid combat affordance"
+                ),
+            },
+            {
+                "name": "fresh_reset_trajectory_replay",
+                "status": "invalid_for_progressed_map_context",
+                "evidence": (
+                    "trajectory-derived coordinates do not recreate opened doors, enemy "
+                    "movement, or route mutations after a fresh ResetEpisode"
+                ),
+                "needed_signal": "save-state/Hellbox snapshot restore for progressed-map curriculum",
+            },
+        ],
     },
     "feature_descriptors": [
         *_feature_descriptors(TACTICAL_FEATURE_NAMES, source="protobuf_or_memory"),
@@ -401,6 +424,26 @@ OBSERVATION_SCHEMA = {
 DECISION_CYCLE_SCHEMA = {
     "schema": "restfuldoom.decision_cycle.v1",
     "clock": "one learned decision per bounded macro-step, not one raw ticcmd per Doom tic",
+    "controller_decision_interface": {
+        "decision_layer_input": [
+            "restfuldoom.observation.v1 feature vector",
+            "restfuldoom.skill_action_mask.v1 feasible-action mask",
+        ],
+        "decision_layer_output": {
+            "field": "rollout_record.action",
+            "type": "integer index into restfuldoom.skill_action.v1",
+        },
+        "controller_input": [
+            "selected skill index",
+            "latest protobuf GameState",
+            "AgentMemory query results already encoded into the observation",
+            "SkillController episode-local action history",
+        ],
+        "controller_output": {
+            "field": "rollout_record.info.decision",
+            "meaning": "selected primitive plus one concrete protobuf PlayerAction sent to Doom",
+        },
+    },
     "layers": [
         {
             "name": "decision_layer",
@@ -434,6 +477,8 @@ DECISION_CYCLE_SCHEMA = {
         "rollout_record.action_mask": "feasible-skill mask used for sampling and PPO logprobs",
         "rollout_record.info.decision": "controller decision details and selected primitive",
         "rollout_record.info.decision_cycle": "tick range and schema markers for this macro-step",
+        "rollout_record.info.route_outcome": "route waypoint attempt/reach/fail/progress metadata",
+        "rollout_record.info.route_action_reward": "dense reward contribution from route-progress outcomes",
     },
 }
 
@@ -442,6 +487,38 @@ MEMORY_CONTRACT = {
     "memory_schema": "restfuldoom.agent_memory.v1",
     "default_path": "agent_memory/e1m1.json",
     "role": "inspectable world ledger and training checkpoint index, not a neural hidden state",
+    "query_update_lifecycle": [
+        {
+            "phase": "reset",
+            "reads": ["ppo_policy", "ppo_checkpoints", "policy"],
+            "writes": [],
+            "purpose": "resume the selected controller or PPO checkpoint before collecting a new episode",
+        },
+        {
+            "phase": "observe",
+            "reads": ["remembered_enemies", "blocked_targets", "best_params"],
+            "writes": [],
+            "purpose": "derive observation features and action masks from live protobuf state plus persistent context",
+        },
+        {
+            "phase": "act",
+            "reads": ["remembered_enemies"],
+            "writes": ["episode-local SkillController history"],
+            "purpose": "turn the selected skill into one safe PlayerAction without mutating persistent memory",
+        },
+        {
+            "phase": "learn",
+            "reads": ["rollout buffer"],
+            "writes": ["ppo_policy", "ppo_checkpoints", "ppo_eval_history"],
+            "purpose": "persist checkpoint lineage, rollout summaries, and promotion-gate outcomes",
+        },
+        {
+            "phase": "export",
+            "reads": ["agent_memory/e1m1.json", "checkpoint files", "trajectory JSONL"],
+            "writes": ["training job bundle"],
+            "purpose": "move local learning state to Docker, Hellbox, or cloud without losing resume metadata",
+        },
+    ],
     "sections": [
         {
             "name": "cells",
@@ -526,6 +603,21 @@ ACTION_SCHEMA = {
         "current": "code-defined options implemented by SkillController._execute_skill",
         "learned_now": "PPO learns when to choose each option",
         "learned_later": "movement primitives can become learned/subpolicy-backed after the option set stabilizes",
+    },
+    "skill_definition_contract": {
+        "storage": "Python schema plus SkillController code branch; not external config yet",
+        "stable_identifier": "integer action index and skill name in PPO_SKILL_ACTIONS",
+        "learned_fields": ["selection probability", "value estimate", "advantage from reward"],
+        "code_owned_fields": [
+            "controller entrypoint",
+            "low-level movement/aim/fire timing",
+            "fallback primitive",
+            "mask feasibility rule",
+        ],
+        "evolution_rule": (
+            "a skill may become config-backed or subpolicy-backed only if it preserves "
+            "the same index/name option contract for older checkpoints"
+        ),
     },
     "mask_semantics": {
         "schema": "restfuldoom.skill_action_mask.v1",

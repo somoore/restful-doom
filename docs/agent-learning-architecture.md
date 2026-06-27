@@ -93,6 +93,20 @@ action schema, memory contract id, input tick, output tick, and macro tic
 count. A single JSONL trajectory row therefore tells us exactly how the
 decision layer, controller, memory, and Doom stream interacted.
 
+The concrete runtime payload is:
+
+| Step | Producer | Consumer | Payload |
+| --- | --- | --- | --- |
+| observe | `DoomAgentEnv` | PPO actor | `restfuldoom.observation.v1` feature vector and `restfuldoom.skill_action_mask.v1` boolean mask |
+| decide | PPO actor | `DoomAgentEnv` | integer action index into `restfuldoom.skill_action.v1` |
+| execute | `SkillController` | `DoomAgentClient` | one protobuf `PlayerAction` plus `rollout_record.info.decision` metadata |
+| score | `DoomAgentEnv` | PPO buffer and memory | reward, transition deltas, route outcome, shootable-target flags, and schema markers |
+| remember | `SkillController` / PPO trainer | next observation and `AgentMemory` | episode-local macro history plus persistent checkpoint/eval summaries |
+
+The fast controller and decision layer therefore communicate only through
+stable skill indexes, masks, protobuf state, and JSONL metadata. The controller
+does not receive gradients or policy logits, and PPO does not send raw ticcmds.
+
 The division of responsibility is intentionally strict:
 
 | Boundary | Owns | Does not own |
@@ -148,6 +162,22 @@ bundles carry a definition for every skill: index, name, controller entrypoint,
 role, primary signal, fallback, representation, execution owner, and mask
 semantics. This is enough for a future cloud worker or MCP surface to inspect
 "what action 3 means" without importing private controller internals.
+
+The current representation is deliberately conservative:
+
+- Skills are code-defined options in `SkillController._execute_skill()`.
+- `ACTION_SCHEMA` is the exported definition contract for checkpoints,
+  rollout buffers, and training bundles.
+- PPO learns selection only: probability of choosing a skill and the value of
+  that choice under reward.
+- The controller owns the primitive mechanics: local aim, movement, use-line
+  timing, fire cadence, and fallback behavior.
+
+This means `fire` is not a learned function yet. It is a stable option whose
+availability is masked by combat affordances, while PPO learns when selecting
+that option is valuable. Later, a skill can become config-backed or dispatch to
+a learned subpolicy, but only if it preserves the same index/name contract for
+old checkpoints.
 
 The learned policies do not learn the movement primitive itself yet. They learn
 when to call the primitive. That keeps the first independent RL objective
@@ -215,6 +245,20 @@ training ledger. The learned model gets compact features derived from current
 protobuf state plus selected memory-derived features such as remembered enemies,
 stuck state, and blocked targets.
 
+The memory lifecycle is:
+
+1. On reset, PPO and deterministic training read checkpoint/policy metadata to
+   resume the requested policy.
+2. Before feature extraction, `extract_features()` queries remembered enemies
+   and blocked-target state, then combines that with the latest protobuf
+   `GameState`.
+3. During controller execution, only episode-local history is mutated; the
+   persistent JSON memory is not written on every PPO macro-step.
+4. After training or evaluation, the trainer writes checkpoint lineage, rollout
+   summaries, and promotion-gate outcomes to memory.
+5. Export bundles copy the memory JSON plus checkpoint files so Docker,
+   Hellbox, or cloud workers can resume from the same learning state.
+
 ## Observation Contract
 
 PPO receives the feature vector declared in
@@ -269,6 +313,15 @@ These gaps explain why the first PPO runs show distance-progress reward before
 damage or kills. The model can learn "approach enemy" from the current vector,
 but it needs stronger combat-opportunity features and action-aware rewards to
 learn "fire now" reliably.
+
+The most important current gap is spawn-to-first-combat. Recent spawn-only PPO
+buffers show positive route progress and route reward, but still zero
+shootable-target steps, zero damage, and zero kills. That means protobuf state
+is rich enough for local movement reward, but not yet rich enough to make the
+fresh-spawn route reliably produce the first valid combat affordance. The next
+two credible fixes are true progressed-state snapshot restore or a compact
+topology/temporal observation that remembers route attempts across more than
+one macro-step.
 
 The next observation upgrades should be staged rather than speculative:
 
@@ -340,9 +393,17 @@ The PPO CLI also has named reset-start schedules. The first one,
 rotates fresh-reset starts from easiest to hardest:
 
 1. `combat_start`: known legal combat start with immediate enemy line-of-sight.
-2. `first_visible_enemy`: trajectory-derived first-contact neighborhood.
-3. `opening_route`: trajectory-derived pre-contact navigation state.
+2. `combat_wide_left`: validated fresh-reset combat variant with immediate
+   shootable target.
+3. `combat_back_left`: validated fresh-reset combat variant with a deeper
+   approach angle and immediate shootable target.
 4. `fresh_spawn`: true E1M1 spawn with no teleport override.
+
+Earlier trajectory-derived route starts were removed from the named curriculum
+because live validation showed they were not valid fresh-reset states. A
+coordinate taken from a successful trajectory does not replay opened doors,
+enemy movement, or map mutations. Those starts need save-state or
+Hellbox/Shrink snapshot restore before they are valid PPO curriculum stages.
 
 Modes are `round_robin`, `progressive`, and `random`. Rollout records,
 checkpoint extras, and memory checkpoint entries carry both the curriculum
@@ -401,6 +462,12 @@ Recent PPO evidence:
   about 650 units with `route_progression` and `seek_enemy`, but still produced
   `shootable_target_steps=0`, `damage_delta=0`, and `max_kills=0`. The next
   gap is spawn-to-first-contact curriculum.
+- `ppo-spawn-trend`: resumed the combat checkpoint from normal E1M1 spawn for
+  six 128-transition updates. Route attempts made positive cumulative waypoint
+  progress in every buffer and route rewards stayed positive, but the run still
+  had zero shootable-target steps, zero damage, and zero kills. This confirms
+  the current bottleneck is route-to-contact observation/curriculum, not the
+  combat-start PPO controller.
 
 ## Next Architecture Work
 

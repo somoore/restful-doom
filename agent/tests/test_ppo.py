@@ -163,9 +163,16 @@ def test_training_schemas_describe_features_and_actions():
     assert ACTION_SCHEMA["representation"]["learned_now"] == (
         "PPO learns when to choose each option"
     )
+    assert ACTION_SCHEMA["skill_definition_contract"]["storage"].startswith("Python schema")
     assert DECISION_CYCLE_SCHEMA["schema"] == "restfuldoom.decision_cycle.v1"
+    assert "controller_input" in DECISION_CYCLE_SCHEMA["controller_decision_interface"]
     assert "rollout_record.action_mask" in DECISION_CYCLE_SCHEMA["trace_fields"]
+    assert "rollout_record.info.route_outcome" in DECISION_CYCLE_SCHEMA["trace_fields"]
     assert MEMORY_CONTRACT["memory_schema"] == "restfuldoom.agent_memory.v1"
+    assert any(
+        phase["phase"] == "learn" and "ppo_checkpoints" in phase["writes"]
+        for phase in MEMORY_CONTRACT["query_update_lifecycle"]
+    )
     assert any(path["method"].startswith("AgentMemory.remembered_enemies") for path in MEMORY_CONTRACT["query_paths"])
     assert any(group["name"] == "memory_queries" for group in OBSERVATION_SCHEMA["source_groups"])
     assert "sector_damaging" in OBSERVATION_SCHEMA["feature_names"]
@@ -173,6 +180,10 @@ def test_training_schemas_describe_features_and_actions():
     assert "prev_route_progress_norm" in OBSERVATION_SCHEMA["feature_names"]
     assert "failed_route_attempt_count_norm" in OBSERVATION_SCHEMA["feature_names"]
     assert "no compact topological map graph" in OBSERVATION_SCHEMA["learning_readiness"]["known_gaps"]
+    assert any(
+        gap["name"] == "spawn_to_first_combat"
+        for gap in OBSERVATION_SCHEMA["learning_readiness"]["gap_register"]
+    )
 
 
 def test_pad_observation_features_adds_neutral_action_history():
@@ -274,9 +285,13 @@ def test_named_curriculum_selects_e1m1_stages():
     assert curriculum["schema"] == "restfuldoom.ppo_curriculum.v1"
     assert first["name"] == "combat_start"
     assert first["reset_start"]["face_nearest_enemy"] is True
-    assert second["name"] == "first_visible_enemy"
+    assert first["validated"] is True
+    assert first["evidence"]["shootable_target_on_reset"] is True
+    assert second["name"] == "combat_wide_left"
+    assert second["requires_progressed_state"] is False
     assert spawn["name"] == "fresh_spawn"
     assert spawn["reset_start"] == {}
+    assert spawn["evidence"]["shootable_target_on_reset"] is False
 
 
 def test_curriculum_rejects_manual_start_mix():
@@ -321,6 +336,41 @@ def test_rollout_summary_counts_curriculum_stages():
     assert buffer.records[0].info["curriculum"]["name"] == "e1m1-spawn-to-combat"
     assert buffer.records[0].info["curriculum_stage"]["name"] == "combat_start"
     assert summary["curriculum_stage_counts"] == {"combat_start": 1}
+
+
+def test_rollout_summary_counts_route_outcomes():
+    buffer = RolloutBuffer()
+    for index, route_outcome in enumerate(
+        [
+            {"attempted": True, "reached": False, "failed": False, "progress_units": 64.0},
+            {"attempted": True, "reached": False, "failed": True, "progress_units": -12.5},
+            {"attempted": True, "reached": True, "failed": False, "progress_units": 32.0},
+        ]
+    ):
+        buffer.add(
+            obs=[0.0, 1.0],
+            action_mask=[True, False],
+            action=0,
+            reward=1.0,
+            done=False,
+            value=0.0,
+            logprob=0.0,
+            info={
+                "skill": "route_progression",
+                "route_outcome": route_outcome,
+                "route_action_reward": 0.25 * (index + 1),
+                "transition": {},
+                "state": {"health": 100, "kills": 0},
+            },
+        )
+
+    summary = _summarize_buffer(buffer)
+
+    assert summary["route_attempt_steps"] == 3
+    assert summary["route_reached_steps"] == 1
+    assert summary["route_failed_steps"] == 1
+    assert summary["route_progress_units"] == 83.5
+    assert summary["route_action_reward"] == 1.5
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")

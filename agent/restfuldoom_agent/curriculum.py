@@ -17,6 +17,9 @@ class CurriculumStage:
     name: str
     reset_start: dict[str, object]
     note: str = ""
+    validated: bool = True
+    requires_progressed_state: bool = False
+    evidence: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
         """Returns a JSON-serializable stage descriptor."""
@@ -25,6 +28,9 @@ class CurriculumStage:
             "name": self.name,
             "reset_start": dict(self.reset_start),
             "note": self.note,
+            "validated": self.validated,
+            "requires_progressed_state": self.requires_progressed_state,
+            "evidence": dict(self.evidence or {}),
         }
 
 
@@ -41,38 +47,61 @@ E1M1_SPAWN_TO_COMBAT_STAGES: list[CurriculumStage] = [
             "face_nearest_enemy": True,
         },
         note="Known legal combat-start point with immediate enemy line-of-sight.",
+        evidence={
+            "fresh_reset_validated": True,
+            "shootable_target_on_reset": True,
+            "damage_observed_with_heuristic": True,
+            "doom_units": {"x": 3248, "y": -3280},
+        },
     ),
     CurriculumStage(
         index=1,
-        name="first_visible_enemy",
+        name="combat_wide_left",
         reset_start={
-            "x_fp": 85360962,
-            "y_fp": -204576139,
+            "x_fp": 193331200,
+            "y_fp": -214958080,
             "health": 100,
             "armor": 0,
             "ammo_bullets": 50,
             "face_nearest_enemy": True,
         },
-        note="Trajectory-derived first visible enemy neighborhood.",
+        note="Fresh-reset combat variant that broadens start position without losing immediate target affordances.",
+        evidence={
+            "fresh_reset_validated": True,
+            "shootable_target_on_reset": True,
+            "damage_observed_with_heuristic": True,
+            "doom_units": {"x": 2950, "y": -3280},
+        },
     ),
     CurriculumStage(
         index=2,
-        name="opening_route",
+        name="combat_back_left",
         reset_start={
-            "x_fp": 84504172,
-            "y_fp": -215625593,
+            "x_fp": 199884800,
+            "y_fp": -221511680,
             "health": 100,
             "armor": 0,
             "ammo_bullets": 50,
             "face_nearest_enemy": True,
         },
-        note="Trajectory-derived route state before first sustained contact.",
+        note="Fresh-reset combat variant with a deeper approach angle and immediate shootable enemy.",
+        evidence={
+            "fresh_reset_validated": True,
+            "shootable_target_on_reset": True,
+            "damage_observed_with_heuristic": True,
+            "doom_units": {"x": 3050, "y": -3380},
+        },
     ),
     CurriculumStage(
         index=3,
         name="fresh_spawn",
         reset_start={},
-        note="Real E1M1 spawn; no teleport override.",
+        note="Real E1M1 spawn; no teleport override. Current PPO shows route progress here but not reliable combat contact.",
+        evidence={
+            "fresh_reset_validated": True,
+            "shootable_target_on_reset": False,
+            "latest_spawn_trend": "route progress without shootable target, damage, or kills",
+        },
     ),
 ]
 

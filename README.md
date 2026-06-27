@@ -364,9 +364,13 @@ PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
 ```
 
 The current `e1m1-spawn-to-combat` stages are fresh-level `EpisodeStart`
-teleports ordered from easiest to hardest: combat start, first visible enemy,
-opening route, then real E1M1 spawn. Each rollout row and checkpoint records the
-active `restfuldoom.ppo_curriculum.v1` stage.
+teleports ordered from easiest to hardest: three live-validated combat starts
+with immediate enemy affordances, then real E1M1 spawn. Each rollout row and
+checkpoint records the active `restfuldoom.ppo_curriculum.v1` stage, including
+validation evidence for the reset start. Trajectory-derived first-contact
+coordinates are intentionally not in this curriculum because a fresh
+`ResetEpisode` does not restore opened doors, enemy movement, or other
+progressed-map mutations.
 
 Continue from an existing PPO checkpoint:
 
@@ -387,6 +391,12 @@ evidence shows that repeatedly warming from the default E1M1 spawn is too slow
 for the PPO inner loop. Fresh-reset `EpisodeStart` is useful for combat
 curriculum, while true save-state or Hellbox/Shrink snapshot restore is still
 needed for progressed-map curriculum.
+
+PPO rollout summaries include route diagnostics for spawn-to-contact work:
+`route_attempt_steps`, `route_reached_steps`, `route_failed_steps`,
+`route_progress_units`, and `route_action_reward`. These are the first numbers
+to inspect when a run moves through E1M1 but still never reaches a shootable
+target.
 
 The checkpoint schema is `restfuldoom.ppo_checkpoint.v1`. Each checkpoint
 stores model weights, optimizer state, PPO config, observation/action schemas,

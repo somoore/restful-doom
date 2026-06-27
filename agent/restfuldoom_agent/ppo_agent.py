@@ -490,6 +490,11 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         for record in records
         if isinstance(record.info, dict)
     ]
+    route_outcomes = [
+        record.info.get("route_outcome", {})
+        for record in records
+        if isinstance(record.info, dict) and isinstance(record.info.get("route_outcome", {}), dict)
+    ]
     states = [
         record.info.get("state", {})
         for record in records
@@ -530,8 +535,23 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
             sum(float(record.info.get("action_reward", 0.0)) for record in records),
             4,
         ),
+        "route_action_reward": round(
+            sum(
+                float(record.info.get("route_action_reward", 0.0))
+                for record in records
+                if isinstance(record.info, dict)
+            ),
+            4,
+        ),
         "shootable_target_steps": sum(
             1 for record in records if record.info.get("had_shootable_target")
+        ),
+        "route_attempt_steps": sum(1 for outcome in route_outcomes if outcome.get("attempted")),
+        "route_reached_steps": sum(1 for outcome in route_outcomes if outcome.get("reached")),
+        "route_failed_steps": sum(1 for outcome in route_outcomes if outcome.get("failed")),
+        "route_progress_units": round(
+            sum(float(outcome.get("progress_units", 0.0)) for outcome in route_outcomes),
+            4,
         ),
         "mean_action_mask_size": round(
             sum(action_mask_sizes) / max(1, len(action_mask_sizes)),
