@@ -135,6 +135,12 @@ and memory:
   contact-specific controller primitive: graded direction probes can use
   short-clearance rays, execution is limited to 1 tic, and the controller
   continues the remembered contact corridor if line of sight drops.
+- `open_use_line` remembers a manual line selected during visible contact and
+  can keep approaching it after line of sight drops, so PPO does not lose the
+  door/switch target at exactly the contact boundary.
+- When a recent contact corridor or remembered contact use-line is active, the
+  mask keeps contact actions available and suppresses generic route progression
+  until that contact context expires.
 - `route_progression` is not advertised merely because a contact route waypoint
   exists. Live probes showed that made PPO over-sample route movement during
   contact without reaching first-shootable combat. It remains callable for
@@ -559,6 +565,13 @@ Recent PPO evidence:
   and `112.9188`; the combat bridge stage still produced real combat
   (`damage_delta=95`, `max_kills=1`). This is useful control-surface progress,
   not a solved contact-to-shootable policy.
+- `ppo-contact-recent-mask-probe`: after adding contact use-line memory and
+  recent-contact mask suppression, the first visible-contact update reached
+  `first_shootable_contacts=1` and `shootable_target_steps=1`, with
+  `visible_contact_distance_delta=257.7431` and zero invalid actions. A
+  follow-up no-terminate contact-to-damage probe did not reproduce shootable
+  contact or produce damage, so this is a first-shootable breakthrough, not a
+  solved contact-to-combat policy.
 
 ## Next Architecture Work
 

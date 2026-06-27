@@ -138,6 +138,7 @@ class SkillController:
         self._recent_shootable_target_flags: list[bool] = []
         self._recent_route_progress_units: list[float] = []
         self._recent_route_failure_flags: list[bool] = []
+        self._recent_contact_use_line: dict[str, int] | None = None
 
     def observation(self, state: Any) -> list[float]:
         """Encodes a protobuf state as the stable PPO feature vector."""
@@ -173,6 +174,7 @@ class SkillController:
         self._recent_shootable_target_flags.clear()
         self._recent_route_progress_units.clear()
         self._recent_route_failure_flags.clear()
+        self._recent_contact_use_line = None
 
     def record_action_history(
         self,
@@ -360,6 +362,7 @@ class SkillController:
             return SKILL_ACTIONS.index("press_exit")
         if (
             self.policy._select_nearby_use_line(features) is not None
+            or self._recent_contact_use_line_for(features) is not None
             or self.policy._select_use_ray(features) is not None
             or self.policy._should_use_ahead(features)
         ):
@@ -375,6 +378,7 @@ class SkillController:
         features = extract_features(state, self.memory, self.params)
         stuck = self.policy._is_stuck(features)
         mask = {skill: False for skill in SKILL_ACTIONS}
+        recent_contact_active = self._recent_contact_active(features)
 
         shootable = self.policy._shootable_enemy(features)
         if shootable is not None and self.policy._can_shoot(features, shootable):
@@ -395,18 +399,25 @@ class SkillController:
                 or nearest_visible <= self.params.close_enemy_units
             ):
                 mask["retreat"] = True
+        elif recent_contact_active:
+            mask["engage"] = True
+            if self.policy._select_known_enemy(features) is not None:
+                mask["seek_enemy"] = True
 
         if not features.visible_enemies and self.policy._select_known_enemy(features) is not None:
             mask["seek_enemy"] = True
 
         if (
             self.policy._select_nearby_use_line(features) is not None
+            or self._recent_contact_use_line_for(features) is not None
             or self.policy._select_use_ray(features) is not None
             or self.policy._should_use_ahead(features)
         ):
             mask["open_use_line"] = True
 
-        if self.policy._select_progression_line(features) is not None or not features.visible_enemies:
+        if self.policy._select_progression_line(features) is not None or (
+            not features.visible_enemies and not recent_contact_active
+        ):
             mask["route_progression"] = True
 
         if stuck:
@@ -488,9 +499,19 @@ class SkillController:
 
         if skill == "open_use_line":
             line = self.policy._select_nearby_use_line(features)
+            remember_contact_line = (
+                line is not None
+                and bool(features.visible_enemies)
+                and self.policy._shootable_enemy(features) is None
+            )
             if line is None:
                 line = self._contact_use_line(features)
+                remember_contact_line = line is not None
+            if line is None:
+                line = self._recent_contact_use_line_for(features)
             if line is not None:
+                if remember_contact_line:
+                    self._remember_contact_use_line(features, line)
                 return self.policy._use_nearby_line(features, line, stuck)
             ray = self.policy._select_use_ray(features)
             if ray is not None:
@@ -576,10 +597,58 @@ class SkillController:
         return min(
             candidates,
             key=lambda line: (
+                0 if int(line.get("side", 0)) == 0 else 1,
                 abs(float(line.get("angle_delta", 999.0))),
                 float(line.get("distance", 999999.0)),
             ),
         )
+
+    def _remember_contact_use_line(self, features: Any, line: dict[str, Any]) -> None:
+        line_id = int(line.get("line_id", 0))
+        if line_id <= 0:
+            return
+        self._recent_contact_use_line = {
+            "line_id": line_id,
+            "tick": int(features.tick),
+            "episode": int(features.episode),
+            "map": int(features.map),
+        }
+
+    def _recent_contact_use_line_for(self, features: Any) -> dict[str, Any] | None:
+        recent = self._recent_contact_use_line
+        if recent is None:
+            return None
+        if int(recent.get("episode", 0)) != int(features.episode):
+            return None
+        if int(recent.get("map", 0)) != int(features.map):
+            return None
+        if int(features.tick) - int(recent.get("tick", 0)) > 120:
+            return None
+        line_id = int(recent.get("line_id", 0))
+        for line in features.navigation.get("use_lines", []):
+            if int(line.get("line_id", 0)) != line_id:
+                continue
+            if int(line.get("special", 0)) not in MANUAL_USE_LINE_SPECIALS:
+                return None
+            if float(line.get("distance", 999999.0)) > 1000.0:
+                return None
+            if abs(float(line.get("angle_delta", 999.0))) > 120.0:
+                return None
+            if self.policy._is_line_blocked(features, line):
+                return None
+            return line
+        return None
+
+    def _recent_contact_active(self, features: Any) -> bool:
+        if self._recent_contact_use_line_for(features) is not None:
+            return True
+        contact = self.policy._last_contact_ray
+        if contact is None:
+            return False
+        age = int(features.tick) - int(contact.get("tick", 0))
+        if age < 0 or age > 90:
+            return False
+        return self.policy._select_known_enemy(features) is not None
 
 
 class DoomAgentEnv:

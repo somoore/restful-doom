@@ -220,6 +220,51 @@ def test_skill_controller_engage_continues_recent_contact_corridor():
     assert second_decision["ppo_skill"] == "engage"
 
 
+def test_skill_controller_open_use_line_remembers_contact_line_after_los_drops():
+    controller = SkillController()
+    first = _state(tick=5, enemy=True, combat=False, contact_use=True)
+    second = _state(
+        tick=20,
+        enemy=True,
+        enemy_line_of_sight=False,
+        combat=False,
+        contact_use=True,
+    )
+
+    _first_action, first_decision = controller.action_for(
+        SKILL_ACTIONS.index("open_use_line"),
+        first,
+    )
+    _second_action, second_decision = controller.action_for(
+        SKILL_ACTIONS.index("open_use_line"),
+        second,
+    )
+
+    assert first_decision["use_line"]["line_id"] == 151
+    assert second_decision["use_line"]["line_id"] == 151
+    assert second_decision["skill"] != "ppo_use_ahead"
+
+
+def test_skill_controller_recent_contact_mask_suppresses_generic_route():
+    controller = SkillController()
+    first = _state(tick=5, enemy=True, combat=False, contact_use=True)
+    second = _state(
+        tick=20,
+        enemy=True,
+        enemy_line_of_sight=False,
+        combat=False,
+        contact_use=True,
+    )
+
+    controller.action_for(SKILL_ACTIONS.index("open_use_line"), first)
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(second)))
+
+    assert mask["engage"]
+    assert mask["seek_enemy"]
+    assert mask["open_use_line"]
+    assert not mask["route_progression"]
+
+
 def test_skill_controller_observation_includes_sector_and_route_features():
     controller = SkillController()
     state = _state(hazard=True, route=True)
