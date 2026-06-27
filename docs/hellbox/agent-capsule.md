@@ -116,10 +116,12 @@ python -m restfuldoom_agent.ppo_agent \
 ```
 
 The PPO learner uses the same structured protobuf state stream and calls
-`ResetEpisode` between episodes. It chooses one of eight high-level skills
+`ResetEpisode` between episodes. It chooses one of nine high-level skills
 (`engage`, `fire`, `seek_enemy`, `open_use_line`, `route_progression`,
-`retreat`, `recover_stuck`, `press_exit`) while the deterministic controller
-executes the low-level Doom commands. Each batch writes rollout buffers and a
+`retreat`, `recover_stuck`, `press_exit`, `close_visible_contact`) while the
+deterministic controller executes the low-level Doom commands. The contact
+closure option gives visible-but-not-shootable states their own action instead
+of folding them into generic `engage`. Each batch writes rollout buffers and a
 `restfuldoom.ppo_checkpoint.v1` checkpoint with model weights, optimizer state,
 schemas, reward config, and eval metadata.
 

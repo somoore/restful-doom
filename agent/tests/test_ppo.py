@@ -39,6 +39,7 @@ from restfuldoom_agent.schemas import (
     DECISION_CYCLE_SCHEMA,
     MEMORY_CONTRACT,
     OBSERVATION_SCHEMA,
+    LEGACY_ACTION_HISTORY_FEATURE_NAMES_V1,
     PRE_FRONTIER_TACTICAL_FEATURE_NAMES,
     PPO_SKILL_ACTIONS,
     pad_observation_features,
@@ -227,6 +228,8 @@ def test_expert_skill_labels_map_to_ppo_actions():
     assert map_expert_skill_to_ppo_action("fire_on_shootable_target") == 1
     assert map_expert_skill_to_ppo_action("seek_known_enemy") == 2
     assert map_expert_skill_to_ppo_action("push_exit_switch") == 7
+    assert map_expert_skill_to_ppo_action("close_visible_contact") == 8
+    assert map_expert_skill_to_ppo_action("ppo_seek_visible_contact") == 8
     assert map_expert_skill_to_ppo_action("not_a_skill") is None
 
 
@@ -377,10 +380,13 @@ def test_pad_observation_features_adds_neutral_frontier_to_old_tactical_rows():
 
 def test_pad_observation_features_adds_neutral_frontier_to_old_ppo_rows():
     old_row = [0.25 for _ in PRE_FRONTIER_TACTICAL_FEATURE_NAMES]
-    old_row.extend([0.5 for _ in OBSERVATION_SCHEMA["action_history_feature_names"]])
+    old_row.extend([0.5 for _ in LEGACY_ACTION_HISTORY_FEATURE_NAMES_V1])
     old_row.extend([0.75 for _ in OBSERVATION_SCHEMA["temporal_context_feature_names"]])
     frontier_index = OBSERVATION_SCHEMA["feature_names"].index(
         "topology_frontier_count_norm"
+    )
+    close_contact_history_index = OBSERVATION_SCHEMA["feature_names"].index(
+        "prev_skill_close_visible_contact"
     )
     contact_start = len(OBSERVATION_SCHEMA["feature_names"]) - len(
         OBSERVATION_SCHEMA["contact_context_feature_names"]
@@ -394,8 +400,11 @@ def test_pad_observation_features_adds_neutral_frontier_to_old_ppo_rows():
 
     assert len(padded) == len(OBSERVATION_SCHEMA["feature_names"])
     assert padded[frontier_index] == 0.0
-    assert padded[:frontier_index] == old_row[:frontier_index]
-    assert padded[frontier_index + 1 : contact_start] == old_row[frontier_index:]
+    assert padded[close_contact_history_index] == 0.0
+    expected_prefix = list(old_row)
+    expected_prefix.insert(frontier_index, 0.0)
+    expected_prefix.insert(close_contact_history_index, 0.0)
+    assert padded[:contact_start] == expected_prefix[:contact_start]
     assert all(value == 0.0 for value in padded[contact_start:])
 
 
@@ -1731,6 +1740,31 @@ def test_ppo_checkpoint_expands_appended_observation_features(tmp_path):
     assert loaded.obs_dim == 4
     assert loaded.resume_migration is not None
     assert loaded.resume_migration["from_obs_dim"] == 2
+    assert not loaded.resume_migration["optimizer_state_loaded"]
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")
+def test_ppo_checkpoint_expands_appended_action_head(tmp_path):
+    trainer = PPOTrainer(
+        obs_dim=2,
+        action_dim=2,
+        config=PPOConfig(update_epochs=1, minibatch_size=4, rollout_steps=8),
+    )
+    checkpoint = trainer.save_checkpoint(tmp_path / "old-actions.pt")
+
+    loaded = PPOTrainer.load_checkpoint(
+        checkpoint,
+        target_obs_dim=2,
+        target_action_dim=3,
+    )
+
+    action, _logprob, _value = loaded.model.act([0.0, 1.0], action_mask=[False, False, True])
+    assert action == 2
+    assert loaded.action_dim == 3
+    assert loaded.resume_migration is not None
+    assert loaded.resume_migration["from_action_dim"] == 2
+    assert loaded.resume_migration["to_action_dim"] == 3
+    assert loaded.resume_migration["action_expanded"] is True
     assert not loaded.resume_migration["optimizer_state_loaded"]
 
 

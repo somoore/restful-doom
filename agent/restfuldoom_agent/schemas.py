@@ -21,10 +21,33 @@ PPO_SKILL_ACTIONS = [
     "retreat",
     "recover_stuck",
     "press_exit",
+    "close_visible_contact",
+]
+
+LEGACY_PPO_SKILL_ACTIONS_V1 = [
+    "engage",
+    "fire",
+    "seek_enemy",
+    "open_use_line",
+    "route_progression",
+    "retreat",
+    "recover_stuck",
+    "press_exit",
 ]
 
 ACTION_HISTORY_FEATURE_NAMES = [
     *(f"prev_skill_{skill}" for skill in PPO_SKILL_ACTIONS),
+    "prev_had_shootable_target",
+    "same_skill_streak_norm",
+    "prev_route_progression",
+    "prev_route_progress_norm",
+    "route_waypoint_reached_recently",
+    "route_waypoint_failed_recently",
+    "failed_route_attempt_count_norm",
+]
+
+LEGACY_ACTION_HISTORY_FEATURE_NAMES_V1 = [
+    *(f"prev_skill_{skill}" for skill in LEGACY_PPO_SKILL_ACTIONS_V1),
     "prev_had_shootable_target",
     "same_skill_streak_norm",
     "prev_route_progression",
@@ -96,11 +119,12 @@ PPO_FEATURE_NAMES = [
 EXPERT_TO_PPO_SKILL_ACTION = {
     "aim_at_enemy": "engage",
     "close_visible_enemy": "engage",
-    "close_visible_contact": "engage",
+    "close_visible_contact": "close_visible_contact",
     "pursue_last_contact_corridor": "engage",
     "skirt_visible_enemy": "engage",
-    "ppo_close_visible_contact": "engage",
-    "ppo_seek_visible_contact": "seek_enemy",
+    "ppo_close_visible_contact": "close_visible_contact",
+    "ppo_close_recent_contact": "close_visible_contact",
+    "ppo_seek_visible_contact": "close_visible_contact",
     "fire_on_enemy": "fire",
     "fire_on_shootable_target": "fire",
     "hold_attack": "fire",
@@ -231,6 +255,17 @@ ACTION_DEFINITIONS = [
         "controller_entrypoint": "SkillController._execute_skill('press_exit')",
         "primary_signal": "exit-line affordances",
         "fallback": "use probe",
+    },
+    {
+        "index": 8,
+        "skill": "close_visible_contact",
+        "kind": "code_defined_option",
+        "learned": False,
+        "execution_owner": "BrainPolicy",
+        "role": "Close visible-but-not-shootable enemy contact while preserving line-of-sight corridors.",
+        "controller_entrypoint": "SkillController._execute_skill('close_visible_contact')",
+        "primary_signal": "visible-contact distance, angle, and recent contact corridor",
+        "fallback": "continue recent contact corridor or seek remembered enemy",
     },
 ]
 
@@ -410,6 +445,38 @@ def pad_observation_features(features: list[float]) -> list[float]:
     pre_frontier_action_history_len = (
         len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES) + len(ACTION_HISTORY_FEATURE_NAMES)
     )
+    legacy_v1_action_history_len = (
+        len(TACTICAL_FEATURE_NAMES) + len(LEGACY_ACTION_HISTORY_FEATURE_NAMES_V1)
+    )
+    pre_frontier_v1_action_history_len = (
+        len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)
+        + len(LEGACY_ACTION_HISTORY_FEATURE_NAMES_V1)
+    )
+    if len(features) == pre_frontier_v1_action_history_len:
+        return _insert_neutral_action_history_skill(
+            [
+                *_insert_neutral_tactical_features(
+                    features[: len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)]
+                ),
+                *features[len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES) :],
+                *encode_temporal_context_features(),
+                *encode_contact_context_features(),
+                *encode_topology_context_features(),
+                *encode_visible_contact_context_features(),
+            ],
+            tactical_len=len(TACTICAL_FEATURE_NAMES),
+        )
+    if len(features) == legacy_v1_action_history_len:
+        return [
+            *_insert_neutral_action_history_skill(
+                features,
+                tactical_len=len(TACTICAL_FEATURE_NAMES),
+            ),
+            *encode_temporal_context_features(),
+            *encode_contact_context_features(),
+            *encode_topology_context_features(),
+            *encode_visible_contact_context_features(),
+        ]
     if len(features) == pre_frontier_action_history_len:
         return [
             *_insert_neutral_tactical_features(features[: len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)]),
@@ -444,6 +511,42 @@ def pad_observation_features(features: list[float]) -> list[float]:
         + len(ACTION_HISTORY_FEATURE_NAMES)
         + len(TEMPORAL_CONTEXT_FEATURE_NAMES)
     )
+    legacy_v1_ppo_len = (
+        len(TACTICAL_FEATURE_NAMES)
+        + len(LEGACY_ACTION_HISTORY_FEATURE_NAMES_V1)
+        + len(TEMPORAL_CONTEXT_FEATURE_NAMES)
+    )
+    pre_frontier_v1_ppo_len = (
+        len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)
+        + len(LEGACY_ACTION_HISTORY_FEATURE_NAMES_V1)
+        + len(TEMPORAL_CONTEXT_FEATURE_NAMES)
+    )
+    if len(features) == legacy_v1_ppo_len:
+        return [
+            *_insert_neutral_action_history_skill(
+                features,
+                tactical_len=len(TACTICAL_FEATURE_NAMES),
+            ),
+            *encode_contact_context_features(),
+            *encode_topology_context_features(),
+            *encode_visible_contact_context_features(),
+        ]
+    if len(features) == pre_frontier_v1_ppo_len:
+        upgraded = [
+            *_insert_neutral_tactical_features(
+                features[: len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)]
+            ),
+            *features[len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES) :],
+        ]
+        return [
+            *_insert_neutral_action_history_skill(
+                upgraded,
+                tactical_len=len(TACTICAL_FEATURE_NAMES),
+            ),
+            *encode_contact_context_features(),
+            *encode_topology_context_features(),
+            *encode_visible_contact_context_features(),
+        ]
     if len(features) == pre_frontier_ppo_len:
         return [
             *_insert_neutral_tactical_features(features[: len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)]),
@@ -464,6 +567,42 @@ def pad_observation_features(features: list[float]) -> list[float]:
         + len(TEMPORAL_CONTEXT_FEATURE_NAMES)
         + len(CONTACT_CONTEXT_FEATURE_NAMES)
     )
+    legacy_v1_contact_ppo_len = (
+        len(TACTICAL_FEATURE_NAMES)
+        + len(LEGACY_ACTION_HISTORY_FEATURE_NAMES_V1)
+        + len(TEMPORAL_CONTEXT_FEATURE_NAMES)
+        + len(CONTACT_CONTEXT_FEATURE_NAMES)
+    )
+    pre_frontier_v1_contact_ppo_len = (
+        len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)
+        + len(LEGACY_ACTION_HISTORY_FEATURE_NAMES_V1)
+        + len(TEMPORAL_CONTEXT_FEATURE_NAMES)
+        + len(CONTACT_CONTEXT_FEATURE_NAMES)
+    )
+    if len(features) == legacy_v1_contact_ppo_len:
+        return [
+            *_insert_neutral_action_history_skill(
+                features,
+                tactical_len=len(TACTICAL_FEATURE_NAMES),
+            ),
+            *encode_topology_context_features(),
+            *encode_visible_contact_context_features(),
+        ]
+    if len(features) == pre_frontier_v1_contact_ppo_len:
+        upgraded = [
+            *_insert_neutral_tactical_features(
+                features[: len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)]
+            ),
+            *features[len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES) :],
+        ]
+        return [
+            *_insert_neutral_action_history_skill(
+                upgraded,
+                tactical_len=len(TACTICAL_FEATURE_NAMES),
+            ),
+            *encode_topology_context_features(),
+            *encode_visible_contact_context_features(),
+        ]
     if len(features) == legacy_contact_ppo_len:
         return [
             *features,
@@ -485,6 +624,50 @@ def pad_observation_features(features: list[float]) -> list[float]:
         + len(CONTACT_CONTEXT_FEATURE_NAMES)
         + len(TOPOLOGY_CONTEXT_FEATURE_NAMES)
     )
+    legacy_v1_topology_ppo_len = (
+        len(TACTICAL_FEATURE_NAMES)
+        + len(LEGACY_ACTION_HISTORY_FEATURE_NAMES_V1)
+        + len(TEMPORAL_CONTEXT_FEATURE_NAMES)
+        + len(CONTACT_CONTEXT_FEATURE_NAMES)
+        + len(TOPOLOGY_CONTEXT_FEATURE_NAMES)
+    )
+    pre_frontier_v1_topology_ppo_len = (
+        len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)
+        + len(LEGACY_ACTION_HISTORY_FEATURE_NAMES_V1)
+        + len(TEMPORAL_CONTEXT_FEATURE_NAMES)
+        + len(CONTACT_CONTEXT_FEATURE_NAMES)
+        + len(TOPOLOGY_CONTEXT_FEATURE_NAMES)
+    )
+    legacy_v1_full_ppo_len = legacy_v1_topology_ppo_len + len(
+        VISIBLE_CONTACT_CONTEXT_FEATURE_NAMES
+    )
+    if len(features) == legacy_v1_full_ppo_len:
+        return _insert_neutral_action_history_skill(
+            features,
+            tactical_len=len(TACTICAL_FEATURE_NAMES),
+        )
+    if len(features) == legacy_v1_topology_ppo_len:
+        return [
+            *_insert_neutral_action_history_skill(
+                features,
+                tactical_len=len(TACTICAL_FEATURE_NAMES),
+            ),
+            *encode_visible_contact_context_features(),
+        ]
+    if len(features) == pre_frontier_v1_topology_ppo_len:
+        upgraded = [
+            *_insert_neutral_tactical_features(
+                features[: len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)]
+            ),
+            *features[len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES) :],
+        ]
+        return [
+            *_insert_neutral_action_history_skill(
+                upgraded,
+                tactical_len=len(TACTICAL_FEATURE_NAMES),
+            ),
+            *encode_visible_contact_context_features(),
+        ]
     if len(features) == legacy_topology_ppo_len:
         return [
             *features,
@@ -501,9 +684,14 @@ def pad_observation_features(features: list[float]) -> list[float]:
         f"got {len(features)}, expected {len(TACTICAL_FEATURE_NAMES)}, "
         f"{len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)}, "
         f"{legacy_action_history_len}, {pre_frontier_action_history_len}, "
+        f"{legacy_v1_action_history_len}, {pre_frontier_v1_action_history_len}, "
         f"{legacy_ppo_len}, {pre_frontier_ppo_len}, "
+        f"{legacy_v1_ppo_len}, {pre_frontier_v1_ppo_len}, "
         f"{legacy_contact_ppo_len}, {pre_frontier_contact_ppo_len}, "
-        f"{legacy_topology_ppo_len}, {pre_frontier_topology_ppo_len}, or "
+        f"{legacy_v1_contact_ppo_len}, {pre_frontier_v1_contact_ppo_len}, "
+        f"{legacy_topology_ppo_len}, {pre_frontier_topology_ppo_len}, "
+        f"{legacy_v1_topology_ppo_len}, {pre_frontier_v1_topology_ppo_len}, "
+        f"{legacy_v1_full_ppo_len}, or "
         f"{len(PPO_FEATURE_NAMES)}"
     )
 
@@ -513,6 +701,18 @@ def _insert_neutral_tactical_features(features: list[float]) -> list[float]:
     values = list(features)
     frontier_index = TACTICAL_FEATURE_NAMES.index("topology_frontier_count_norm")
     values.insert(frontier_index, 0.0)
+    return values
+
+
+def _insert_neutral_action_history_skill(
+    features: list[float],
+    *,
+    tactical_len: int,
+) -> list[float]:
+    """Insert a neutral previous-skill bit for the appended contact-closing option."""
+    values = list(features)
+    insert_at = tactical_len + len(LEGACY_PPO_SKILL_ACTIONS_V1)
+    values.insert(insert_at, 0.0)
     return values
 
 
@@ -1225,8 +1425,17 @@ ACTION_SCHEMA = {
             {
                 "name": "visible_contact",
                 "meaning": (
-                    "visible-but-not-shootable contact exposes engage, seek_enemy, "
-                    "and contact use-line actions when those affordances exist"
+                    "visible-but-not-shootable contact exposes close_visible_contact "
+                    "instead of generic engage so the learner can choose contact "
+                    "closure separately from remembered pursuit and use-line actions"
+                ),
+            },
+            {
+                "name": "visible_contact_use_line_gate",
+                "meaning": (
+                    "open_use_line is suppressed during far visible contact unless "
+                    "the use-line is already close/use-ready or the enemy contact is "
+                    "close and aligned enough that acting on the line is plausible"
                 ),
             },
             {

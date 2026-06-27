@@ -503,7 +503,7 @@ class SkillController:
         if features.visible_enemies:
             if features.health <= self.params.retreat_health:
                 return SKILL_ACTIONS.index("retreat")
-            return SKILL_ACTIONS.index("engage")
+            return SKILL_ACTIONS.index("close_visible_contact")
         if self.policy._select_local_exit_line(features) is not None:
             return SKILL_ACTIONS.index("press_exit")
         if (
@@ -540,10 +540,16 @@ class SkillController:
 
         if features.visible_enemies:
             if not can_fire:
-                mask["engage"] = True
+                mask["close_visible_contact"] = True
             if not can_fire and shootable is None and self.policy._select_known_enemy(features) is not None:
                 mask["seek_enemy"] = True
-            if not can_fire and shootable is None and self._contact_use_line(features) is not None:
+            contact_line = self._contact_use_line(features)
+            if (
+                not can_fire
+                and shootable is None
+                and contact_line is not None
+                and self._contact_use_line_ready_for_visible_contact(features, contact_line)
+            ):
                 mask["open_use_line"] = True
             nearest_visible = min(
                 (float(enemy["distance"]) for enemy in features.visible_enemies),
@@ -555,10 +561,14 @@ class SkillController:
             ):
                 mask["retreat"] = True
         elif recent_contact_active:
-            mask["engage"] = True
+            mask["close_visible_contact"] = True
             if self.policy._select_known_enemy(features) is not None:
                 mask["seek_enemy"] = True
-            if self._recent_contact_use_line_for(features) is not None:
+            contact_line = self._recent_contact_use_line_for(features)
+            if (
+                contact_line is not None
+                and self._contact_use_line_ready_for_visible_contact(features, contact_line)
+            ):
                 mask["open_use_line"] = True
 
         if not features.visible_enemies and self.policy._select_known_enemy(features) is not None:
@@ -566,12 +576,20 @@ class SkillController:
 
         if (
             not can_fire
+            and not recent_contact_active
             and (
                 self.policy._select_nearby_use_line(features) is not None
-                or self._recent_contact_use_line_for(features) is not None
+                or (
+                    self._recent_contact_use_line_for(features) is not None
+                    and self._contact_use_line_ready_for_visible_contact(
+                        features,
+                        self._recent_contact_use_line_for(features),
+                    )
+                )
                 or self.policy._select_use_ray(features) is not None
                 or self.policy._should_use_ahead(features)
             )
+            and not self._visible_contact_needs_closure(features)
         ):
             mask["open_use_line"] = True
 
@@ -605,6 +623,38 @@ class SkillController:
             contact = self.policy._continue_last_contact_corridor(features, stuck)
             if contact is not None:
                 return contact
+            return self.policy._explore(features, stuck)
+
+        if skill == "close_visible_contact":
+            enemy = features.visible_enemies[0] if features.visible_enemies else None
+            if enemy is not None and self.policy._shootable_enemy(features) is None:
+                contact = self.policy._close_visible_contact(
+                    features,
+                    enemy,
+                    stuck,
+                    "ppo_close_visible_contact",
+                )
+                if contact is not None:
+                    return contact
+                return self.policy._turn_toward_or_move(
+                    features,
+                    enemy["angle_delta"],
+                    "ppo_close_visible_contact",
+                    stuck,
+                    enemy=enemy,
+                )
+            contact = self.policy._continue_last_contact_corridor(features, stuck)
+            if contact is not None:
+                return contact
+            enemy = self.policy._select_known_enemy(features)
+            if enemy is not None:
+                return self.policy._turn_toward_or_move(
+                    features,
+                    enemy["angle_delta"],
+                    "ppo_close_recent_contact",
+                    stuck,
+                    enemy=enemy,
+                )
             return self.policy._explore(features, stuck)
 
         if skill == "fire":
@@ -675,11 +725,49 @@ class SkillController:
                 line = self._recent_contact_use_line_for(features)
                 contact_line = line is not None
             if line is not None:
+                if contact_line and not self._contact_use_line_ready_for_visible_contact(
+                    features,
+                    line,
+                ):
+                    enemy = features.visible_enemies[0] if features.visible_enemies else None
+                    if enemy is not None:
+                        contact = self.policy._close_visible_contact(
+                            features,
+                            enemy,
+                            stuck,
+                            "ppo_close_visible_contact",
+                        )
+                        if contact is not None:
+                            return contact
+                        return self.policy._turn_toward_or_move(
+                            features,
+                            enemy["angle_delta"],
+                            "ppo_close_visible_contact",
+                            stuck,
+                            enemy=enemy,
+                        )
                 if remember_contact_line or contact_line:
                     self._remember_contact_use_line(features, line)
                 if contact_line:
                     return self._use_contact_line(features, line, stuck)
                 return self.policy._use_nearby_line(features, line, stuck)
+            if self._visible_contact_needs_closure(features):
+                enemy = features.visible_enemies[0]
+                contact = self.policy._close_visible_contact(
+                    features,
+                    enemy,
+                    stuck,
+                    "ppo_close_visible_contact",
+                )
+                if contact is not None:
+                    return contact
+                return self.policy._turn_toward_or_move(
+                    features,
+                    enemy["angle_delta"],
+                    "ppo_close_visible_contact",
+                    stuck,
+                    enemy=enemy,
+                )
             ray = self.policy._select_use_ray(features)
             if ray is not None:
                 return self.policy._use_directional_line(features, ray, stuck)
@@ -768,6 +856,29 @@ class SkillController:
             ),
         )
 
+    def _visible_contact_needs_closure(self, features: Any) -> bool:
+        """Returns true for visible enemy contact that is not yet shootable."""
+        return bool(features.visible_enemies) and self.policy._shootable_enemy(features) is None
+
+    def _contact_use_line_ready_for_visible_contact(
+        self,
+        features: Any,
+        line: dict[str, Any] | None,
+    ) -> bool:
+        """Gate contact use-lines so far first-visible states close contact first."""
+        if line is None:
+            return False
+        line_distance = self.policy._line_control_distance(line)
+        line_angle = abs(self.policy._line_control_angle_delta(line))
+        if line_distance <= 220.0 and line_angle <= 24.0:
+            return True
+        if not features.visible_enemies:
+            return False
+        enemy = features.visible_enemies[0]
+        enemy_distance = float(enemy.get("distance", 999999.0))
+        enemy_angle = abs(float(enemy.get("angle_delta", 999.0)))
+        return enemy_distance <= 900.0 and enemy_angle <= 45.0
+
     def _use_contact_line(
         self,
         features: Any,
@@ -853,7 +964,7 @@ class SkillController:
             "map": int(features.map),
         }
         line = self._contact_use_line(features)
-        if line is not None:
+        if line is not None and self._contact_use_line_ready_for_visible_contact(features, line):
             self._remember_contact_use_line(features, line)
 
     def _recent_contact_use_line_for(self, features: Any) -> dict[str, Any] | None:

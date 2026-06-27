@@ -234,7 +234,8 @@ def test_skill_controller_action_mask_uses_affordances():
     assert not combat_mask["route_progression"]
     assert not combat_mask["press_exit"]
     assert not visible_mask["fire"]
-    assert visible_mask["engage"]
+    assert not visible_mask["engage"]
+    assert visible_mask["close_visible_contact"]
     assert visible_mask["seek_enemy"]
     assert not visible_route_mask["route_progression"]
     assert visible_use_mask["open_use_line"]
@@ -243,7 +244,7 @@ def test_skill_controller_action_mask_uses_affordances():
 
 def test_skill_controller_contact_actions_use_visible_enemy_and_route_waypoint():
     controller = SkillController()
-    state = _state(enemy=True, combat=False, enemy_distance=1400, route=True, contact_use=True)
+    state = _state(enemy=True, combat=False, enemy_distance=640, route=True, contact_use=True)
 
     _seek_action, seek_decision = controller.action_for(SKILL_ACTIONS.index("seek_enemy"), state)
     _route_action, route_decision = controller.action_for(
@@ -255,7 +256,7 @@ def test_skill_controller_contact_actions_use_visible_enemy_and_route_waypoint()
         state,
     )
 
-    assert seek_decision["skill"] == "ppo_seek_visible_contact"
+    assert seek_decision["skill"] in {"ppo_seek_visible_contact", "ppo_seek_visible_enemy"}
     assert seek_decision["enemy"]["id"] == 7
     assert route_decision["ppo_skill"] == "route_progression"
     assert route_decision["skill"] in {
@@ -267,6 +268,19 @@ def test_skill_controller_contact_actions_use_visible_enemy_and_route_waypoint()
     }
     assert use_decision["ppo_skill"] == "open_use_line"
     assert use_decision["use_line"]["line_id"] == 151
+
+
+def test_skill_controller_far_visible_contact_uses_close_option_before_use_line():
+    controller = SkillController()
+    state = _state(enemy=True, combat=False, enemy_distance=1800, contact_use=True)
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+    _action, decision = controller.action_for(SKILL_ACTIONS.index("open_use_line"), state)
+
+    assert mask["close_visible_contact"]
+    assert not mask["open_use_line"]
+    assert decision["skill"] == "ppo_close_visible_contact"
+    assert decision["ppo_skill"] == "open_use_line"
 
 
 def test_skill_controller_engage_continues_recent_contact_corridor():
@@ -335,7 +349,8 @@ def test_skill_controller_mask_remembers_contact_line_without_open_action():
     _action, decision = controller.action_for(SKILL_ACTIONS.index("open_use_line"), second)
 
     assert first_mask["open_use_line"]
-    assert second_mask["open_use_line"]
+    assert not second_mask["open_use_line"]
+    assert second_mask["close_visible_contact"]
     assert decision["use_line"]["line_id"] == 151
     assert decision["skill"] != "ppo_use_ahead"
 
@@ -384,8 +399,9 @@ def test_skill_controller_contact_use_line_followthrough_releases_after_streak()
         )
     mask = dict(zip(SKILL_ACTIONS, controller.action_mask(second)))
 
-    assert mask["open_use_line"]
-    assert mask["engage"]
+    assert not mask["open_use_line"]
+    assert not mask["engage"]
+    assert mask["close_visible_contact"]
     assert mask["seek_enemy"]
 
 
@@ -452,9 +468,10 @@ def test_skill_controller_recent_contact_mask_suppresses_generic_route():
     controller.action_for(SKILL_ACTIONS.index("open_use_line"), first)
     mask = dict(zip(SKILL_ACTIONS, controller.action_mask(second)))
 
-    assert mask["engage"]
+    assert not mask["engage"]
+    assert mask["close_visible_contact"]
     assert mask["seek_enemy"]
-    assert mask["open_use_line"]
+    assert not mask["open_use_line"]
     assert not mask["route_progression"]
 
 
@@ -478,7 +495,8 @@ def test_skill_controller_recent_visible_contact_suppresses_generic_route():
     contact_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(second)))
     expired_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(expired)))
 
-    assert contact_mask["engage"]
+    assert not contact_mask["engage"]
+    assert contact_mask["close_visible_contact"]
     assert contact_mask["seek_enemy"]
     assert not contact_mask["route_progression"]
     assert expired_mask["route_progression"]
@@ -522,7 +540,8 @@ def test_skill_controller_recent_contact_route_failures_suppress_progression_lin
     combat_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(combat_state)))
 
     assert before_failures["route_progression"]
-    assert after_failure["engage"]
+    assert not after_failure["engage"]
+    assert after_failure["close_visible_contact"]
     assert after_failure["seek_enemy"]
     assert not after_failure["route_progression"]
     assert combat_mask["fire"]

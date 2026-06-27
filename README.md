@@ -338,6 +338,11 @@ The training API is:
   enemy: active/shootable/needs-closure flags, distance, angle, alignment, and
   close-contact state. This makes the first-visible to first-shootable subtask
   explicit in the vector instead of hiding it in generic enemy memory.
+- PPO exposes `close_visible_contact` as its own stable skill action. Visible
+  but not shootable contact now has a direct contact-closing option, while
+  `open_use_line` is masked during far contact unless the line is close/use-
+  ready or the enemy contact is close and aligned enough to make using the line
+  plausible.
 - `--first-visible-bonus`, `--first-shootable-bonus`,
   `--visible-contact-progress-reward`, `--terminate-on-first-visible`, and
   `--terminate-on-first-shootable` enable first-contact and
@@ -350,9 +355,9 @@ The training API is:
 - Rollout buffers and checkpoints also carry the decision-cycle and memory
   contracts, so a resumed cloud job can inspect how skills, masks, memory
   queries, and controller execution are meant to interact.
-- Older PPO checkpoints whose observation schema is a prefix of the current
-  schema can resume with zero-initialized weights for appended observation
-  features.
+- Older PPO checkpoints whose observation or action schema is a prefix of the
+  current schema can resume with zero-initialized weights for appended
+  observation features and mean-initialized rows for appended actor actions.
 
 Run a small PPO batch against a live gRPC Doom endpoint:
 
@@ -435,12 +440,12 @@ known shootable `combat_start`. Use it with `--first-shootable-bonus` and
 closing distance to a visible but not yet shootable enemy. The visible-contact
 controller uses short graded movement rays, remembered contact corridors, and
 short-lived contact use-line memory; the PPO mask keeps this boundary focused
-on `engage`, `seek_enemy`, and usable line affordances instead of generic route
-progression. The observation vector now exposes that contact use-line state
-directly, so PPO can distinguish a fresh contact candidate from a stale or
-over-forced line. Use `--curriculum-mode fixed --curriculum-start-index <n>`
-when a single stage needs repeated training before mixing it back into the
-schedule.
+on `close_visible_contact`, `seek_enemy`, and ready usable-line affordances
+instead of generic route progression or far `open_use_line` overcommit. The
+observation vector now exposes that contact use-line state directly, so PPO can
+distinguish a fresh contact candidate from a stale or over-forced line. Use
+`--curriculum-mode fixed --curriculum-start-index <n>` when a single stage needs
+repeated training before mixing it back into the schedule.
 
 For longer curriculum runs, add `--checkpoint-eval-curriculum` with small
 `--checkpoint-eval-max-steps` first. The eval result is stored in checkpoint

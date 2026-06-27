@@ -176,6 +176,7 @@ The stable action space is:
 | 5 | `retreat` | when danger warrants distance | backward/strafe mechanics |
 | 6 | `recover_stuck` | when recovery should interrupt | unstuck sequence |
 | 7 | `press_exit` | when exit affordances dominate | exit alignment and use |
+| 8 | `close_visible_contact` | when visible contact needs closure | contact-ray movement and recent corridor follow-through |
 
 The machine-readable definition is `ACTION_SCHEMA`
 (`restfuldoom.skill_action.v1`). Each descriptor includes the index, name,
@@ -193,6 +194,7 @@ The controller owns primitive mechanics:
 - movement amount and turn amount
 - aiming tolerance and firing cadence
 - door/switch use timing
+- contact closing as a dedicated option for visible-but-not-shootable enemies
 - short option follow-through for shot windows and recent contact use-lines
   with a same-skill streak guard unless the remembered line is close enough to
   activate
@@ -201,6 +203,12 @@ The controller owns primitive mechanics:
 
 A future skill can become config-backed or internally learned only if the
 stable index/name option contract remains valid for older checkpoints.
+
+For contact-to-shootable training, the mask exposes `close_visible_contact`
+when visible contact needs closure and suppresses far `open_use_line` choices
+until a line is close/use-ready or the enemy contact is close and aligned. That
+keeps the decision boundary explicit: close contact, pursue memory, or act on a
+ready line.
 
 ## 4. Protobuf State To Rich Observation
 

@@ -468,11 +468,14 @@ class PPOTrainer:
         )
         obs_dim = target_obs_dim or checkpoint_obs_dim
         action_dim = target_action_dim or checkpoint_action_dim
+        action_migrated = False
         if action_dim != checkpoint_action_dim:
-            raise ValueError(
-                "checkpoint action dimension cannot be migrated: "
-                f"{checkpoint_action_dim} != {action_dim}"
-            )
+            if action_dim < checkpoint_action_dim:
+                raise ValueError(
+                    "checkpoint action dimension cannot be migrated: "
+                    f"{checkpoint_action_dim} -> {action_dim}"
+                )
+            action_migrated = True
         migrated = False
         state_dict = checkpoint["model_state_dict"]
         if obs_dim != checkpoint_obs_dim:
@@ -488,15 +491,31 @@ class PPOTrainer:
                 device=device,
             )
             migrated = True
+        if action_migrated:
+            state_dict = _expand_action_state_dict(
+                state_dict,
+                checkpoint_action_dim=checkpoint_action_dim,
+                target_action_dim=action_dim,
+                device=device,
+            )
+            migrated = True
         trainer = cls(obs_dim=obs_dim, action_dim=action_dim, config=config, device=device)
         trainer.model.load_state_dict(state_dict)
         if migrated:
             trainer.resume_migration = {
-                "schema": "restfuldoom.ppo_observation_migration.v1",
+                "schema": "restfuldoom.ppo_checkpoint_migration.v1",
                 "from_obs_dim": checkpoint_obs_dim,
                 "to_obs_dim": obs_dim,
+                "from_action_dim": checkpoint_action_dim,
+                "to_action_dim": action_dim,
+                "observation_expanded": obs_dim != checkpoint_obs_dim,
+                "action_expanded": action_dim != checkpoint_action_dim,
                 "optimizer_state_loaded": False,
-                "reason": "observation schema appended features; first-layer new columns initialized to zero",
+                "reason": (
+                    "checkpoint schema appended observation features or actions; "
+                    "new observation columns are zero-initialized and new actor rows "
+                    "start from the previous policy head mean"
+                ),
             }
         else:
             trainer.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -530,6 +549,49 @@ def _expand_observation_state_dict(
     )
     expanded[:, :checkpoint_obs_dim] = old_weight.to(device)
     migrated[weight_key] = expanded
+    return migrated
+
+
+def _expand_action_state_dict(
+    state_dict: dict[str, Any],
+    *,
+    checkpoint_action_dim: int,
+    target_action_dim: int,
+    device: str,
+) -> dict[str, Any]:
+    require_torch()
+    migrated = dict(state_dict)
+    weight_key = "actor.weight"
+    bias_key = "actor.bias"
+    if weight_key not in migrated or bias_key not in migrated:
+        raise ValueError("checkpoint missing actor policy head")
+    old_weight = migrated[weight_key]
+    old_bias = migrated[bias_key]
+    if old_weight.shape[0] != checkpoint_action_dim or old_bias.shape[0] != checkpoint_action_dim:
+        raise ValueError(
+            "checkpoint actor head does not match action dimension: "
+            f"{old_weight.shape[0]}/{old_bias.shape[0]} != {checkpoint_action_dim}"
+        )
+    expanded_weight = torch.zeros(
+        (target_action_dim, old_weight.shape[1]),
+        dtype=old_weight.dtype,
+        device=device,
+    )
+    expanded_bias = torch.zeros(
+        (target_action_dim,),
+        dtype=old_bias.dtype,
+        device=device,
+    )
+    expanded_weight[:checkpoint_action_dim] = old_weight.to(device)
+    expanded_bias[:checkpoint_action_dim] = old_bias.to(device)
+    if target_action_dim > checkpoint_action_dim:
+        expanded_weight[checkpoint_action_dim:] = old_weight.to(device).mean(
+            dim=0,
+            keepdim=True,
+        )
+        expanded_bias[checkpoint_action_dim:] = old_bias.to(device).mean()
+    migrated[weight_key] = expanded_weight
+    migrated[bias_key] = expanded_bias
     return migrated
 
 

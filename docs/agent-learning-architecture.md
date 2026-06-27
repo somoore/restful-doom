@@ -35,7 +35,7 @@ The loop has these concrete implementations:
 
 - `DoomAgentClient` owns the bidirectional gRPC stream.
 - `BrainPolicy` is the hand-built fast policy plus controller.
-- `SkillController` wraps `BrainPolicy` for PPO by exposing eight stable skill
+- `SkillController` wraps `BrainPolicy` for PPO by exposing nine stable skill
   actions.
 - `DoomAgentEnv` is the Gym-style environment used by PPO.
 - `SkillPolicyModel` is the behavior-cloned softmax selector trained from good
@@ -146,17 +146,18 @@ and memory:
   follows through by suppressing normal `engage`, use-line, and route actions.
   This prevents PPO from creating a brief firing window and then immediately
   moving out of it before damage can land.
-- `engage` is available when an enemy is visible.
-- `seek_enemy` is also available during visible-but-not-shootable contact, so
-  PPO can choose a different close/turn primitive instead of being forced into
-  `engage` when line-of-sight exists but the combat probe cannot fire.
-- During visible-but-not-shootable contact, `engage` and `seek_enemy` use a
-  contact-specific controller primitive: graded direction probes can use
-  short-clearance rays, execution is limited to 1 tic, and the controller
-  continues the remembered contact corridor if line of sight drops.
-- `open_use_line` remembers a manual line selected during visible contact and
-  can keep approaching it after line of sight drops, so PPO does not lose the
-  door/switch target at exactly the contact boundary.
+- `close_visible_contact` is available when an enemy is visible but not yet
+  shootable, so PPO can choose contact closure directly instead of hiding that
+  decision inside generic `engage`.
+- `seek_enemy` remains available during visible-but-not-shootable contact when
+  enemy memory/protobuf has a usable target.
+- During visible-but-not-shootable contact, `close_visible_contact` and
+  `seek_enemy` use contact-specific controller primitives: graded direction
+  probes can use short-clearance rays, execution is limited to 1 tic, and the
+  controller continues the remembered contact corridor if line of sight drops.
+- `open_use_line` remembers a manual line selected during ready visible contact
+  and can keep approaching it after line of sight drops, so PPO does not lose a
+  close door/switch target at exactly the contact boundary.
 - When a recent contact corridor or remembered contact use-line is active, the
   mask keeps contact actions available and suppresses generic route progression
   until that contact context expires. Contact use-line follow-through is
@@ -169,6 +170,8 @@ and memory:
 - `retreat` is available only for low health or close threats.
 - `seek_enemy` is available when no enemy is visible but memory/protobuf has a
   target to hunt.
+- `close_visible_contact` is available when an enemy is visible but not yet a
+  shootable target, or when a recent contact corridor can still be followed.
 - `open_use_line`, `route_progression`, `recover_stuck`, and `press_exit` are
   enabled only when their corresponding affordances are present.
 
@@ -188,6 +191,7 @@ The PPO skill action space is in `restfuldoom_agent.schemas.PPO_SKILL_ACTIONS`:
 - `retreat`
 - `recover_stuck`
 - `press_exit`
+- `close_visible_contact`
 
 These are currently code-defined options, not learned movement primitives. Each
 skill is implemented as a branch in `SkillController._execute_skill()` and
@@ -234,6 +238,7 @@ The current representation is:
 | `retreat` | code-defined option | when danger warrants distance | backward/strafe retreat mechanics |
 | `recover_stuck` | code-defined option | when recovery should interrupt other plans | unstuck turn/backtrack sequence |
 | `press_exit` | code-defined option | when the exit should take priority | exit switch alignment and use |
+| `close_visible_contact` | code-defined option | when visible contact needs closure before combat | contact-ray movement and recent corridor follow-through |
 
 Later, a skill can become learned internally without changing the PPO action
 index if it preserves the same option contract. For example, `engage` could
@@ -307,7 +312,7 @@ The memory lifecycle is:
 PPO receives the feature vector declared in
 `restfuldoom_agent.schemas.OBSERVATION_SCHEMA`. It is derived from protobuf
 state, memory, and macro-action history, not screenshots. The current schema has
-104 features: 55 base tactical features, 15 action-history features,
+105 features: 55 base tactical features, 16 action-history features,
 11 bounded temporal-context features, 8 contact-context features, 7
 local topology-context features, and 8 visible-contact-context features.
 
@@ -472,7 +477,7 @@ PPO can be warm-started from successful protobuf trajectories before live RL
 updates. The bootstrap path:
 
 1. Reads trajectory JSONL records with `metadata.policy_decision.skill`.
-2. Maps rich expert skills into the eight stable PPO skills using
+2. Maps rich expert skills into the nine stable PPO skills using
    `EXPERT_TO_PPO_SKILL_ACTION`.
 3. Trains the actor with supervised cross-entropy.
 4. Continues normal PPO collection and updates against live Doom reward.
@@ -751,6 +756,13 @@ Recent PPO evidence:
   `visible_contact_needs_closure_steps=42`, but checkpoint eval still scored
   the `first-visible` slot at zero earned kills. The feature is live; the
   first-visible-to-shootable policy gap remains.
+- The contact-closure primitive is now a first-class PPO action appended after
+  the original eight skills. Older checkpoints can migrate by expanding both
+  observation and actor-action dimensions, while the mask exposes
+  `close_visible_contact` for visible-but-not-shootable states and suppresses
+  far `open_use_line` choices until the line is close/use-ready or the enemy
+  contact is close and aligned. This is option/mask representation progress;
+  the next live proof must show improved first-visible eval results.
 
 ## Next Architecture Work
 

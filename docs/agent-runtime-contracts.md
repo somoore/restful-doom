@@ -122,6 +122,7 @@ external config. The stable action space is:
 | 5 | `retreat` | when danger warrants distance | backing/strafe mechanics |
 | 6 | `recover_stuck` | when to interrupt for recovery | unstuck sequence |
 | 7 | `press_exit` | when exit affordances should dominate | exit alignment and use |
+| 8 | `close_visible_contact` | when visible contact needs closure | contact-ray movement and recent corridor follow-through |
 
 The machine-readable definition is
 `restfuldoom_agent.schemas.ACTION_SCHEMA` (`restfuldoom.skill_action.v1`).
@@ -136,6 +137,9 @@ contract remains valid for old checkpoints.
 Two current mask rules are intentionally controller-heavy. If the protobuf
 combat probe reports a shootable enemy and the controller can fire, the mask
 follows through to `fire` and suppresses normal engage/use/route actions. If
+an enemy is visible but not shootable, the mask exposes `close_visible_contact`
+instead of generic `engage`; `open_use_line` is only available when the contact
+line is close/use-ready or the enemy contact is close and aligned. If
 PPO selects `open_use_line` for a recent visible-contact manual line, the mask
 keeps that option active until the line is no longer valid or a shootable enemy
 appears. That contact-line follow-through is bounded: after a long same-skill
