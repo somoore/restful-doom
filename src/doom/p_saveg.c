@@ -76,6 +76,24 @@ char *P_SaveGameFile(int slot)
     return filename;
 }
 
+char *P_AgentSaveGameFile(int slot)
+{
+    static char *filename = NULL;
+    static size_t filename_size = 0;
+    char basename[32];
+
+    if (filename == NULL)
+    {
+        filename_size = strlen(savegamedir) + 32;
+        filename = malloc(filename_size);
+    }
+
+    DEH_snprintf(basename, 32, "agentdoom%d.dsg", slot);
+    M_snprintf(filename, filename_size, "%s%s", savegamedir, basename);
+
+    return filename;
+}
+
 // Endian-safe integer read/write functions
 
 static byte saveg_read8(void)
@@ -1888,4 +1906,3 @@ void P_UnArchiveSpecials (void)
     }
 
 }
-

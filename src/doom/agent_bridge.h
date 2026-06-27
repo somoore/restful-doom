@@ -21,9 +21,12 @@ typedef struct
 } agent_player_action_t;
 
 #define AGENT_CONTROL_RESET_EPISODE 1u
+#define AGENT_CONTROL_SAVE_SNAPSHOT 2u
+#define AGENT_CONTROL_LOAD_SNAPSHOT 3u
 #define AGENT_CONTROL_FLAG_START_POSITION 1u
 #define AGENT_CONTROL_FLAG_FACE_NEAREST_ENEMY 2u
 #define AGENT_CONTROL_FLAG_APPLY_RESOURCES 4u
+#define AGENT_CONTROL_SNAPSHOT_DESCRIPTION_BYTES 24u
 
 typedef struct
 {
@@ -42,6 +45,8 @@ typedef struct
     int32_t start_ammo_shells;
     int32_t start_ammo_cells;
     int32_t start_ammo_rockets;
+    int32_t snapshot_slot;
+    uint8_t snapshot_description[AGENT_CONTROL_SNAPSHOT_DESCRIPTION_BYTES];
     uint8_t reserved[4];
 } agent_control_request_t;
 
@@ -180,7 +185,7 @@ int restfuldoom_agent_take_action(agent_player_action_t *out_action);
 int restfuldoom_agent_take_control_request(agent_control_request_t *out_request);
 
 void AgentBridge_Init(int port);
-void AgentBridge_BeforeTic(void);
+int AgentBridge_BeforeTic(void);
 void AgentBridge_AfterTic(int completed_tic);
 void AgentBridge_ApplyTiccmd(ticcmd_t *cmd);
 

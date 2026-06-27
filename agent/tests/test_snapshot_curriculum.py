@@ -33,6 +33,7 @@ def test_snapshot_builder_generates_manifest_from_trajectory_rows(tmp_path):
         indexes=[1],
         auto_selectors=["first-shootable", "first-damage"],
         snapshot_dir=Path("snapshots"),
+        save_slot_base=3,
     )
 
     assert manifest["schema"] == "restfuldoom.snapshot_curriculum.v1"
@@ -49,9 +50,12 @@ def test_snapshot_builder_generates_manifest_from_trajectory_rows(tmp_path):
     assert first["reset_start"]["x_fp"] == 101 * 65536
     assert first["expected_state"]["visible_enemy"] is True
     assert first["expected_state"]["shootable_target"] is False
+    assert first["snapshot"]["slot"] == 3
+    assert first["snapshot"]["ref"] == "save_slot:3"
     assert second["evidence"]["selectors"] == ["first-shootable", "first-damage"]
     assert second["expected_state"]["shootable_target"] is True
     assert second["expected_state"]["damage_delta"] == 20
+    assert second["snapshot"]["slot"] == 4
 
     validation = validate_snapshot_curriculum(tmp_path / "snapshot-curriculum.json")
     assert validation["valid"] is True
@@ -92,6 +96,36 @@ def test_snapshot_validation_checks_required_artifacts_and_digests(tmp_path):
     assert validation["valid"] is False
     assert validation["digest_mismatches"] == ["first_contact_snapshot"]
     assert "digest mismatch" in validation["errors"][0]
+
+
+def test_snapshot_validation_allows_native_slots_when_requiring_artifacts(tmp_path):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": "restfuldoom.snapshot_curriculum.v1",
+                "name": "native-slot",
+                "stages": [
+                    {
+                        "name": "slot_snapshot",
+                        "snapshot": {
+                            "id": "slot-3",
+                            "slot": 3,
+                            "ref": "save_slot:3",
+                        },
+                        "expected_state": {"episode": 1, "map": 1, "tick": 10},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    validation = validate_snapshot_curriculum(manifest, require_artifacts=True)
+
+    assert validation["valid"] is True
+    assert validation["stages"][0]["snapshot_slot"] == 3
+    assert validation["missing_artifacts"] == []
 
 
 def test_snapshot_builder_capture_command_populates_digest(tmp_path):

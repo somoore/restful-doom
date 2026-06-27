@@ -18,6 +18,7 @@
 //
 
 #include <stdlib.h>
+#include <string.h>
 
 #include "doomfeatures.h"
 
@@ -92,7 +93,10 @@ static void RunTic(ticcmd_t *cmds, boolean *ingame)
     if (advancedemo)
         D_DoAdvanceDemo ();
 
-    AgentBridge_BeforeTic();
+    if (AgentBridge_BeforeTic())
+    {
+        memset(cmds, 0, sizeof(ticcmd_t) * MAXPLAYERS);
+    }
     G_Ticker ();
     AgentBridge_AfterTic(gametic);
 }

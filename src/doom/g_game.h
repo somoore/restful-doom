@@ -48,6 +48,10 @@ void G_DoLoadGame (void);
 // Called by M_Responder.
 void G_SaveGame (int slot, char* description);
 
+// Called by the agent bridge for progressed-state training snapshots.
+boolean G_AgentSaveGame(int slot, const char *description);
+boolean G_AgentLoadGame(int slot);
+
 // Only called by startup code.
 void G_RecordDemo (char* name);
 
@@ -77,4 +81,3 @@ int G_VanillaVersionCode(void);
 extern int vanilla_savegame_limit;
 extern int vanilla_demo_limit;
 #endif
-

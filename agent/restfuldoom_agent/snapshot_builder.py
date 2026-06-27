@@ -36,6 +36,7 @@ def build_snapshot_curriculum_from_trajectory(
     indexes: list[int] | None = None,
     auto_selectors: list[str] | None = None,
     snapshot_dir: str | Path = "snapshots",
+    save_slot_base: int | None = None,
     capsule: str = "agent-doom",
     microvm_id: str | None = None,
     capture_command: str | None = None,
@@ -74,6 +75,7 @@ def build_snapshot_curriculum_from_trajectory(
             trajectory=trajectory,
             name=name,
             snapshot_dir=snapshot_directory,
+            save_slot=(save_slot_base + order) if save_slot_base is not None else None,
             capsule=capsule,
             microvm_id=microvm_id,
         )
@@ -216,6 +218,7 @@ def _stage_from_record(
     trajectory: Path,
     name: str,
     snapshot_dir: Path,
+    save_slot: int | None,
     capsule: str,
     microvm_id: str | None,
 ) -> dict[str, Any]:
@@ -231,6 +234,9 @@ def _stage_from_record(
     }
     if microvm_id:
         snapshot["microvm_id"] = microvm_id
+    if save_slot is not None:
+        snapshot["slot"] = int(save_slot)
+        snapshot["ref"] = f"save_slot:{int(save_slot)}"
 
     return {
         "index": order,
@@ -550,6 +556,11 @@ def _main(argv: list[str] | None = None) -> int:
         help="auto-select the first row matching this milestone; may be repeated",
     )
     parser.add_argument("--snapshot-dir", type=Path, default=Path("snapshots"))
+    parser.add_argument(
+        "--save-slot-base",
+        type=int,
+        help="optional first Doom agent save slot assigned to generated stages",
+    )
     parser.add_argument("--capsule", default="agent-doom")
     parser.add_argument("--microvm-id")
     parser.add_argument(
@@ -576,6 +587,7 @@ def _main(argv: list[str] | None = None) -> int:
         indexes=indexes,
         auto_selectors=args.auto,
         snapshot_dir=args.snapshot_dir,
+        save_slot_base=args.save_slot_base,
         capsule=args.capsule,
         microvm_id=args.microvm_id,
         capture_command=args.capture_command,

@@ -575,10 +575,29 @@ def _restore_snapshot_for_stage(
 ) -> dict[str, object]:
     command_template = getattr(args, "snapshot_restore_command", None)
     if not command_template:
-        raise ValueError(
-            "snapshot curriculum stage "
-            f"{curriculum_stage.get('name')!r} requires --snapshot-restore-command"
-        )
+        slot = _snapshot_slot(curriculum_stage)
+        if slot is None:
+            raise ValueError(
+                "snapshot curriculum stage "
+                f"{curriculum_stage.get('name')!r} requires --snapshot-restore-command "
+                "or snapshot.slot"
+            )
+        snapshot = curriculum_stage.get("snapshot", {})
+        snapshot_dict = snapshot if isinstance(snapshot, dict) else {}
+        return {
+            "schema": "restfuldoom.snapshot_restore.v1",
+            "stage_name": curriculum_stage.get("name"),
+            "stage_index": curriculum_stage.get("selected_index", curriculum_stage.get("index")),
+            "snapshot_id": snapshot_dict.get("id"),
+            "snapshot_path": snapshot_dict.get("path"),
+            "snapshot_ref": snapshot_dict.get("ref"),
+            "api_method": "grpc_load_snapshot",
+            "restore_command_configured": False,
+            "returncode": 0,
+            "slot": slot,
+            "update_index": int(update_index),
+            "reset_index": int(reset_index),
+        }
     command = _render_snapshot_restore_command(
         str(command_template),
         curriculum_stage,
@@ -620,6 +639,20 @@ def _restore_snapshot_for_stage(
         "update_index": int(update_index),
         "reset_index": int(reset_index),
     }
+
+
+def _snapshot_slot(curriculum_stage: dict[str, object]) -> int | None:
+    snapshot = curriculum_stage.get("snapshot", {})
+    snapshot_dict = snapshot if isinstance(snapshot, dict) else {}
+    value = snapshot_dict.get("slot")
+    if value is None:
+        ref = snapshot_dict.get("ref")
+        if isinstance(ref, str) and ref.startswith("save_slot:"):
+            value = ref.removeprefix("save_slot:")
+    try:
+        return None if value is None else int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _render_snapshot_restore_command(
@@ -1436,7 +1469,8 @@ def main() -> None:
         "--snapshot-restore-command",
         help=(
             "Command template run before each snapshot reset. Supports placeholders "
-            "such as {snapshot_id}, {snapshot_path_sh}, {stage_name}, and {reset_index}."
+            "such as {snapshot_id}, {snapshot_path_sh}, {stage_name}, and {reset_index}. "
+            "Optional when each snapshot stage has snapshot.slot or ref=save_slot:N."
         ),
     )
     parser.add_argument("--snapshot-restore-cwd", type=Path)

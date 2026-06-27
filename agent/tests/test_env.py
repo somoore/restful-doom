@@ -689,6 +689,50 @@ def test_doom_agent_env_snapshot_reset_observes_without_episode_reset():
     assert reset_context["actual_first_state"]["tick"] == 700
 
 
+def test_doom_agent_env_snapshot_reset_can_load_server_slot():
+    first = _state(tick=800, enemy=True)
+    client = _FakeClient([first])
+    env = DoomAgentEnv(
+        DoomEnvConfig(
+            reset_mode="snapshot",
+            snapshot={
+                "id": "slot-3",
+                "ref": "save_slot:3",
+                "slot": 3,
+                "digest": "engine-save-slot",
+            },
+            curriculum_stage={
+                "name": "first_contact_snapshot",
+                "reset_mode": "snapshot",
+                "expected_state": {"tick": 800},
+                "snapshot_restore": {
+                    "schema": "restfuldoom.snapshot_restore.v1",
+                    "api_method": "grpc_load_snapshot",
+                    "restore_command_configured": False,
+                    "slot": 3,
+                    "returncode": 0,
+                },
+            },
+        ),
+        client=client,
+        controller=SkillController(),
+    )
+
+    async def run():
+        await env.reset(seed=99)
+        await env.close()
+        return env._last_reset_context
+
+    reset_context = asyncio.run(run())
+
+    assert client.reset_requests == []
+    assert client.load_snapshot_requests == [{"slot": 3, "run_id": "ppo-1-load-snapshot"}]
+    assert reset_context["source"] == "snapshot_restore"
+    assert reset_context["restore"]["api_method"] == "grpc_load_snapshot"
+    assert reset_context["restore"]["returncode"] == 0
+    assert reset_context["actual_first_state"]["tick"] == 800
+
+
 def test_doom_agent_env_aggregates_macro_action_tics():
     first = _state(tick=1, kills=0)
     second = _state(tick=2, kills=0, enemy=True, enemy_distance=500)
@@ -943,6 +987,7 @@ class _FakeClient:
         self.states = list(states)
         self.actions = []
         self.reset_requests = []
+        self.load_snapshot_requests = []
 
     async def reset_episode(self, *, skill, episode, map, seed, run_id, start=None):
         self.reset_requests.append(
@@ -957,6 +1002,16 @@ class _FakeClient:
             seed=seed,
             seed_applied=False,
             start_queued=False,
+        )
+
+    async def load_snapshot(self, *, slot, run_id=""):
+        self.load_snapshot_requests.append({"slot": slot, "run_id": run_id})
+        return SimpleNamespace(
+            accepted=True,
+            message="queued",
+            slot=slot,
+            save_queued=False,
+            load_queued=True,
         )
 
     async def session(self, actions):

@@ -17,6 +17,7 @@ from restfuldoom_agent.ppo_agent import (
     _policy_eval_selection_score,
     _record_ppo_checkpoint,
     _reset_start_from_trajectory,
+    _restore_snapshot_for_stage,
     _resolve_resume_checkpoint,
     _should_replace_best_checkpoint,
     _summarize_buffer,
@@ -642,6 +643,29 @@ def test_snapshot_restore_command_rendering_redacts_secrets():
 
     assert "/tmp/snap one.bin" in command
     assert _redacted_restore_argv(argv)[-1] == "<redacted>"
+
+
+def test_snapshot_restore_uses_grpc_slot_without_external_command():
+    stage = {
+        "name": "first_contact",
+        "index": 2,
+        "snapshot": {
+            "id": "slot-4",
+            "slot": 4,
+            "ref": "save_slot:4",
+        },
+    }
+    args = SimpleNamespace(snapshot_restore_command=None)
+
+    restore = _restore_snapshot_for_stage(stage, args, update_index=3, reset_index=5)
+
+    assert restore["schema"] == "restfuldoom.snapshot_restore.v1"
+    assert restore["api_method"] == "grpc_load_snapshot"
+    assert restore["restore_command_configured"] is False
+    assert restore["slot"] == 4
+    assert restore["returncode"] == 0
+    assert restore["update_index"] == 3
+    assert restore["reset_index"] == 5
 
 
 def test_rollout_summary_counts_curriculum_stages():

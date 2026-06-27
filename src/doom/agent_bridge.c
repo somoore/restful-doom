@@ -26,6 +26,8 @@ static agent_control_request_t agent_pending_start;
 
 static boolean IsLivingEnemy(const mobj_t *obj);
 static int ProgressionLinePriority(int special);
+static void SnapshotDescription(char *out, size_t out_size,
+                                const agent_control_request_t *request);
 static const int agent_nav_direction_offsets[AGENT_MAX_NAV_DIRECTIONS] = {
     -90,
     -60,
@@ -49,6 +51,35 @@ static int ClampInt(int value, int low, int high)
         return high;
     }
     return value;
+}
+
+static void SnapshotDescription(char *out, size_t out_size,
+                                const agent_control_request_t *request)
+{
+    size_t index;
+
+    if (out == NULL || out_size == 0)
+    {
+        return;
+    }
+
+    out[0] = '\0';
+    if (request == NULL)
+    {
+        return;
+    }
+
+    for (index = 0;
+         index + 1 < out_size && index < AGENT_CONTROL_SNAPSHOT_DESCRIPTION_BYTES;
+         ++index)
+    {
+        if (request->snapshot_description[index] == '\0')
+        {
+            break;
+        }
+        out[index] = (char) request->snapshot_description[index];
+    }
+    out[index] = '\0';
 }
 
 static uint32_t AngleToDegrees(angle_t angle)
@@ -796,16 +827,18 @@ void AgentBridge_AfterTic(int completed_tic)
     restfuldoom_agent_publish_state(&snapshot);
 }
 
-void AgentBridge_BeforeTic(void)
+int AgentBridge_BeforeTic(void)
 {
     agent_control_request_t request;
     agent_player_action_t discarded_action;
+    char snapshot_description[AGENT_CONTROL_SNAPSHOT_DESCRIPTION_BYTES];
     int requests_applied = 0;
     int actions_discarded;
+    int suppress_current_ticcmd = 0;
 
     if (!agent_bridge_initialized)
     {
-        return;
+        return 0;
     }
 
     while (requests_applied < 4 && restfuldoom_agent_take_control_request(&request) == 1)
@@ -819,9 +852,11 @@ void AgentBridge_BeforeTic(void)
                 {
                     ++actions_discarded;
                 }
+                agent_pending_start_active = false;
                 G_DeferedInitNew((skill_t) ClampInt(request.skill, sk_baby, sk_nightmare),
                                  request.episode,
                                  request.map);
+                suppress_current_ticcmd = 1;
                 if ((request.flags
                      & (AGENT_CONTROL_FLAG_START_POSITION
                         | AGENT_CONTROL_FLAG_FACE_NEAREST_ENEMY
@@ -831,11 +866,33 @@ void AgentBridge_BeforeTic(void)
                     agent_pending_start_active = true;
                 }
                 break;
+            case AGENT_CONTROL_SAVE_SNAPSHOT:
+                SnapshotDescription(
+                    snapshot_description,
+                    sizeof(snapshot_description),
+                    &request);
+                G_AgentSaveGame(
+                    ClampInt(request.snapshot_slot, 0, 9),
+                    snapshot_description);
+                break;
+            case AGENT_CONTROL_LOAD_SNAPSHOT:
+                actions_discarded = 0;
+                while (actions_discarded < 256
+                    && restfuldoom_agent_take_action(&discarded_action) == 1)
+                {
+                    ++actions_discarded;
+                }
+                agent_pending_start_active = false;
+                G_AgentLoadGame(ClampInt(request.snapshot_slot, 0, 9));
+                suppress_current_ticcmd = 1;
+                break;
             default:
                 break;
         }
         ++requests_applied;
     }
+
+    return suppress_current_ticcmd;
 }
 
 void AgentBridge_ApplyTiccmd(ticcmd_t *cmd)

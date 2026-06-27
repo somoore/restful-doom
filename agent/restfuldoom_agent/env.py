@@ -1015,9 +1015,13 @@ class DoomAgentEnv:
                 key: restore.get(key)
                 for key in (
                     "schema",
+                    "api_method",
                     "returncode",
                     "elapsed_seconds",
                     "restore_command_configured",
+                    "slot",
+                    "accepted",
+                    "message",
                     "update_index",
                     "reset_index",
                 )
@@ -1030,17 +1034,56 @@ class DoomAgentEnv:
     async def _reset_from_snapshot(self) -> Any:
         """Reconnects and observes the current restored state without fresh-resetting Doom."""
         if self._owns_client:
-            await self.close()
+            if self.client is not None:
+                await self.client.close()
+            self.client = None
         else:
             if self._action_queue is not None:
                 try:
                     self._action_queue.put_nowait(None)
                 except asyncio.QueueFull:
                     pass
-            self._state_stream = None
-            self._action_queue = None
+        self._state_stream = None
+        self._action_queue = None
+
+        slot = _snapshot_slot(self.config.snapshot or {})
+        if slot is not None:
+            await self._load_server_snapshot(slot)
         await self._ensure_stream()
         return await self._next_live_state(self.config.episode, self.config.map)
+
+    async def _load_server_snapshot(self, slot: int) -> None:
+        await self._ensure_client()
+        assert self.client is not None
+        start = time.monotonic()
+        response = await self.client.load_snapshot(
+            slot=slot,
+            run_id=f"{self.config.run_id}-{self._episode_index}-load-snapshot",
+        )
+        elapsed = round(time.monotonic() - start, 4)
+        if not response.accepted:
+            raise RuntimeError(f"snapshot load rejected: {response.message}")
+        stage = dict(self.config.curriculum_stage or {})
+        restore = dict(stage.get("snapshot_restore", {}))
+        restore.update(
+            {
+                "schema": "restfuldoom.snapshot_restore.v1",
+                "api_method": "grpc_load_snapshot",
+                "restore_command_configured": False,
+                "returncode": 0,
+                "elapsed_seconds": elapsed,
+                "slot": int(response.slot),
+                "accepted": bool(response.accepted),
+                "message": response.message,
+            }
+        )
+        stage["snapshot_restore"] = restore
+        self.config = DoomEnvConfig(
+            **{
+                **self.config.__dict__,
+                "curriculum_stage": stage,
+            }
+        )
 
     async def _reset_with_retries(self, reset_seed: int) -> Any:
         attempts = max(1, int(self.config.reset_attempts))
@@ -1259,6 +1302,13 @@ class DoomAgentEnv:
         return max(-1.0, min(1.0, reward))
 
     async def _ensure_stream(self) -> None:
+        await self._ensure_client()
+        assert self.client is not None
+        if self._state_stream is None:
+            self._action_queue = asyncio.Queue(maxsize=16)
+            self._state_stream = self.client.session(self._action_iter()).__aiter__()
+
+    async def _ensure_client(self) -> None:
         if self.client is None:
             self.client = DoomAgentClient(
                 self.config.endpoint,
@@ -1267,9 +1317,6 @@ class DoomAgentEnv:
                 tls=self.config.tls,
                 authority=self.config.authority,
             )
-        if self._state_stream is None:
-            self._action_queue = asyncio.Queue(maxsize=16)
-            self._state_stream = self.client.session(self._action_iter()).__aiter__()
 
     async def _action_iter(self) -> AsyncIterator[Any]:
         yield agent_pb2.PlayerAction()
@@ -1456,6 +1503,18 @@ def _has_shootable_enemy(state: Any) -> bool:
         getattr(combat, "has_shootable_target", False)
         and getattr(combat, "target_is_enemy", False)
     )
+
+
+def _snapshot_slot(snapshot: dict[str, Any]) -> int | None:
+    value = snapshot.get("slot")
+    if value is None:
+        ref = snapshot.get("ref")
+        if isinstance(ref, str) and ref.startswith("save_slot:"):
+            value = ref.removeprefix("save_slot:")
+    try:
+        return None if value is None else int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _has_visible_enemy(state: Any) -> bool:

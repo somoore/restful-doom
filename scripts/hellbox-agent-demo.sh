@@ -16,6 +16,8 @@ SNAPSHOT_CURRICULUM="${SNAPSHOT_CURRICULUM:-$ROOT/trajectories/snapshot-curricul
 SNAPSHOT_DIR="${SNAPSHOT_DIR:-$ROOT/snapshots}"
 SNAPSHOT_INDEXES="${SNAPSHOT_INDEXES:-}"
 SNAPSHOT_AUTO="${SNAPSHOT_AUTO:-first-visible first-shootable first-damage}"
+SNAPSHOT_SAVE_SLOT_BASE="${SNAPSHOT_SAVE_SLOT_BASE:-}"
+SNAPSHOT_SLOT="${SNAPSHOT_SLOT:-0}"
 SNAPSHOT_CAPTURE_COMMAND="${SNAPSHOT_CAPTURE_COMMAND:-}"
 SNAPSHOT_REQUIRE_ARTIFACTS="${SNAPSHOT_REQUIRE_ARTIFACTS:-0}"
 FREEZE_AFTER_SECONDS="${FREEZE_AFTER_SECONDS:-8}"
@@ -23,7 +25,7 @@ THAW_AFTER_SECONDS="${THAW_AFTER_SECONDS:-3}"
 
 usage() {
     cat >&2 <<EOF
-usage: $(basename "$0") build|up|token|run|suspend|resume|validate|snapshot-plan|snapshot-validate|production-demo|loop
+usage: $(basename "$0") build|up|token|run|suspend|resume|validate|snapshot-plan|snapshot-validate|snapshot-save|snapshot-load|production-demo|loop
 
 Environment:
   HELLBOX_CLI             CLI binary. Default: shrink
@@ -40,6 +42,8 @@ Environment:
   SNAPSHOT_DIR            Snapshot artifact directory.
   SNAPSHOT_INDEXES        Comma-separated zero-based trajectory rows to snapshot.
   SNAPSHOT_AUTO           Space-separated auto selectors. Default: first-visible first-shootable first-damage
+  SNAPSHOT_SAVE_SLOT_BASE Optional first Doom agent save slot assigned to generated stages.
+  SNAPSHOT_SLOT           Native Doom agent save slot for snapshot-save/load. Default: 0
   SNAPSHOT_CAPTURE_COMMAND Optional command template that writes {snapshot_path_sh}.
   SNAPSHOT_REQUIRE_ARTIFACTS Set to 1 to require local snapshot files during validation.
 
@@ -194,6 +198,9 @@ snapshot_plan() {
             args+=(--auto "$selector")
         done
     fi
+    if [ -n "$SNAPSHOT_SAVE_SLOT_BASE" ]; then
+        args+=(--save-slot-base "$SNAPSHOT_SAVE_SLOT_BASE")
+    fi
     if [ -n "$SNAPSHOT_CAPTURE_COMMAND" ]; then
         args+=(--capture-command "$SNAPSHOT_CAPTURE_COMMAND")
     fi
@@ -209,6 +216,16 @@ snapshot_validate() {
         args+=(--require-artifacts)
     fi
     PYTHONPATH="$ROOT/agent" "$PYTHON_BIN" -m restfuldoom_agent.snapshot_curriculum "${args[@]}"
+}
+
+snapshot_slot_command() {
+    ensure_token_json
+    PYTHONPATH="$ROOT/agent" "$PYTHON_BIN" -m restfuldoom_agent.snapshot_slots "$1" \
+        --token-json "$TOKEN_JSON" \
+        --agent-port "$AGENT_PORT" \
+        --tls \
+        --slot "$SNAPSHOT_SLOT" \
+        --run-id "$NAME-snapshot-slot"
 }
 
 case "${1:-}" in
@@ -250,6 +267,14 @@ case "${1:-}" in
     snapshot-validate)
         snapshot_validate
         note "snapshot-validate"
+        ;;
+    snapshot-save)
+        snapshot_slot_command save
+        note "snapshot-save"
+        ;;
+    snapshot-load)
+        snapshot_slot_command load
+        note "snapshot-load"
         ;;
     production-demo)
         "$0" build

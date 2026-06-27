@@ -101,6 +101,17 @@ class EpisodeReset:
 
 
 @dataclass(frozen=True)
+class SnapshotCommand:
+    """Accepted snapshot save/load details from the Doom bridge."""
+
+    accepted: bool
+    message: str
+    slot: int
+    save_queued: bool
+    load_queued: bool
+
+
+@dataclass(frozen=True)
 class EpisodeStart:
     """Optional post-reset curriculum start."""
 
@@ -248,6 +259,52 @@ class DoomAgentClient:
             seed=int(response.seed),
             seed_applied=bool(response.seed_applied),
             start_queued=bool(getattr(response, "start_queued", False)),
+        )
+
+    async def save_snapshot(
+        self,
+        *,
+        slot: int,
+        description: str = "",
+        run_id: str = "",
+    ) -> SnapshotCommand:
+        """Queues a local savegame snapshot on Doom's simulation thread."""
+        response = await self.stub.SaveSnapshot(
+            agent_pb2.SaveSnapshotRequest(
+                slot=int(slot),
+                description=description,
+                run_id=run_id,
+            ),
+            metadata=self.metadata,
+        )
+        return SnapshotCommand(
+            accepted=bool(response.accepted),
+            message=str(response.message),
+            slot=int(response.slot),
+            save_queued=bool(response.save_queued),
+            load_queued=bool(response.load_queued),
+        )
+
+    async def load_snapshot(
+        self,
+        *,
+        slot: int,
+        run_id: str = "",
+    ) -> SnapshotCommand:
+        """Queues a local savegame restore on Doom's simulation thread."""
+        response = await self.stub.LoadSnapshot(
+            agent_pb2.LoadSnapshotRequest(
+                slot=int(slot),
+                run_id=run_id,
+            ),
+            metadata=self.metadata,
+        )
+        return SnapshotCommand(
+            accepted=bool(response.accepted),
+            message=str(response.message),
+            slot=int(response.slot),
+            save_queued=bool(response.save_queued),
+            load_queued=bool(response.load_queued),
         )
 
     async def observe_reconnecting(

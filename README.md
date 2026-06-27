@@ -34,7 +34,7 @@ The punchline is:
   this is supervised imitation rather than independent RL.
 - PPO combat-start curriculum can learn kills from reward feedback.
 - Snapshot-backed curriculum contracts, manifest builder, artifact validator,
-  and PPO restore plumbing are implemented.
+  PPO restore plumbing, and native agent save-slot restore are implemented.
 - Full independent PPO level completion from E1M1 spawn is not proven yet.
 - Next major unlock: capture real Hellbox/Shrink progressed-map snapshots and
   train/evaluate PPO through the promotion gate.
@@ -556,14 +556,16 @@ PYTHONPATH=agent python -m restfuldoom_agent.snapshot_builder \
     --output trajectories/e1m1-snapshot-curriculum.json \
     --name e1m1-progressed-bottlenecks \
     --snapshot-dir snapshots \
+    --save-slot-base 3 \
     --auto first-visible \
     --auto first-shootable \
     --auto first-damage
 ```
 
 The builder records the source row, selected milestone, expected first restored
-state, reset-start evidence, and placeholder snapshot paths. If a local capture
-command is available, add `--capture-command` with placeholders such as
+state, reset-start evidence, placeholder snapshot paths, and optional native
+save-slot refs such as `save_slot:3`. If a local capture command is available,
+add `--capture-command` with placeholders such as
 `{snapshot_path_sh}`, `{snapshot_id_sh}`, `{stage_name_sh}`, `{record_index}`,
 and `{tick}`. After capture, validate the manifest and artifact digests:
 
@@ -575,10 +577,32 @@ PYTHONPATH=agent python -m restfuldoom_agent.snapshot_curriculum \
 ```
 
 `scripts/hellbox-agent-demo.sh snapshot-plan` wraps the same builder around the
-current Hellbox trajectory, and `snapshot-validate` runs the validator. Treat a
+current Hellbox trajectory, and `snapshot-validate` runs the validator. Set
+`SNAPSHOT_SAVE_SLOT_BASE=3` to assign native Doom agent save slots to generated
+stages. Snapshot stages with `snapshot.slot` or `snapshot.ref: "save_slot:N"`
+can restore through the native gRPC `LoadSnapshot` RPC; stages without a slot
+still use `--snapshot-restore-command` for Hellbox/Shrink artifacts. Treat a
 manifest with missing artifacts as a planning document only; promotion-quality
 PPO runs should use a validated manifest with real snapshot files and
-`sha256:` digests.
+`sha256:` digests or a verified native save-slot capture.
+
+Native save slots can be captured or restored directly against a running Doom
+agent endpoint:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.snapshot_slots save \
+    --token-json trajectories/agent-doom-token.json \
+    --tls \
+    --slot 3
+
+PYTHONPATH=agent python -m restfuldoom_agent.snapshot_slots load \
+    --token-json trajectories/agent-doom-token.json \
+    --tls \
+    --slot 3
+```
+
+`scripts/hellbox-agent-demo.sh snapshot-save` and `snapshot-load` wrap these
+commands using `SNAPSHOT_SLOT`.
 
 PPO rollout summaries include route diagnostics for spawn-to-contact work:
 `route_attempt_steps`, `route_reached_steps`, `route_failed_steps`,

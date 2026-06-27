@@ -204,6 +204,7 @@ def _validate_stage(
     stage_report["snapshot_id"] = snapshot.get("id")
     stage_report["snapshot_ref"] = snapshot.get("ref")
     stage_report["snapshot_path"] = snapshot.get("path")
+    stage_report["snapshot_slot"] = _snapshot_slot(snapshot)
     stage_report["expected_digest"] = snapshot.get("digest")
 
     reset_start = raw_stage.get("reset_start", {})
@@ -213,9 +214,9 @@ def _validate_stage(
     if expected is not None and not isinstance(expected, dict):
         stage_report["errors"].append(f"stage {index} expected_state must be an object")
 
-    if not any(snapshot.get(key) for key in ("id", "path", "ref")):
+    if not any(snapshot.get(key) for key in ("id", "path", "ref", "slot")):
         stage_report["errors"].append(
-            f"stage {index} snapshot must include at least one of id, path, or ref"
+            f"stage {index} snapshot must include at least one of id, path, ref, or slot"
         )
 
     raw_path = snapshot.get("path")
@@ -244,7 +245,7 @@ def _validate_stage(
                 stage_report["errors"].append(message)
             else:
                 stage_report["warnings"].append(message)
-    elif require_artifacts:
+    elif require_artifacts and stage_report["snapshot_slot"] is None:
         stage_report["errors"].append(
             f"stage {index} has no local snapshot.path to validate"
         )
@@ -278,6 +279,18 @@ def _is_real_sha256_digest(value: object) -> bool:
         return False
     suffix = value.removeprefix("sha256:")
     return len(suffix) == 64 and all(character in "0123456789abcdef" for character in suffix)
+
+
+def _snapshot_slot(snapshot: dict[str, Any]) -> int | None:
+    value = snapshot.get("slot")
+    if value is None:
+        ref = snapshot.get("ref")
+        if isinstance(ref, str) and ref.startswith("save_slot:"):
+            value = ref.removeprefix("save_slot:")
+    try:
+        return None if value is None else int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _main(argv: list[str] | None = None) -> int:

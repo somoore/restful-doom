@@ -222,6 +222,7 @@ static boolean *joybuttons = &joyarray[1];		// allow [-1]
  
 static int      savegameslot; 
 static char     savedescription[32]; 
+static boolean  agentsaveslot;
  
 #define	BODYQUESIZE	32
 
@@ -1558,6 +1559,7 @@ void G_DoLoadGame (void)
 
     if (save_stream == NULL)
     {
+        savegame_error = true;
         return;
     }
 
@@ -1565,6 +1567,7 @@ void G_DoLoadGame (void)
 
     if (!P_ReadSaveGameHeader())
     {
+        savegame_error = true;
         fclose(save_stream);
         return;
     }
@@ -1610,13 +1613,73 @@ G_SaveGame
     sendsave = true;
 }
 
+boolean G_AgentSaveGame(int slot, const char *description)
+{
+    FILE *check_file;
+    char *savegame_file;
+
+    if (slot < 0 || slot > 9 || gamestate != GS_LEVEL)
+    {
+        return false;
+    }
+
+    savegame_file = P_AgentSaveGameFile(slot);
+    savegame_error = false;
+    agentsaveslot = true;
+    savegameslot = slot;
+    M_StringCopy(
+        savedescription,
+        description != NULL && description[0] != '\0'
+            ? description
+            : "agent snapshot",
+        sizeof(savedescription));
+    sendsave = false;
+    G_DoSaveGame();
+
+    check_file = fopen(savegame_file, "rb");
+    if (check_file == NULL)
+    {
+        return false;
+    }
+    fclose(check_file);
+
+    return !savegame_error;
+}
+
+boolean G_AgentLoadGame(int slot)
+{
+    char *savegame_file;
+    FILE *check_file;
+
+    if (slot < 0 || slot > 9)
+    {
+        return false;
+    }
+
+    savegame_file = P_AgentSaveGameFile(slot);
+    check_file = fopen(savegame_file, "rb");
+    if (check_file == NULL)
+    {
+        return false;
+    }
+    fclose(check_file);
+
+    savegame_error = false;
+    G_LoadGame(savegame_file);
+    G_DoLoadGame();
+
+    return !savegame_error;
+}
+
 void G_DoSaveGame (void) 
 { 
     char *savegame_file;
     char *temp_savegame_file;
 
     temp_savegame_file = P_TempSaveGameFile();
-    savegame_file = P_SaveGameFile(savegameslot);
+    savegame_file = agentsaveslot
+        ? P_AgentSaveGameFile(savegameslot)
+        : P_SaveGameFile(savegameslot);
 
     // Open the savegame file for writing.  We write to a temporary file
     // and then rename it at the end if it was successfully written.
@@ -1627,6 +1690,7 @@ void G_DoSaveGame (void)
 
     if (save_stream == NULL)
     {
+        agentsaveslot = false;
         return;
     }
 
@@ -1660,6 +1724,7 @@ void G_DoSaveGame (void)
     rename(temp_savegame_file, savegame_file);
     
     gameaction = ga_nothing; 
+    agentsaveslot = false;
     M_StringCopy(savedescription, "", sizeof(savedescription));
 
     players[consoleplayer].message = DEH_String(GGSAVED);

@@ -12,6 +12,12 @@ service DoomAgent {
 
   // Requests a fresh episode reset on Doom's simulation thread.
   rpc ResetEpisode(ResetEpisodeRequest) returns (ResetEpisodeResponse);
+
+  // Saves the current Doom state into a local savegame slot.
+  rpc SaveSnapshot(SaveSnapshotRequest) returns (SnapshotCommandResponse);
+
+  // Loads a local savegame slot as a progressed-state snapshot.
+  rpc LoadSnapshot(LoadSnapshotRequest) returns (SnapshotCommandResponse);
 }
 
 // Configures an observation-only stream.
@@ -82,6 +88,45 @@ message ResetEpisodeResponse {
 
   // True when an optional EpisodeStart was queued with the reset.
   bool start_queued = 8;
+}
+
+// Agent-only savegame snapshot request.
+message SaveSnapshotRequest {
+  // Doom save slot used for the snapshot. Values are clamped by the bridge.
+  int32 slot = 1;
+
+  // Optional save description. The engine truncates this to the save header.
+  string description = 2;
+
+  // Optional caller run identifier for logs and trajectory correlation.
+  string run_id = 3;
+}
+
+// Agent-only savegame restore request.
+message LoadSnapshotRequest {
+  // Doom save slot used for the snapshot. Values are clamped by the bridge.
+  int32 slot = 1;
+
+  // Optional caller run identifier for logs and trajectory correlation.
+  string run_id = 2;
+}
+
+// Snapshot command acceptance details from the gRPC bridge.
+message SnapshotCommandResponse {
+  // True when the request was queued for Doom's simulation thread.
+  bool accepted = 1;
+
+  // Human-readable status for demos and training logs.
+  string message = 2;
+
+  // Values that were queued after bridge-side normalization.
+  int32 slot = 3;
+
+  // True when the request queued a save command.
+  bool save_queued = 4;
+
+  // True when the request queued a load command.
+  bool load_queued = 5;
 }
 
 // A full game-state observation optimized for AI agents.

@@ -286,6 +286,7 @@ PYTHONPATH=agent python -m restfuldoom_agent.snapshot_builder \
     --output trajectories/e1m1-snapshot-curriculum.json \
     --name e1m1-progressed-bottlenecks \
     --snapshot-dir snapshots \
+    --save-slot-base 3 \
     --auto first-visible \
     --auto first-shootable \
     --auto first-damage
@@ -301,8 +302,20 @@ PYTHONPATH=agent python -m restfuldoom_agent.snapshot_curriculum \
     --require-artifacts
 ```
 
+`--save-slot-base` assigns native Doom agent save slots to generated stages.
+Stages with `snapshot.slot` or `snapshot.ref: "save_slot:N"` restore through
+the gRPC `LoadSnapshot` RPC and do not require an external restore command.
+Stages without a slot still use `--snapshot-restore-command` for
+Hellbox/Shrink or file-backed artifacts.
+
+Native slots can be managed with `python -m restfuldoom_agent.snapshot_slots
+save|load --slot N` or the Hellbox wrapper commands `snapshot-save` and
+`snapshot-load`.
+
 The validator checks the schema, stage structure, local snapshot files, and
 `sha256:` digests. PPO experiments can load an unvalidated manifest for plumbing
 smokes, but any promotion or export meant to resume in cloud should use a
 validated manifest so the training bundle carries real progressed-state
-artifacts rather than teleport approximations.
+artifacts rather than teleport approximations. Native save-slot curricula should
+record the slot refs in the manifest and verify the first restored protobuf
+state through `reset_context.actual_first_state`.

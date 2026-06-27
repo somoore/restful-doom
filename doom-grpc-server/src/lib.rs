@@ -30,9 +30,10 @@ pub mod proto {
 
 use proto::doom_agent_server::{DoomAgent, DoomAgentServer};
 use proto::{
-    Ammo, CombatProbe, DirectionProbe, DoomKey, EnemyInfo, GameState, LevelInfo, MapObjectState,
-    MouseInput, NavigationProbe, ObserveRequest, PlayerAction, PlayerActionType, PlayerState,
-    RawTiccmd, ResetEpisodeRequest, ResetEpisodeResponse, RouteWaypoint, SectorProbe, StateDelta,
+    Ammo, CombatProbe, DirectionProbe, DoomKey, EnemyInfo, GameState, LevelInfo,
+    LoadSnapshotRequest, MapObjectState, MouseInput, NavigationProbe, ObserveRequest, PlayerAction,
+    PlayerActionType, PlayerState, RawTiccmd, ResetEpisodeRequest, ResetEpisodeResponse,
+    RouteWaypoint, SaveSnapshotRequest, SectorProbe, SnapshotCommandResponse, StateDelta,
     UseLineInfo, Vec3Fixed,
 };
 
@@ -49,6 +50,8 @@ const BT_ATTACK: u8 = 1;
 const BT_USE: u8 = 2;
 const BT_CHANGE: u8 = 4;
 const BT_WEAPONSHIFT: u32 = 3;
+const MAX_SNAPSHOT_SLOT: i32 = 9;
+const SNAPSHOT_DESCRIPTION_BYTES: usize = 24;
 
 static BRIDGE: OnceLock<Bridge> = OnceLock::new();
 
@@ -114,16 +117,7 @@ impl DoomAgent for AgentRuntime {
     ) -> Result<Response<ResetEpisodeResponse>, Status> {
         let request = request.into_inner();
         let control = control_request_from_proto(&request);
-        self.control_tx
-            .try_send(control)
-            .map_err(|error| match error {
-                mpsc::error::TrySendError::Full(_) => {
-                    Status::resource_exhausted("episode reset queue is full")
-                }
-                mpsc::error::TrySendError::Closed(_) => {
-                    Status::unavailable("episode reset queue is closed")
-                }
-            })?;
+        self.queue_control(control, "episode reset")?;
 
         Ok(Response::new(ResetEpisodeResponse {
             accepted: true,
@@ -135,6 +129,57 @@ impl DoomAgent for AgentRuntime {
             seed_applied: false,
             start_queued: control.flags & AGENT_CONTROL_FLAG_START_POSITION != 0,
         }))
+    }
+
+    /// Queues a Doom savegame snapshot for the simulation thread.
+    async fn save_snapshot(
+        &self,
+        request: Request<SaveSnapshotRequest>,
+    ) -> Result<Response<SnapshotCommandResponse>, Status> {
+        let control = save_snapshot_control_from_proto(&request.into_inner());
+        self.queue_control(control, "snapshot save")?;
+        Ok(Response::new(SnapshotCommandResponse {
+            accepted: true,
+            message: "snapshot save queued on Doom simulation thread".to_string(),
+            slot: control.snapshot_slot,
+            save_queued: true,
+            load_queued: false,
+        }))
+    }
+
+    /// Queues a Doom savegame restore for the simulation thread.
+    async fn load_snapshot(
+        &self,
+        request: Request<LoadSnapshotRequest>,
+    ) -> Result<Response<SnapshotCommandResponse>, Status> {
+        let control = load_snapshot_control_from_proto(&request.into_inner());
+        self.queue_control(control, "snapshot load")?;
+        Ok(Response::new(SnapshotCommandResponse {
+            accepted: true,
+            message: "snapshot load queued on Doom simulation thread".to_string(),
+            slot: control.snapshot_slot,
+            save_queued: false,
+            load_queued: true,
+        }))
+    }
+}
+
+impl AgentRuntime {
+    /// Queues one control command for Doom's simulation thread.
+    ///
+    /// # Errors
+    /// Returns a gRPC status when the bounded control queue is full or closed.
+    fn queue_control(&self, control: AgentControlRequest, name: &str) -> Result<(), Status> {
+        self.control_tx
+            .try_send(control)
+            .map_err(|error| match error {
+                mpsc::error::TrySendError::Full(_) => {
+                    Status::resource_exhausted(format!("{name} queue is full"))
+                }
+                mpsc::error::TrySendError::Closed(_) => {
+                    Status::unavailable(format!("{name} queue is closed"))
+                }
+            })
     }
 }
 
@@ -385,6 +430,37 @@ fn control_request_from_proto(request: &ResetEpisodeRequest) -> AgentControlRequ
     }
 
     control
+}
+
+fn save_snapshot_control_from_proto(request: &SaveSnapshotRequest) -> AgentControlRequest {
+    let mut control = AgentControlRequest {
+        command: AGENT_CONTROL_SAVE_SNAPSHOT,
+        snapshot_slot: clamp_snapshot_slot(request.slot),
+        ..AgentControlRequest::default()
+    };
+    copy_snapshot_description(&request.description, &mut control.snapshot_description);
+    control
+}
+
+fn load_snapshot_control_from_proto(request: &LoadSnapshotRequest) -> AgentControlRequest {
+    AgentControlRequest {
+        command: AGENT_CONTROL_LOAD_SNAPSHOT,
+        snapshot_slot: clamp_snapshot_slot(request.slot),
+        ..AgentControlRequest::default()
+    }
+}
+
+fn clamp_snapshot_slot(slot: i32) -> i32 {
+    clamp_i32(slot, 0, MAX_SNAPSHOT_SLOT)
+}
+
+fn copy_snapshot_description(description: &str, out: &mut [u8; SNAPSHOT_DESCRIPTION_BYTES]) {
+    let bytes = description.as_bytes();
+    // Doom's save header reserves 24 bytes. Leave one byte for a C NUL.
+    let copy_len = bytes
+        .len()
+        .min(SNAPSHOT_DESCRIPTION_BYTES.saturating_sub(1));
+    out[..copy_len].copy_from_slice(&bytes[..copy_len]);
 }
 
 fn state_from_snapshot(snapshot: &AgentGameStateSnapshot) -> GameState {
@@ -748,6 +824,8 @@ pub struct AgentPlayerAction {
 }
 
 const AGENT_CONTROL_RESET_EPISODE: u32 = 1;
+const AGENT_CONTROL_SAVE_SNAPSHOT: u32 = 2;
+const AGENT_CONTROL_LOAD_SNAPSHOT: u32 = 3;
 const AGENT_CONTROL_FLAG_START_POSITION: u32 = 1;
 const AGENT_CONTROL_FLAG_FACE_NEAREST_ENEMY: u32 = 2;
 const AGENT_CONTROL_FLAG_APPLY_RESOURCES: u32 = 4;
@@ -771,6 +849,8 @@ pub struct AgentControlRequest {
     pub start_ammo_shells: i32,
     pub start_ammo_cells: i32,
     pub start_ammo_rockets: i32,
+    pub snapshot_slot: i32,
+    pub snapshot_description: [u8; SNAPSHOT_DESCRIPTION_BYTES],
     pub _reserved: [u8; 4],
 }
 
@@ -1075,6 +1155,27 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_requests_normalize_fixed_size_control() {
+        let save = save_snapshot_control_from_proto(&SaveSnapshotRequest {
+            slot: 77,
+            description: "abcdefghijklmnopqrstuvwxyz".to_string(),
+            run_id: "capture".to_string(),
+        });
+        let load = load_snapshot_control_from_proto(&LoadSnapshotRequest {
+            slot: -2,
+            run_id: "restore".to_string(),
+        });
+
+        assert_eq!(save.command, AGENT_CONTROL_SAVE_SNAPSHOT);
+        assert_eq!(save.snapshot_slot, 9);
+        assert_eq!(save.snapshot_description[0], b'a');
+        assert_eq!(save.snapshot_description[22], b'w');
+        assert_eq!(save.snapshot_description[23], 0);
+        assert_eq!(load.command, AGENT_CONTROL_LOAD_SNAPSHOT);
+        assert_eq!(load.snapshot_slot, 0);
+    }
+
+    #[test]
     fn snapshot_conversion_bounds_enemies() {
         let mut snapshot = AgentGameStateSnapshot {
             tick: 42,
@@ -1300,6 +1401,52 @@ mod tests {
             (request.skill, request.episode, request.map, request.seed),
             (4, 1, 1, 321)
         );
+
+        let save = client
+            .save_snapshot(SaveSnapshotRequest {
+                slot: 4,
+                description: "first contact".to_string(),
+                run_id: "roundtrip".to_string(),
+            })
+            .await
+            .expect("snapshot save queues")
+            .into_inner();
+        assert!(save.accepted);
+        assert!(save.save_queued);
+        assert_eq!(save.slot, 4);
+
+        for _ in 0..20 {
+            // SAFETY: The output pointer references a valid stack variable.
+            if unsafe { restfuldoom_agent_take_control_request(&mut request) } == 1 {
+                break;
+            }
+            sleep(Duration::from_millis(25)).await;
+        }
+        assert_eq!(request.command, AGENT_CONTROL_SAVE_SNAPSHOT);
+        assert_eq!(request.snapshot_slot, 4);
+        assert_eq!(&request.snapshot_description[..13], b"first contact");
+
+        let load = client
+            .load_snapshot(LoadSnapshotRequest {
+                slot: 4,
+                run_id: "roundtrip".to_string(),
+            })
+            .await
+            .expect("snapshot load queues")
+            .into_inner();
+        assert!(load.accepted);
+        assert!(load.load_queued);
+        assert_eq!(load.slot, 4);
+
+        for _ in 0..20 {
+            // SAFETY: The output pointer references a valid stack variable.
+            if unsafe { restfuldoom_agent_take_control_request(&mut request) } == 1 {
+                break;
+            }
+            sleep(Duration::from_millis(25)).await;
+        }
+        assert_eq!(request.command, AGENT_CONTROL_LOAD_SNAPSHOT);
+        assert_eq!(request.snapshot_slot, 4);
 
         tx.send(PlayerAction {
             tick: 100,
