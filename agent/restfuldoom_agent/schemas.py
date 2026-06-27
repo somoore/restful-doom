@@ -26,6 +26,11 @@ ACTION_HISTORY_FEATURE_NAMES = [
     *(f"prev_skill_{skill}" for skill in PPO_SKILL_ACTIONS),
     "prev_had_shootable_target",
     "same_skill_streak_norm",
+    "prev_route_progression",
+    "prev_route_progress_norm",
+    "route_waypoint_reached_recently",
+    "route_waypoint_failed_recently",
+    "failed_route_attempt_count_norm",
 ]
 
 PPO_FEATURE_NAMES = [
@@ -176,6 +181,11 @@ def encode_action_history_features(
     previous_action_index: int | None,
     previous_had_shootable_target: bool,
     same_skill_streak: int,
+    previous_route_progression: bool = False,
+    previous_route_progress_units: float = 0.0,
+    route_waypoint_reached_recently: bool = False,
+    route_waypoint_failed_recently: bool = False,
+    failed_route_attempt_count: int = 0,
 ) -> list[float]:
     """Encode stateful PPO action-history features."""
     one_hot = [0.0 for _ in PPO_SKILL_ACTIONS]
@@ -185,6 +195,11 @@ def encode_action_history_features(
         *one_hot,
         1.0 if previous_had_shootable_target else 0.0,
         max(0.0, min(1.0, float(same_skill_streak) / 8.0)),
+        1.0 if previous_route_progression else 0.0,
+        max(-1.0, min(1.0, float(previous_route_progress_units) / 256.0)),
+        1.0 if route_waypoint_reached_recently else 0.0,
+        1.0 if route_waypoint_failed_recently else 0.0,
+        max(0.0, min(1.0, float(failed_route_attempt_count) / 8.0)),
     ]
 
 
@@ -199,6 +214,11 @@ def pad_observation_features(features: list[float]) -> list[float]:
                 previous_action_index=None,
                 previous_had_shootable_target=False,
                 same_skill_streak=0,
+                previous_route_progression=False,
+                previous_route_progress_units=0.0,
+                route_waypoint_reached_recently=False,
+                route_waypoint_failed_recently=False,
+                failed_route_attempt_count=0,
             ),
         ]
     raise ValueError(
@@ -280,6 +300,11 @@ def _feature_meaning(name: str) -> str:
         "route_waypoint_walk_trigger": "Progression waypoint is a walk-trigger line.",
         "prev_had_shootable_target": "Previous macro-step had a shootable enemy target.",
         "same_skill_streak_norm": "Consecutive same PPO skill selections normalized by 8.",
+        "prev_route_progression": "Previous macro-step selected route_progression.",
+        "prev_route_progress_norm": "Previous route-progression distance gain toward its waypoint normalized by 256 Doom units.",
+        "route_waypoint_reached_recently": "Previous route-progression macro-step reached or crossed its waypoint.",
+        "route_waypoint_failed_recently": "Previous route-progression macro-step stalled or moved away from its waypoint.",
+        "failed_route_attempt_count_norm": "Consecutive failed route-progression attempts normalized by 8.",
     }
     return meanings.get(name, "PPO observation feature.")
 
@@ -346,26 +371,26 @@ OBSERVATION_SCHEMA = {
         },
     ],
     "learning_readiness": {
-        "strengths": [
-            "combat and navigation affordances are structured protobuf fields",
-            "memory-derived enemy recall gives PPO a target when line of sight is lost",
-            "macro-action history tells PPO whether it just ignored or used a shootable target",
-            "current-sector hazard fields tell PPO when navigation is causing floor damage",
-            "route-waypoint fields give spawn-to-contact training an explicit progression target",
-        ],
-        "known_gaps": [
-            "no compact topological map graph",
-            "no recurrent state beyond one previous macro action",
-            "no projectile or incoming-damage predictor",
+            "strengths": [
+                "combat and navigation affordances are structured protobuf fields",
+                "memory-derived enemy recall gives PPO a target when line of sight is lost",
+                "macro-action history tells PPO whether it just ignored or used a shootable target",
+                "current-sector hazard fields tell PPO when navigation is causing floor damage",
+                "route-waypoint fields give spawn-to-contact training an explicit progression target",
+                "route-outcome history tells PPO whether the last progression decision reached, stalled, or moved toward its waypoint",
+            ],
+            "known_gaps": [
+                "no compact topological map graph",
+                "no recurrent state beyond one previous macro action",
+                "no projectile or incoming-damage predictor",
             "reset seeds are labels until the server reports seed_applied=true",
         ],
         "next_feature_candidates": [
-            "recent_damage_window_norm",
-            "enemy_projectile_threat_norm",
-            "topology_frontier_count_norm",
-            "route_waypoint_reached_recently",
-            "failed_route_attempt_count_norm",
-        ],
+                "recent_damage_window_norm",
+                "enemy_projectile_threat_norm",
+                "topology_frontier_count_norm",
+                "route_waypoint_repeat_count_norm",
+            ],
     },
     "feature_descriptors": [
         *_feature_descriptors(TACTICAL_FEATURE_NAMES, source="protobuf_or_memory"),

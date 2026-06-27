@@ -74,6 +74,31 @@ def test_skill_controller_observation_includes_previous_action_history():
     assert after_fire["same_skill_streak_norm"] > 0.0
 
 
+def test_skill_controller_observation_includes_route_outcome_history():
+    controller = SkillController()
+    state = _state(route=True)
+    route_index = SKILL_ACTIONS.index("route_progression")
+
+    controller.record_action_history(
+        action_index=route_index,
+        had_shootable_target=False,
+        route_outcome={
+            "attempted": True,
+            "progress_units": 128.0,
+            "reached": True,
+            "failed": False,
+        },
+    )
+    features = dict(zip(OBSERVATION_SCHEMA["feature_names"], controller.observation(state)))
+
+    assert features["prev_skill_route_progression"] == 1.0
+    assert features["prev_route_progression"] == 1.0
+    assert features["prev_route_progress_norm"] == pytest.approx(0.5)
+    assert features["route_waypoint_reached_recently"] == 1.0
+    assert features["route_waypoint_failed_recently"] == 0.0
+    assert features["failed_route_attempt_count_norm"] == 0.0
+
+
 def test_skill_controller_action_mask_uses_affordances():
     controller = SkillController()
     combat_state = _state(enemy=True, combat=True)
@@ -210,6 +235,34 @@ def test_doom_agent_env_penalizes_missed_shootable_target():
     assert step.reward == pytest.approx(-0.05)
 
 
+def test_doom_agent_env_records_route_outcome_and_reward():
+    first = _state(tick=1, route=True, x_units=0)
+    second = _state(tick=2, route=True, x_units=128)
+    client = _DurationAwareFakeClient([first, second])
+    env = DoomAgentEnv(
+        DoomEnvConfig(max_steps=10, goal_preset="navigation", max_action_tics=1),
+        client=client,
+        controller=SkillController(),
+    )
+
+    async def run():
+        await env.reset(seed=5)
+        step = await env.step(SKILL_ACTIONS.index("route_progression"))
+        await env.close()
+        return step
+
+    step = asyncio.run(run())
+    features = dict(zip(OBSERVATION_SCHEMA["feature_names"], step.observation))
+
+    assert step.info["route_outcome"]["attempted"]
+    assert step.info["route_outcome"]["progress_units"] == pytest.approx(128.0)
+    assert step.info["route_outcome"]["failed"] is False
+    assert step.info["route_action_reward"] > 0.0
+    assert features["prev_route_progression"] == 1.0
+    assert features["prev_route_progress_norm"] == pytest.approx(0.5)
+    assert features["route_waypoint_failed_recently"] == 0.0
+
+
 def test_doom_agent_env_reset_can_warmup_until_shootable_target():
     first = _state(tick=1, enemy=True, combat=False)
     second = _state(tick=2, enemy=True, combat=True)
@@ -331,8 +384,10 @@ def _state(
     enemy_distance=256,
     hazard=False,
     route=False,
+    x_units=0,
+    y_units=0,
 ):
-    position = SimpleNamespace(x_fp=0, y_fp=0, z_fp=0)
+    position = SimpleNamespace(x_fp=x_units * 65536, y_fp=y_units * 65536, z_fp=0)
     obj = SimpleNamespace(
         id=1,
         position=position,
@@ -398,6 +453,7 @@ def _state(
         route_waypoint=None,
     )
     if route:
+        route_distance_units = abs(512 - x_units)
         route_line = SimpleNamespace(
             line_id=88,
             midpoint=SimpleNamespace(x_fp=512 * 65536, y_fp=0, z_fp=0),
@@ -406,8 +462,8 @@ def _state(
             nearest_point=SimpleNamespace(x_fp=512 * 65536, y_fp=0, z_fp=0),
             special=88,
             tag=1,
-            distance_fp=512 * 65536,
-            nearest_distance_fp=512 * 65536,
+            distance_fp=route_distance_units * 65536,
+            nearest_distance_fp=route_distance_units * 65536,
         )
         navigation.route_waypoint = SimpleNamespace(
             line=route_line,

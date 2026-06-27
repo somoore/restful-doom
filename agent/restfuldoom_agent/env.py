@@ -73,6 +73,9 @@ class DoomEnvConfig:
     shootable_fire_reward: float = 0.5
     missed_fire_penalty: float = 0.05
     blind_fire_penalty: float = 0.02
+    route_progress_reward: float = 0.01
+    route_reached_reward: float = 0.25
+    route_failure_penalty: float = 0.03
 
     def reward_goal(self) -> Goal:
         """Returns the reward goal for the configured preset."""
@@ -116,6 +119,11 @@ class SkillController:
         self._previous_action_index: int | None = None
         self._previous_had_shootable_target = False
         self._same_skill_streak = 0
+        self._previous_route_progression = False
+        self._previous_route_progress_units = 0.0
+        self._route_waypoint_reached_recently = False
+        self._route_waypoint_failed_recently = False
+        self._failed_route_attempt_count = 0
 
     def observation(self, state: Any) -> list[float]:
         """Encodes a protobuf state as the stable PPO feature vector."""
@@ -126,6 +134,11 @@ class SkillController:
                 previous_action_index=self._previous_action_index,
                 previous_had_shootable_target=self._previous_had_shootable_target,
                 same_skill_streak=self._same_skill_streak,
+                previous_route_progression=self._previous_route_progression,
+                previous_route_progress_units=self._previous_route_progress_units,
+                route_waypoint_reached_recently=self._route_waypoint_reached_recently,
+                route_waypoint_failed_recently=self._route_waypoint_failed_recently,
+                failed_route_attempt_count=self._failed_route_attempt_count,
             ),
         ]
 
@@ -134,12 +147,18 @@ class SkillController:
         self._previous_action_index = None
         self._previous_had_shootable_target = False
         self._same_skill_streak = 0
+        self._previous_route_progression = False
+        self._previous_route_progress_units = 0.0
+        self._route_waypoint_reached_recently = False
+        self._route_waypoint_failed_recently = False
+        self._failed_route_attempt_count = 0
 
     def record_action_history(
         self,
         *,
         action_index: int,
         had_shootable_target: bool,
+        route_outcome: dict[str, Any] | None = None,
     ) -> None:
         """Records the previous macro action for the next PPO observation."""
         if self._previous_action_index == action_index:
@@ -148,6 +167,17 @@ class SkillController:
             self._same_skill_streak = 1
         self._previous_action_index = action_index
         self._previous_had_shootable_target = bool(had_shootable_target)
+        outcome = route_outcome if isinstance(route_outcome, dict) else {}
+        self._previous_route_progression = bool(outcome.get("attempted"))
+        self._previous_route_progress_units = float(outcome.get("progress_units") or 0.0)
+        self._route_waypoint_reached_recently = bool(outcome.get("reached"))
+        self._route_waypoint_failed_recently = bool(outcome.get("failed"))
+        if self._route_waypoint_failed_recently:
+            self._failed_route_attempt_count += 1
+        elif self._previous_route_progression and (
+            self._route_waypoint_reached_recently or self._previous_route_progress_units > 4.0
+        ):
+            self._failed_route_attempt_count = 0
 
     def action_for(self, action_index: int, state: Any) -> tuple[Any, dict[str, Any]]:
         """Returns the PlayerAction for a PPO skill index."""
@@ -494,13 +524,17 @@ class DoomAgentEnv:
             if done:
                 break
         skill = SKILL_ACTIONS[action_index]
-        action_reward = self._combat_action_reward(skill, had_shootable_target)
+        route_outcome = _route_outcome(skill, previous, current)
+        combat_action_reward = self._combat_action_reward(skill, had_shootable_target)
+        route_action_reward = self._route_action_reward(route_outcome)
+        action_reward = combat_action_reward + route_action_reward
         total_reward += action_reward
         self._current_state = current
         if hasattr(self.controller, "record_action_history"):
             self.controller.record_action_history(
                 action_index=action_index,
                 had_shootable_target=had_shootable_target,
+                route_outcome=route_outcome,
             )
         return EnvStep(
             observation=self.controller.observation(current),
@@ -522,6 +556,9 @@ class DoomAgentEnv:
                 "transition": _combine_transition_summaries(transition_summaries),
                 "macro_tics": len(transition_summaries),
                 "action_reward": action_reward,
+                "combat_action_reward": combat_action_reward,
+                "route_action_reward": route_action_reward,
+                "route_outcome": route_outcome,
                 "had_shootable_target": had_shootable_target,
                 "reset_warmup": dict(self._last_reset_warmup),
                 "state": summarize_state(current),
@@ -545,6 +582,17 @@ class DoomAgentEnv:
         if skill == "fire":
             return -self.config.blind_fire_penalty
         return 0.0
+
+    def _route_action_reward(self, route_outcome: dict[str, Any]) -> float:
+        if not route_outcome.get("attempted"):
+            return 0.0
+        reward = float(route_outcome.get("progress_units") or 0.0) * self.config.route_progress_reward
+        reward = max(-1.0, min(1.0, reward))
+        if route_outcome.get("reached"):
+            reward += self.config.route_reached_reward
+        if route_outcome.get("failed"):
+            reward -= self.config.route_failure_penalty
+        return reward
 
     async def _ensure_stream(self) -> None:
         if self.client is None:
@@ -730,3 +778,115 @@ def _has_visible_enemy(state: Any) -> bool:
         if bool(getattr(enemy, "line_of_sight", False)):
             return True
     return False
+
+
+def _route_outcome(skill: str, previous: Any, current: Any) -> dict[str, Any]:
+    """Summarizes whether a route-progression macro-step helped."""
+    route, line = _route_waypoint(previous)
+    line_id = int(getattr(line, "line_id", 0)) if line is not None else 0
+    outcome: dict[str, Any] = {
+        "attempted": skill == "route_progression" and line is not None,
+        "line_id": line_id,
+        "previous_distance_units": 0.0,
+        "current_distance_units": 0.0,
+        "progress_units": 0.0,
+        "reached": False,
+        "failed": False,
+        "priority": int(getattr(route, "priority", 0)) if route is not None else 0,
+        "exit": bool(getattr(route, "exit", False)) if route is not None else False,
+        "walk_trigger": bool(getattr(route, "walk_trigger", False)) if route is not None else False,
+    }
+    if not outcome["attempted"]:
+        return outcome
+
+    previous_x, previous_y = _player_xy_units(previous)
+    current_x, current_y = _player_xy_units(current)
+    previous_distance = _distance_to_line_units(
+        line,
+        previous_x,
+        previous_y,
+        fallback_fp=getattr(line, "nearest_distance_fp", 0),
+    )
+    current_distance = _distance_to_line_units(line, current_x, current_y)
+    progress = previous_distance - current_distance
+    current_line_id = _route_waypoint_line_id(current)
+    line_changed = current_line_id not in (0, line_id)
+    reached = current_distance <= 48.0 or (line_changed and previous_distance <= 128.0)
+    failed = not reached and progress <= 4.0
+    outcome.update(
+        {
+            "previous_distance_units": round(previous_distance, 4),
+            "current_distance_units": round(current_distance, 4),
+            "progress_units": round(progress, 4),
+            "reached": reached,
+            "failed": failed,
+            "line_changed": line_changed,
+            "current_line_id": current_line_id,
+        }
+    )
+    return outcome
+
+
+def _route_waypoint(state: Any) -> tuple[Any | None, Any | None]:
+    navigation = getattr(state, "navigation", None)
+    route = getattr(navigation, "route_waypoint", None) if navigation is not None else None
+    line = getattr(route, "line", None) if route is not None else None
+    if line is None or int(getattr(line, "line_id", 0)) <= 0:
+        return None, None
+    return route, line
+
+
+def _route_waypoint_line_id(state: Any) -> int:
+    _route, line = _route_waypoint(state)
+    if line is None:
+        return 0
+    return int(getattr(line, "line_id", 0))
+
+
+def _player_xy_units(state: Any) -> tuple[float, float]:
+    player = getattr(state, "player", None)
+    obj = getattr(player, "object", None) if player is not None else None
+    position = getattr(obj, "position", None) if obj is not None else None
+    if position is None:
+        return 0.0, 0.0
+    return (
+        float(getattr(position, "x_fp", 0)) / 65536.0,
+        float(getattr(position, "y_fp", 0)) / 65536.0,
+    )
+
+
+def _distance_to_line_units(
+    line: Any,
+    x_units: float,
+    y_units: float,
+    *,
+    fallback_fp: int | float = 0,
+) -> float:
+    start = getattr(line, "start", None)
+    end = getattr(line, "end", None)
+    if start is None or end is None:
+        fallback = float(fallback_fp or 0.0) / 65536.0
+        if fallback > 0.0:
+            return fallback
+        midpoint = getattr(line, "midpoint", None)
+        if midpoint is None:
+            return 0.0
+        return (
+            (x_units - float(getattr(midpoint, "x_fp", 0)) / 65536.0) ** 2
+            + (y_units - float(getattr(midpoint, "y_fp", 0)) / 65536.0) ** 2
+        ) ** 0.5
+
+    x1 = float(getattr(start, "x_fp", 0)) / 65536.0
+    y1 = float(getattr(start, "y_fp", 0)) / 65536.0
+    x2 = float(getattr(end, "x_fp", 0)) / 65536.0
+    y2 = float(getattr(end, "y_fp", 0)) / 65536.0
+    dx = x2 - x1
+    dy = y2 - y1
+    length_sq = dx * dx + dy * dy
+    if length_sq <= 0.0:
+        return ((x_units - x1) ** 2 + (y_units - y1) ** 2) ** 0.5
+    t = ((x_units - x1) * dx + (y_units - y1) * dy) / length_sq
+    t = max(0.0, min(1.0, t))
+    nearest_x = x1 + t * dx
+    nearest_y = y1 + t * dy
+    return ((x_units - nearest_x) ** 2 + (y_units - nearest_y) ** 2) ** 0.5

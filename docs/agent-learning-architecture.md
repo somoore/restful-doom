@@ -220,7 +220,7 @@ stuck state, and blocked targets.
 PPO receives the feature vector declared in
 `restfuldoom_agent.schemas.OBSERVATION_SCHEMA`. It is derived from protobuf
 state, memory, and macro-action history, not screenshots. The current schema has
-64 features: 54 base tactical features plus 10 action-history features.
+69 features: 54 base tactical features plus 15 action-history features.
 
 The base feature groups are:
 
@@ -240,6 +240,10 @@ The action-history group is:
 - one-hot previous PPO skill
 - whether the previous macro-step had a shootable target
 - same-skill streak normalized by 8
+- whether the previous macro-step selected `route_progression`
+- distance gained or lost toward the previous route waypoint
+- whether the previous route waypoint was reached or failed
+- consecutive failed route-attempt count
 
 The schema now also declares source groups:
 
@@ -253,10 +257,10 @@ This is good enough for early skill learning, but it is not yet a complete
 learning observation. Known gaps:
 
 - No compact topological map graph, only local probes plus coarse cell memory.
-- Only one macro-step of action history; there is no recurrent state or longer
-  temporal context yet.
+- Only one macro-step of action history plus a route-failure streak; there is
+  no recurrent state or longer temporal context yet.
 - Route waypoints are a single local progression target, not a full route plan
-  or proof that the waypoint was recently reached.
+  or topology graph.
 - No enemy projectile or incoming-damage prediction.
 - No deterministic RNG seed application yet; reset seed is currently a label,
   not replay proof.
@@ -268,12 +272,10 @@ learn "fire now" reliably.
 
 The next observation upgrades should be staged rather than speculative:
 
-1. Add route-success history so PPO can tell whether a waypoint was just reached
-   or repeatedly failed.
-2. Add a short temporal window or recurrent policy after that is stable;
+1. Add a short temporal window or recurrent policy after that is stable;
    one previous macro action is not enough to represent "I just tried this
    door" or "this corridor approach failed twice."
-3. Add a compact topology graph once true save-state or Hellbox/Shrink snapshot
+2. Add a compact topology graph once true save-state or Hellbox/Shrink snapshot
    restore is available, because map graph learning is much more useful when
    we can repeatedly resume from progressed map states.
 
@@ -389,7 +391,6 @@ Recent PPO evidence:
 
 The next useful changes are:
 
-- Add route-success/failure history to the PPO observation vector.
 - Extend action history beyond one macro-step or add a recurrent policy.
 - Add true save-state or Hellbox/Shrink snapshot restore so PPO can train from
   progressed map states, not only fresh-reset teleport starts.

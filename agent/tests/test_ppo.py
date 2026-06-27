@@ -165,6 +165,8 @@ def test_training_schemas_describe_features_and_actions():
     assert any(group["name"] == "memory_queries" for group in OBSERVATION_SCHEMA["source_groups"])
     assert "sector_damaging" in OBSERVATION_SCHEMA["feature_names"]
     assert "route_waypoint_distance_norm" in OBSERVATION_SCHEMA["feature_names"]
+    assert "prev_route_progress_norm" in OBSERVATION_SCHEMA["feature_names"]
+    assert "failed_route_attempt_count_norm" in OBSERVATION_SCHEMA["feature_names"]
     assert "no compact topological map graph" in OBSERVATION_SCHEMA["learning_readiness"]["known_gaps"]
 
 

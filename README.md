@@ -286,6 +286,10 @@ The training API is:
 - PPO observations include current-sector hazard fields and a cheap progression
   route waypoint from protobuf navigation, giving spawn-to-contact training
   more than nearest-enemy distance alone.
+- PPO macro-action history also records route-progression outcomes: distance
+  gained toward the waypoint, reached/failed flags, and failed-attempt streaks.
+  This lets the model distinguish a useful navigation choice from a repeated
+  stall.
 - Checkpoints and rollout buffers carry `restfuldoom.observation.v1` and
   `restfuldoom.skill_action.v1`, including feature descriptors and
   machine-readable definitions for each PPO skill.
