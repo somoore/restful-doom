@@ -52,11 +52,12 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
         rollout_steps=args.rollout_steps,
         seed=args.seed,
     )
-    env = DoomAgentEnv(env_config)
     memory = AgentMemory.load(args.memory_path) if args.memory_path is not None else None
-    if args.resume_checkpoint is not None:
+    resume_checkpoint = _resolve_resume_checkpoint(args, memory)
+    env = DoomAgentEnv(env_config)
+    if resume_checkpoint is not None:
         trainer = PPOTrainer.load_checkpoint(
-            args.resume_checkpoint,
+            resume_checkpoint,
             device=args.device,
             target_obs_dim=len(OBSERVATION_SCHEMA["feature_names"]),
             target_action_dim=len(ACTION_SCHEMA["actions"]),
@@ -125,8 +126,8 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     "reset_start": curriculum_stage.get("reset_start", {}),
                     "curriculum": curriculum,
                     "curriculum_stage": curriculum_stage,
-                    "resume_checkpoint": str(args.resume_checkpoint)
-                    if args.resume_checkpoint is not None
+                    "resume_checkpoint": str(resume_checkpoint)
+                    if resume_checkpoint is not None
                     else None,
                     "resume_migration": trainer.resume_migration,
                 },
@@ -178,6 +179,11 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                 }
     finally:
         await env.close()
+    resume_source = "new"
+    if args.resume_best_checkpoint:
+        resume_source = "memory_best"
+    elif resume_checkpoint is not None:
+        resume_source = "explicit"
     return {
         "schema": "restfuldoom.ppo_training_run.v1",
         "run_id": args.run_id,
@@ -185,7 +191,8 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
         "behavior_clone": behavior_clone_summary or {},
         "reset_start": reset_start,
         "curriculum": curriculum,
-        "resume_checkpoint": str(args.resume_checkpoint) if args.resume_checkpoint else None,
+        "resume_checkpoint": str(resume_checkpoint) if resume_checkpoint else None,
+        "resume_checkpoint_source": resume_source,
         "best_checkpoint": best_checkpoint or {},
         "observation_schema": OBSERVATION_SCHEMA,
         "action_schema": ACTION_SCHEMA,
@@ -394,6 +401,34 @@ def _record_ppo_checkpoint(
     )
     memory.data["updated_at"] = _iso_now()
     memory.save()
+
+
+def _resolve_resume_checkpoint(
+    args: argparse.Namespace,
+    memory: AgentMemory | None,
+) -> Path | None:
+    """Returns the checkpoint path to resume from, validating memory-backed resumes."""
+    if args.resume_checkpoint is not None and args.resume_best_checkpoint:
+        raise ValueError("--resume-checkpoint cannot be combined with --resume-best-checkpoint")
+    if args.resume_checkpoint is not None:
+        path = Path(args.resume_checkpoint)
+        if not path.exists():
+            raise ValueError(f"--resume-checkpoint does not exist: {path}")
+        return path
+    if not args.resume_best_checkpoint:
+        return None
+    if memory is None:
+        raise ValueError("--resume-best-checkpoint requires --memory-path")
+    best = memory.data.get("ppo_best_checkpoint")
+    if not isinstance(best, dict):
+        raise ValueError("memory does not contain ppo_best_checkpoint")
+    checkpoint = best.get("checkpoint_path")
+    if not isinstance(checkpoint, str) or not checkpoint:
+        raise ValueError("memory ppo_best_checkpoint does not include checkpoint_path")
+    path = Path(checkpoint)
+    if not path.exists():
+        raise ValueError(f"memory ppo_best_checkpoint file does not exist: {path}")
+    return path
 
 
 def _load_behavior_clone_samples(
@@ -769,6 +804,11 @@ def main() -> None:
     parser.add_argument("--bc-learning-rate", type=float)
     parser.add_argument("--bc-max-samples", type=int, default=20000)
     parser.add_argument("--resume-checkpoint", type=Path)
+    parser.add_argument(
+        "--resume-best-checkpoint",
+        action="store_true",
+        help="Resume from ppo_best_checkpoint in --memory-path.",
+    )
     parser.add_argument("--eval-checkpoint", type=Path)
     parser.add_argument("--eval-baseline", choices=["random", "heuristic"], default="heuristic")
     parser.add_argument("--eval-episodes", type=int, default=1)

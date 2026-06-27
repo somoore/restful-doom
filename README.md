@@ -278,6 +278,9 @@ The training API is:
   a missed reset observation.
 - `--resume-checkpoint` continues PPO from a saved `.pt` checkpoint, including
   model weights and optimizer state.
+- `--resume-best-checkpoint` continues PPO from `ppo_best_checkpoint` in
+  `--memory-path`, which is useful when the latest curriculum update regressed
+  but an earlier update in the same lineage had better rollout evidence.
 - `restfuldoom_agent.ppo` provides actor-critic PPO, GAE, clipped objective,
   entropy bonus, rollout JSONL buffers, checkpoint save/load, and a promotion
   gate.
@@ -425,6 +428,20 @@ PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
     --buffer-dir trajectories/ppo \
     --memory-path agent_memory/e1m1.json \
     --resume-checkpoint agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0007.pt
+```
+
+Continue from the best checkpoint recorded in memory:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
+    --endpoint 127.0.0.1:50051 \
+    --goal-preset combat \
+    --updates 2 \
+    --rollout-steps 128 \
+    --checkpoint-dir agent_models/ppo \
+    --buffer-dir trajectories/ppo \
+    --memory-path agent_memory/e1m1.json \
+    --resume-best-checkpoint
 ```
 
 Bounded curriculum warmup is still available for experiments, but current local

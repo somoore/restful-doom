@@ -440,6 +440,12 @@ update index from that file. The CLI validates that checkpoint observation and
 action dimensions match the current exported schemas before collecting more
 rollouts.
 
+`ppo_agent --resume-best-checkpoint --memory-path agent_memory/e1m1.json`
+resolves `ppo_best_checkpoint.checkpoint_path` from memory and resumes that
+checkpoint. This is intentionally separate from promotion: it only chooses the
+best continuation point for more training, while promotion still requires the
+baseline evaluation gate.
+
 ## Reset Curriculum
 
 `DoomAgentEnv` has two curriculum mechanisms.

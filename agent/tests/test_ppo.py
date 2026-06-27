@@ -10,6 +10,7 @@ from restfuldoom_agent.ppo_agent import (
     _checkpoint_selection_score,
     _record_ppo_checkpoint,
     _reset_start_from_trajectory,
+    _resolve_resume_checkpoint,
     _summarize_buffer,
 )
 from restfuldoom_agent.ppo import (
@@ -609,6 +610,45 @@ def test_ppo_export_paths_include_best_checkpoint(tmp_path):
     paths = _memory_ppo_checkpoint_paths(memory)
 
     assert paths == [latest, best, lineage]
+
+
+def test_resolve_resume_best_checkpoint_from_memory(tmp_path):
+    checkpoint = tmp_path / "best.pt"
+    checkpoint.write_text("checkpoint", encoding="utf-8")
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    memory.data["ppo_best_checkpoint"] = {"checkpoint_path": str(checkpoint)}
+    args = SimpleNamespace(
+        resume_checkpoint=None,
+        resume_best_checkpoint=True,
+    )
+
+    assert _resolve_resume_checkpoint(args, memory) == checkpoint
+
+
+def test_resolve_resume_checkpoint_rejects_conflicts(tmp_path):
+    checkpoint = tmp_path / "explicit.pt"
+    checkpoint.write_text("checkpoint", encoding="utf-8")
+    args = SimpleNamespace(
+        resume_checkpoint=checkpoint,
+        resume_best_checkpoint=True,
+    )
+
+    with pytest.raises(ValueError, match="cannot be combined"):
+        _resolve_resume_checkpoint(args, AgentMemory.load(tmp_path / "memory.json"))
+
+
+def test_resolve_resume_best_checkpoint_requires_existing_file(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    memory.data["ppo_best_checkpoint"] = {
+        "checkpoint_path": str(tmp_path / "missing.pt")
+    }
+    args = SimpleNamespace(
+        resume_checkpoint=None,
+        resume_best_checkpoint=True,
+    )
+
+    with pytest.raises(ValueError, match="does not exist"):
+        _resolve_resume_checkpoint(args, memory)
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")
