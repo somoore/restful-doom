@@ -264,7 +264,8 @@ The memory lifecycle is:
 PPO receives the feature vector declared in
 `restfuldoom_agent.schemas.OBSERVATION_SCHEMA`. It is derived from protobuf
 state, memory, and macro-action history, not screenshots. The current schema has
-69 features: 54 base tactical features plus 15 action-history features.
+80 features: 54 base tactical features, 15 action-history features, and
+11 bounded temporal-context features.
 
 The base feature groups are:
 
@@ -289,6 +290,15 @@ The action-history group is:
 - whether the previous route waypoint was reached or failed
 - consecutive failed route-attempt count
 
+The temporal-context group is:
+
+- player movement delta since the previous encoded PPO observation
+- nearest-enemy distance trend since the previous encoded observation
+- route-waypoint distance trend since the previous encoded observation
+- same-cell observation streak and recent cell-change flag
+- recent visible-enemy and shootable-target contact flags
+- rolling route-progress and route-failure ratio over recent macro-steps
+
 The schema now also declares source groups:
 
 - `protobuf_state`: live player, enemy, combat, navigation, use-line, and level
@@ -296,13 +306,15 @@ The schema now also declares source groups:
   probes.
 - `memory_queries`: remembered enemies and blocked-target state.
 - `controller_state`: stuck detection and macro-action history.
+- `temporal_context`: bounded observation and route-outcome history maintained
+  by `SkillController`.
 
 This is good enough for early skill learning, but it is not yet a complete
 learning observation. Known gaps:
 
 - No compact topological map graph, only local probes plus coarse cell memory.
-- Only one macro-step of action history plus a route-failure streak; there is
-  no recurrent state or longer temporal context yet.
+- The temporal window is hand-built and bounded; there is no recurrent neural
+  state yet.
 - Route waypoints are a single local progression target, not a full route plan
   or topology graph.
 - No enemy projectile or incoming-damage prediction.
@@ -320,14 +332,13 @@ shootable-target steps, zero damage, and zero kills. That means protobuf state
 is rich enough for local movement reward, but not yet rich enough to make the
 fresh-spawn route reliably produce the first valid combat affordance. The next
 two credible fixes are true progressed-state snapshot restore or a compact
-topology/temporal observation that remembers route attempts across more than
-one macro-step.
+topology observation that remembers map structure beyond the current waypoint.
 
 The next observation upgrades should be staged rather than speculative:
 
-1. Add a short temporal window or recurrent policy after that is stable;
-   one previous macro action is not enough to represent "I just tried this
-   door" or "this corridor approach failed twice."
+1. Evaluate the bounded temporal window in live spawn-to-contact PPO, then
+   promote to a recurrent policy only if the hand-built trend features are
+   still insufficient.
 2. Add a compact topology graph once true save-state or Hellbox/Shrink snapshot
    restore is available, because map graph learning is much more useful when
    we can repeatedly resume from progressed map states.
@@ -473,7 +484,9 @@ Recent PPO evidence:
 
 The next useful changes are:
 
-- Extend action history beyond one macro-step or add a recurrent policy.
+- Evaluate bounded temporal-context features from true spawn and add a
+  recurrent policy only if the feed-forward actor still cannot bridge to first
+  contact.
 - Add true save-state or Hellbox/Shrink snapshot restore so PPO can train from
   progressed map states, not only fresh-reset teleport starts.
 - Promote combat affordances from binary target presence to richer target

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ from .schemas import (
     OBSERVATION_SCHEMA,
     PPO_SKILL_ACTIONS,
     encode_action_history_features,
+    encode_temporal_context_features,
 )
 from .skill_policy import features_from_tactical
 
@@ -124,6 +126,12 @@ class SkillController:
         self._route_waypoint_reached_recently = False
         self._route_waypoint_failed_recently = False
         self._failed_route_attempt_count = 0
+        self._previous_observation_snapshot: dict[str, Any] | None = None
+        self._same_cell_observation_streak = 0
+        self._recent_visible_enemy_flags: list[bool] = []
+        self._recent_shootable_target_flags: list[bool] = []
+        self._recent_route_progress_units: list[float] = []
+        self._recent_route_failure_flags: list[bool] = []
 
     def observation(self, state: Any) -> list[float]:
         """Encodes a protobuf state as the stable PPO feature vector."""
@@ -140,6 +148,7 @@ class SkillController:
                 route_waypoint_failed_recently=self._route_waypoint_failed_recently,
                 failed_route_attempt_count=self._failed_route_attempt_count,
             ),
+            *self._temporal_context_features(features),
         ]
 
     def reset_episode_context(self) -> None:
@@ -152,6 +161,12 @@ class SkillController:
         self._route_waypoint_reached_recently = False
         self._route_waypoint_failed_recently = False
         self._failed_route_attempt_count = 0
+        self._previous_observation_snapshot = None
+        self._same_cell_observation_streak = 0
+        self._recent_visible_enemy_flags.clear()
+        self._recent_shootable_target_flags.clear()
+        self._recent_route_progress_units.clear()
+        self._recent_route_failure_flags.clear()
 
     def record_action_history(
         self,
@@ -178,6 +193,120 @@ class SkillController:
             self._route_waypoint_reached_recently or self._previous_route_progress_units > 4.0
         ):
             self._failed_route_attempt_count = 0
+        if self._previous_route_progression:
+            self._append_recent(
+                self._recent_route_progress_units,
+                self._previous_route_progress_units,
+            )
+            self._append_recent(
+                self._recent_route_failure_flags,
+                self._route_waypoint_failed_recently,
+            )
+        if had_shootable_target:
+            self._append_recent(self._recent_shootable_target_flags, True)
+
+    def _temporal_context_features(self, features: Any) -> list[float]:
+        """Returns bounded temporal context and advances the observation snapshot."""
+        current_snapshot = self._observation_snapshot(features)
+        previous_snapshot = self._previous_observation_snapshot
+        if previous_snapshot is None:
+            delta_x = 0.0
+            delta_y = 0.0
+            movement_distance = 0.0
+            enemy_distance_delta = 0.0
+            route_distance_delta = 0.0
+            cell_changed = False
+            self._same_cell_observation_streak = 1
+            encoded_same_cell_observation_streak = 0
+        else:
+            delta_x = current_snapshot["x_units"] - previous_snapshot["x_units"]
+            delta_y = current_snapshot["y_units"] - previous_snapshot["y_units"]
+            movement_distance = math.hypot(delta_x, delta_y)
+            enemy_distance_delta = (
+                previous_snapshot["enemy_distance"] - current_snapshot["enemy_distance"]
+                if previous_snapshot["enemy_distance"] is not None
+                and current_snapshot["enemy_distance"] is not None
+                else 0.0
+            )
+            route_distance_delta = (
+                previous_snapshot["route_distance"] - current_snapshot["route_distance"]
+                if previous_snapshot["route_distance"] is not None
+                and current_snapshot["route_distance"] is not None
+                else 0.0
+            )
+            cell_changed = current_snapshot["cell"] != previous_snapshot["cell"]
+            if cell_changed:
+                self._same_cell_observation_streak = 1
+            else:
+                self._same_cell_observation_streak += 1
+            encoded_same_cell_observation_streak = self._same_cell_observation_streak
+
+        self._append_recent(
+            self._recent_visible_enemy_flags,
+            bool(current_snapshot["visible_enemy"]),
+        )
+        self._append_recent(
+            self._recent_shootable_target_flags,
+            bool(current_snapshot["shootable_target"]),
+        )
+        route_attempts = max(1, len(self._recent_route_failure_flags))
+        recent_route_failure_ratio = (
+            sum(1 for failed in self._recent_route_failure_flags if failed) / route_attempts
+            if self._recent_route_failure_flags
+            else 0.0
+        )
+        temporal = encode_temporal_context_features(
+            delta_x_units=delta_x,
+            delta_y_units=delta_y,
+            movement_distance_units=movement_distance,
+            enemy_distance_delta_units=enemy_distance_delta,
+            route_distance_delta_units=route_distance_delta,
+            same_cell_observation_streak=encoded_same_cell_observation_streak,
+            cell_changed_recently=cell_changed,
+            visible_enemy_seen_recently=any(self._recent_visible_enemy_flags),
+            shootable_target_seen_recently=any(self._recent_shootable_target_flags),
+            recent_route_progress_units=sum(self._recent_route_progress_units),
+            recent_route_failure_ratio=recent_route_failure_ratio,
+        )
+        self._previous_observation_snapshot = current_snapshot
+        return temporal
+
+    @staticmethod
+    def _observation_snapshot(features: Any) -> dict[str, Any]:
+        route_waypoint = features.navigation.get("route_waypoint", {})
+        route_line = (
+            route_waypoint.get("line", {})
+            if isinstance(route_waypoint, dict)
+            and isinstance(route_waypoint.get("line", {}), dict)
+            else {}
+        )
+        enemy_distance = None
+        if features.visible_enemies:
+            enemy_distance = float(features.visible_enemies[0]["distance"])
+        elif features.known_enemies:
+            enemy_distance = float(features.known_enemies[0]["distance"])
+        return {
+            "x_units": float(features.x_units),
+            "y_units": float(features.y_units),
+            "cell": str(features.cell),
+            "enemy_distance": enemy_distance,
+            "route_distance": (
+                float(route_line["distance"])
+                if route_line and "distance" in route_line
+                else None
+            ),
+            "visible_enemy": bool(features.visible_enemies),
+            "shootable_target": bool(
+                features.combat.get("has_shootable_target")
+                and features.combat.get("target_is_enemy")
+            ),
+        }
+
+    @staticmethod
+    def _append_recent(values: list[Any], value: Any, *, max_length: int = 4) -> None:
+        values.append(value)
+        if len(values) > max_length:
+            del values[: len(values) - max_length]
 
     def action_for(self, action_index: int, state: Any) -> tuple[Any, dict[str, Any]]:
         """Returns the PlayerAction for a PPO skill index."""

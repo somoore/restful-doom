@@ -33,9 +33,24 @@ ACTION_HISTORY_FEATURE_NAMES = [
     "failed_route_attempt_count_norm",
 ]
 
+TEMPORAL_CONTEXT_FEATURE_NAMES = [
+    "delta_x_norm",
+    "delta_y_norm",
+    "movement_distance_norm",
+    "enemy_distance_delta_norm",
+    "route_distance_delta_norm",
+    "same_cell_observation_streak_norm",
+    "cell_changed_recently",
+    "visible_enemy_seen_recently",
+    "shootable_target_seen_recently",
+    "recent_route_progress_norm",
+    "recent_route_failure_ratio",
+]
+
 PPO_FEATURE_NAMES = [
     *TACTICAL_FEATURE_NAMES,
     *ACTION_HISTORY_FEATURE_NAMES,
+    *TEMPORAL_CONTEXT_FEATURE_NAMES,
 ]
 
 EXPERT_TO_PPO_SKILL_ACTION = {
@@ -203,6 +218,40 @@ def encode_action_history_features(
     ]
 
 
+def encode_temporal_context_features(
+    *,
+    delta_x_units: float = 0.0,
+    delta_y_units: float = 0.0,
+    movement_distance_units: float = 0.0,
+    enemy_distance_delta_units: float = 0.0,
+    route_distance_delta_units: float = 0.0,
+    same_cell_observation_streak: int = 0,
+    cell_changed_recently: bool = False,
+    visible_enemy_seen_recently: bool = False,
+    shootable_target_seen_recently: bool = False,
+    recent_route_progress_units: float = 0.0,
+    recent_route_failure_ratio: float = 0.0,
+) -> list[float]:
+    """Encode bounded temporal context for PPO observations."""
+    return [
+        _clip(float(delta_x_units) / 512.0),
+        _clip(float(delta_y_units) / 512.0),
+        _clip(float(movement_distance_units) / 512.0, minimum=0.0),
+        _clip(float(enemy_distance_delta_units) / 512.0),
+        _clip(float(route_distance_delta_units) / 512.0),
+        _clip(float(same_cell_observation_streak) / 8.0, minimum=0.0),
+        1.0 if cell_changed_recently else 0.0,
+        1.0 if visible_enemy_seen_recently else 0.0,
+        1.0 if shootable_target_seen_recently else 0.0,
+        _clip(float(recent_route_progress_units) / 512.0),
+        _clip(float(recent_route_failure_ratio), minimum=0.0),
+    ]
+
+
+def _clip(value: float, *, minimum: float = -1.0, maximum: float = 1.0) -> float:
+    return max(minimum, min(maximum, value))
+
+
 def pad_observation_features(features: list[float]) -> list[float]:
     """Pad older tactical-only feature rows to the current PPO observation contract."""
     if len(features) == len(PPO_FEATURE_NAMES):
@@ -220,10 +269,18 @@ def pad_observation_features(features: list[float]) -> list[float]:
                 route_waypoint_failed_recently=False,
                 failed_route_attempt_count=0,
             ),
+            *encode_temporal_context_features(),
+        ]
+    legacy_action_history_len = len(TACTICAL_FEATURE_NAMES) + len(ACTION_HISTORY_FEATURE_NAMES)
+    if len(features) == legacy_action_history_len:
+        return [
+            *features,
+            *encode_temporal_context_features(),
         ]
     raise ValueError(
         "feature vector length does not match tactical or PPO observation schema: "
-        f"got {len(features)}, expected {len(TACTICAL_FEATURE_NAMES)} or "
+        f"got {len(features)}, expected {len(TACTICAL_FEATURE_NAMES)}, "
+        f"{legacy_action_history_len}, or "
         f"{len(PPO_FEATURE_NAMES)}"
     )
 
@@ -305,6 +362,17 @@ def _feature_meaning(name: str) -> str:
         "route_waypoint_reached_recently": "Previous route-progression macro-step reached or crossed its waypoint.",
         "route_waypoint_failed_recently": "Previous route-progression macro-step stalled or moved away from its waypoint.",
         "failed_route_attempt_count_norm": "Consecutive failed route-progression attempts normalized by 8.",
+        "delta_x_norm": "Player X movement since the previous encoded PPO observation normalized by 512 units.",
+        "delta_y_norm": "Player Y movement since the previous encoded PPO observation normalized by 512 units.",
+        "movement_distance_norm": "Distance moved since the previous encoded PPO observation normalized by 512 units.",
+        "enemy_distance_delta_norm": "Positive when nearest known enemy distance decreased since the previous observation, normalized by 512 units.",
+        "route_distance_delta_norm": "Positive when route waypoint distance decreased since the previous observation, normalized by 512 units.",
+        "same_cell_observation_streak_norm": "Consecutive encoded observations in the same coarse map cell normalized by 8.",
+        "cell_changed_recently": "Flag that the current encoded observation moved into a different coarse map cell.",
+        "visible_enemy_seen_recently": "Flag that any of the recent encoded observations saw a line-of-sight enemy.",
+        "shootable_target_seen_recently": "Flag that any recent encoded observation or macro-step had a shootable enemy target.",
+        "recent_route_progress_norm": "Rolling route-progression gain over recent macro-steps normalized by 512 Doom units.",
+        "recent_route_failure_ratio": "Fraction of recent route-progression attempts that failed.",
     }
     return meanings.get(name, "PPO observation feature.")
 
@@ -315,6 +383,7 @@ OBSERVATION_SCHEMA = {
     "feature_names": PPO_FEATURE_NAMES,
     "base_feature_names": TACTICAL_FEATURE_NAMES,
     "action_history_feature_names": ACTION_HISTORY_FEATURE_NAMES,
+    "temporal_context_feature_names": TEMPORAL_CONTEXT_FEATURE_NAMES,
     "source_groups": [
         {
             "name": "protobuf_state",
@@ -369,6 +438,11 @@ OBSERVATION_SCHEMA = {
                 *ACTION_HISTORY_FEATURE_NAMES,
             ],
         },
+        {
+            "name": "temporal_context",
+            "producer": "SkillController bounded observation and route-outcome history",
+            "features": TEMPORAL_CONTEXT_FEATURE_NAMES,
+        },
     ],
     "learning_readiness": {
         "strengths": [
@@ -378,10 +452,11 @@ OBSERVATION_SCHEMA = {
             "current-sector hazard fields tell PPO when navigation is causing floor damage",
             "route-waypoint fields give spawn-to-contact training an explicit progression target",
             "route-outcome history tells PPO whether the last progression decision reached, stalled, or moved toward its waypoint",
+            "bounded temporal features expose recent movement, enemy-distance, route-distance, and shootable-contact trends",
         ],
         "known_gaps": [
             "no compact topological map graph",
-            "no recurrent state beyond one previous macro action",
+            "no recurrent neural state beyond bounded hand-built temporal features",
             "no projectile or incoming-damage predictor",
             "reset seeds are labels until the server reports seed_applied=true",
         ],
@@ -418,6 +493,7 @@ OBSERVATION_SCHEMA = {
     "feature_descriptors": [
         *_feature_descriptors(TACTICAL_FEATURE_NAMES, source="protobuf_or_memory"),
         *_feature_descriptors(ACTION_HISTORY_FEATURE_NAMES, source="macro_step_history"),
+        *_feature_descriptors(TEMPORAL_CONTEXT_FEATURE_NAMES, source="temporal_context"),
     ],
 }
 

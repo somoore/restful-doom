@@ -290,6 +290,9 @@ The training API is:
   gained toward the waypoint, reached/failed flags, and failed-attempt streaks.
   This lets the model distinguish a useful navigation choice from a repeated
   stall.
+- PPO observations also include bounded temporal context: recent movement
+  delta, enemy-distance trend, route-distance trend, same-cell streak, recent
+  visible/shootable contact, and rolling route failure/progress signals.
 - Checkpoints and rollout buffers carry `restfuldoom.observation.v1` and
   `restfuldoom.skill_action.v1`, including feature descriptors and
   machine-readable definitions for each PPO skill.

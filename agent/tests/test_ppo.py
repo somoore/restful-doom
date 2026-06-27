@@ -179,6 +179,11 @@ def test_training_schemas_describe_features_and_actions():
     assert "route_waypoint_distance_norm" in OBSERVATION_SCHEMA["feature_names"]
     assert "prev_route_progress_norm" in OBSERVATION_SCHEMA["feature_names"]
     assert "failed_route_attempt_count_norm" in OBSERVATION_SCHEMA["feature_names"]
+    assert "enemy_distance_delta_norm" in OBSERVATION_SCHEMA["feature_names"]
+    assert "recent_route_failure_ratio" in OBSERVATION_SCHEMA["feature_names"]
+    assert "temporal_context" in {
+        group["name"] for group in OBSERVATION_SCHEMA["source_groups"]
+    }
     assert "no compact topological map graph" in OBSERVATION_SCHEMA["learning_readiness"]["known_gaps"]
     assert any(
         gap["name"] == "spawn_to_first_combat"
@@ -194,6 +199,17 @@ def test_pad_observation_features_adds_neutral_action_history():
     assert len(padded) == len(OBSERVATION_SCHEMA["feature_names"])
     assert padded[: len(FEATURE_NAMES)] == tactical
     assert all(value == 0.0 for value in padded[len(FEATURE_NAMES) :])
+
+
+def test_pad_observation_features_adds_neutral_temporal_context_to_legacy_rows():
+    legacy = [0.0 for _ in OBSERVATION_SCHEMA["base_feature_names"]]
+    legacy.extend([0.25 for _ in OBSERVATION_SCHEMA["action_history_feature_names"]])
+
+    padded = pad_observation_features(legacy)
+
+    assert len(padded) == len(OBSERVATION_SCHEMA["feature_names"])
+    assert padded[: len(legacy)] == legacy
+    assert all(value == 0.0 for value in padded[len(legacy) :])
 
 
 def test_rollout_summary_deduplicates_reset_warmup_metadata():

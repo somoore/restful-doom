@@ -99,6 +99,46 @@ def test_skill_controller_observation_includes_route_outcome_history():
     assert features["failed_route_attempt_count_norm"] == 0.0
 
 
+def test_skill_controller_observation_includes_temporal_context():
+    controller = SkillController()
+    first = _state(enemy=True, route=True, enemy_distance=512, x_units=0)
+    second = _state(enemy=True, route=True, enemy_distance=384, x_units=128)
+
+    initial = dict(zip(OBSERVATION_SCHEMA["feature_names"], controller.observation(first)))
+    after_move = dict(zip(OBSERVATION_SCHEMA["feature_names"], controller.observation(second)))
+
+    assert initial["delta_x_norm"] == 0.0
+    assert initial["movement_distance_norm"] == 0.0
+    assert initial["enemy_distance_delta_norm"] == 0.0
+    assert after_move["delta_x_norm"] == pytest.approx(0.25)
+    assert after_move["movement_distance_norm"] == pytest.approx(0.25)
+    assert after_move["enemy_distance_delta_norm"] == pytest.approx(0.25)
+    assert after_move["route_distance_delta_norm"] == pytest.approx(0.25)
+    assert after_move["cell_changed_recently"] == 1.0
+    assert after_move["visible_enemy_seen_recently"] == 1.0
+
+
+def test_skill_controller_observation_tracks_recent_route_failures():
+    controller = SkillController()
+    route_index = SKILL_ACTIONS.index("route_progression")
+    state = _state(route=True)
+
+    controller.record_action_history(
+        action_index=route_index,
+        had_shootable_target=False,
+        route_outcome={
+            "attempted": True,
+            "progress_units": -16.0,
+            "reached": False,
+            "failed": True,
+        },
+    )
+    features = dict(zip(OBSERVATION_SCHEMA["feature_names"], controller.observation(state)))
+
+    assert features["recent_route_progress_norm"] == pytest.approx(-16.0 / 512.0)
+    assert features["recent_route_failure_ratio"] == 1.0
+
+
 def test_skill_controller_action_mask_uses_affordances():
     controller = SkillController()
     combat_state = _state(enemy=True, combat=True)
