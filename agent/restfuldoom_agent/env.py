@@ -628,7 +628,7 @@ class SkillController:
         if skill == "close_visible_contact":
             enemy = features.visible_enemies[0] if features.visible_enemies else None
             if enemy is not None and self.policy._shootable_enemy(features) is None:
-                contact_line = self._contact_use_line(features)
+                contact_line = self._contact_use_line(features, allow_blocked=False)
                 if (
                     contact_line is not None
                     and not self._contact_use_line_ready_for_visible_contact(
@@ -764,7 +764,7 @@ class SkillController:
                 if remember_contact_line or contact_line:
                     self._remember_contact_use_line(features, line)
                 if contact_line:
-                    return self._use_contact_line(features, line, stuck)
+                    return self._use_contact_line(features, line, stuck, track_stall=False)
                 return self.policy._use_nearby_line(features, line, stuck)
             if self._visible_contact_needs_closure(features):
                 enemy = features.visible_enemies[0]
@@ -848,7 +848,12 @@ class SkillController:
             return None
         return line
 
-    def _contact_use_line(self, features: Any) -> dict[str, Any] | None:
+    def _contact_use_line(
+        self,
+        features: Any,
+        *,
+        allow_blocked: bool = True,
+    ) -> dict[str, Any] | None:
         """Returns a manual line worth approaching during visible contact."""
         if not features.visible_enemies or self.policy._shootable_enemy(features) is not None:
             return None
@@ -859,6 +864,8 @@ class SkillController:
             if float(line.get("distance", 999999.0)) > 1200.0:
                 continue
             if abs(float(line.get("angle_delta", 999.0))) > 120.0:
+                continue
+            if not allow_blocked and self.policy._is_line_blocked(features, line):
                 continue
             candidates.append(line)
         if not candidates:
@@ -900,8 +907,17 @@ class SkillController:
         features: Any,
         line: dict[str, Any],
         stuck: bool,
+        *,
+        track_stall: bool = True,
     ) -> tuple[Any, dict[str, Any]]:
         """Approach or press a manual line selected as part of visible contact."""
+        if track_stall and not self.policy._record_line_attempt(
+            features,
+            line,
+            allow_immediate_use_bypass=False,
+        ):
+            self._recent_contact_use_line = None
+            return self.policy._explore(features, stuck)
         angle_delta = self.policy._line_control_angle_delta(line)
         distance = self.policy._line_control_distance(line)
         line_record = self.policy._line_record(line)
@@ -1002,6 +1018,8 @@ class SkillController:
             if float(line.get("distance", 999999.0)) > 1400.0:
                 return None
             if abs(float(line.get("angle_delta", 999.0))) > 160.0:
+                return None
+            if self.policy._is_line_blocked(features, line):
                 return None
             return line
         return None

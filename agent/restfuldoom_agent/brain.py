@@ -2251,6 +2251,8 @@ class BrainPolicy:
         self,
         features: TacticalFeatures,
         line: dict[str, Any],
+        *,
+        allow_immediate_use_bypass: bool = True,
     ) -> bool:
         if (
             int(line.get("special", 0)) in EXIT_LINE_SPECIALS
@@ -2258,7 +2260,8 @@ class BrainPolicy:
         ):
             return True
         if (
-            bool(features.navigation.get("use_line_ahead"))
+            allow_immediate_use_bypass
+            and bool(features.navigation.get("use_line_ahead"))
             and int(line.get("special", 0)) in MANUAL_USE_LINE_SPECIALS
             and float(line.get("distance", 999999)) <= 192.0
             and not (

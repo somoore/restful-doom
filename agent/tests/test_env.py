@@ -368,6 +368,40 @@ def test_skill_controller_close_visible_contact_continues_contact_line_after_los
     assert decision["use_line"]["line_id"] == 151
 
 
+def test_skill_controller_close_visible_contact_releases_stalled_contact_line():
+    controller = SkillController()
+    first = _state(
+        tick=5,
+        enemy=True,
+        combat=False,
+        enemy_distance=1800,
+        contact_use=True,
+        contact_use_distance_units=640,
+    )
+    controller.action_for(SKILL_ACTIONS.index("close_visible_contact"), first)
+
+    last_decision = None
+    for tick in range(20, 80, 5):
+        stalled = _state(
+            tick=tick,
+            enemy=True,
+            enemy_line_of_sight=False,
+            combat=False,
+            enemy_distance=1800,
+            contact_use=True,
+            contact_use_distance_units=16,
+        )
+        stalled.navigation.use_line_ahead = True
+        _action, last_decision = controller.action_for(
+            SKILL_ACTIONS.index("close_visible_contact"),
+            stalled,
+        )
+
+    assert last_decision is not None
+    assert last_decision["ppo_skill"] == "close_visible_contact"
+    assert last_decision["skill"] != "contact_use_line"
+
+
 def test_skill_controller_engage_continues_recent_contact_corridor():
     controller = SkillController()
     first = _state(tick=5, enemy=True, combat=False, enemy_distance=2200)
