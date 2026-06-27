@@ -320,9 +320,13 @@ PYTHONPATH=agent python -m restfuldoom_agent.snapshot_capture \
     --output trajectories/e1m1-snapshot-curriculum.json \
     --name e1m1-progressed-bottlenecks \
     --save-slot-base 3 \
+    --attempts 3 \
+    --reset-before-attempt \
+    --reset-seed-base 31 \
     --auto first-visible \
     --auto first-shootable \
     --auto first-damage \
+    --auto first-kill \
     --verify-loads
 ```
 
@@ -330,7 +334,13 @@ The capture command uses the deterministic structured brain only to reach
 progressed states. It saves native `agentdoomN.dsg` slots at the first matching
 protobuf milestones and emits a normal `restfuldoom.snapshot_curriculum.v1`
 manifest. PPO still learns independently from reward feedback when the manifest
-is later passed to `ppo_agent --snapshot-curriculum`.
+is later passed to `ppo_agent --snapshot-curriculum`. Use `--attempts` with
+`--reset-before-attempt` when one route rollout is not reliable enough; each
+attempt uses a fresh `BrainPolicy` instance and, when reset is enabled, queues a
+fast gRPC `ResetEpisode` before streaming. Multi-attempt captures write
+per-attempt trajectory files and record `source.attempt_reports` plus
+per-stage `capture_attempt` metadata. Native save slots are limited to `0..9`,
+so `--save-slot-base + requested_milestones - 1` must stay inside that range.
 
 Snapshot resets are verified by default. After an external restore or native
 `LoadSnapshot`, `DoomAgentEnv.reset()` observes the first protobuf state and

@@ -4,10 +4,14 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from restfuldoom_agent.snapshot_capture import (
     SnapshotCaptureConfig,
     SnapshotMilestoneTracker,
+    _attempt_trajectory_path,
     _capture_stage,
+    _main as snapshot_capture_main,
 )
 from restfuldoom_agent.env import _verify_snapshot_restored_state
 from restfuldoom_agent.snapshot_builder import (
@@ -251,8 +255,86 @@ def test_native_snapshot_capture_stage_queues_save_slot(tmp_path):
     assert stage["snapshot"]["ref"] == "save_slot:4"
     assert stage["capture"]["method"] == "grpc_save_snapshot"
     assert stage["capture"]["save_queued"] is True
+    assert stage["capture"]["attempt"] == 1
     assert stage["evidence"]["selectors"] == ["first-shootable", "first-damage"]
+    assert stage["evidence"]["capture_attempt"] == 1
+    assert stage["evidence"]["attempt_record_index"] == 2
     assert stage["expected_state"]["damage_delta"] == 20
+
+
+def test_native_snapshot_capture_stage_records_attempt_metadata(tmp_path):
+    record = _trajectory_row(
+        42,
+        visible=True,
+        shootable=False,
+        skill="seek_enemy",
+    )
+    config = SnapshotCaptureConfig(
+        output_path=tmp_path / "manifest.json",
+        name="native-capture",
+        snapshot_dir=tmp_path / "snapshots",
+        save_slot_base=4,
+    )
+    client = _FakeSnapshotClient()
+
+    stage = asyncio.run(
+        _capture_stage(
+            client,
+            config,
+            record,
+            selectors=["first-visible"],
+            line_index=42,
+            order=2,
+            trajectory=tmp_path / "run-attempt-002.jsonl",
+            run_id="capture-test",
+            attempt=2,
+            global_record_index=1042,
+        )
+    )
+
+    assert stage["snapshot"]["slot"] == 6
+    assert stage["evidence"]["capture_attempt"] == 2
+    assert stage["evidence"]["attempt_record_index"] == 42
+    assert stage["evidence"]["global_record_index"] == 1042
+    assert stage["capture"]["attempt"] == 2
+    assert stage["capture"]["attempt_record_index"] == 42
+
+
+def test_snapshot_capture_attempt_trajectory_paths_do_not_overwrite_base():
+    path = Path("trajectories/snapshot-capture.jsonl")
+
+    assert _attempt_trajectory_path(path, attempt=1, attempts=1) == path
+    assert _attempt_trajectory_path(path, attempt=2, attempts=3) == Path(
+        "trajectories/snapshot-capture-attempt-002.jsonl"
+    )
+    assert _attempt_trajectory_path(Path("capture"), attempt=1, attempts=2) == Path(
+        "capture-attempt-001.jsonl"
+    )
+    assert _attempt_trajectory_path(None, attempt=1, attempts=2) is None
+
+
+def test_snapshot_capture_rejects_native_slot_range_exhaustion(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        snapshot_capture_main(
+            [
+                "--endpoint",
+                "127.0.0.1:50051",
+                "--output",
+                str(tmp_path / "manifest.json"),
+                "--save-slot-base",
+                "8",
+                "--auto",
+                "first-visible",
+                "--auto",
+                "first-shootable",
+                "--auto",
+                "first-damage",
+            ]
+        )
+
+    err = capsys.readouterr().err
+    assert "must fit native slots 0..9" in err
+    assert "requested range 8..10" in err
 
 
 def test_native_snapshot_load_verification_matches_progressed_state():

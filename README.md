@@ -581,9 +581,13 @@ PYTHONPATH=agent python -m restfuldoom_agent.snapshot_capture \
     --output trajectories/e1m1-snapshot-curriculum.json \
     --name e1m1-progressed-bottlenecks \
     --save-slot-base 3 \
+    --attempts 3 \
+    --reset-before-attempt \
+    --reset-seed-base 31 \
     --auto first-visible \
     --auto first-shootable \
     --auto first-damage \
+    --auto first-kill \
     --verify-loads
 ```
 
@@ -592,7 +596,12 @@ This command runs the deterministic structured brain, queues native
 PPO-ready `restfuldoom.snapshot_curriculum.v1` manifest using
 `snapshot.slot` / `save_slot:N` refs. `--verify-loads` optionally loads each
 captured slot after the rollout and records whether the restored protobuf state
-matches the expected map/position/shootable-target evidence.
+matches the expected map/position/shootable-target evidence. `--attempts` runs
+fresh capture attempts until all requested milestones are found; with
+`--reset-before-attempt`, each attempt starts from a fast gRPC `ResetEpisode`
+instead of relying on Docker restart. Native Doom agent saves currently expose
+slots `0..9`, so choose `--save-slot-base` such that the highest requested
+milestone fits that range.
 
 During PPO training, snapshot resets verify the first restored protobuf state
 against the stage `expected_state` before collecting rollout records. The check

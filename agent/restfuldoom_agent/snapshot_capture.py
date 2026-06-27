@@ -38,6 +38,7 @@ from .snapshot_curriculum import SNAPSHOT_CURRICULUM_SCHEMA, validate_snapshot_c
 SNAPSHOT_CAPTURE_SOURCE_SCHEMA = "restfuldoom.snapshot_capture_source.v1"
 NATIVE_SNAPSHOT_CAPTURE_SCHEMA = "restfuldoom.native_snapshot_capture.v1"
 SNAPSHOT_LOAD_VERIFICATION_SCHEMA = "restfuldoom.snapshot_load_verification.v1"
+MAX_NATIVE_SAVE_SLOT = 9
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,12 @@ class SnapshotCaptureConfig:
     goal_preset: str = "combat"
     mission: str = "capture progressed-map bottleneck snapshots"
     max_states: int = 12000
+    attempts: int = 1
+    reset_before_attempt: bool = False
+    reset_skill: int = 2
+    reset_episode: int = 1
+    reset_map: int = 1
+    reset_seed_base: int = 0
     policy_id: str = "snapshot_capture_brain"
     reconnect: bool = True
     max_reconnects: int = 5
@@ -147,13 +154,6 @@ async def capture_snapshot_curriculum(config: SnapshotCaptureConfig) -> dict[str
     params = memory.best_params()
     skill_model_path = _resolve_skill_model_path(config.skill_model_path, memory)
     skill_model = SkillPolicyModel.load(skill_model_path) if skill_model_path else None
-    policy = BrainPolicy(
-        memory=memory,
-        params=params,
-        policy_id=config.policy_id,
-        skill_model=skill_model,
-    )
-    reward = RewardEngine(goal_preset(config.goal_preset))
     client = DoomAgentClient(
         config.endpoint,
         token=config.token,
@@ -163,12 +163,12 @@ async def capture_snapshot_curriculum(config: SnapshotCaptureConfig) -> dict[str
     )
     tracker = SnapshotMilestoneTracker(config.auto_selectors)
     run_id = f"snapshot-capture-{uuid.uuid4().hex[:12]}"
-    trajectory = config.trajectory_jsonl or Path("<stream>")
     stages: list[dict[str, Any]] = []
     records_seen = 0
     last_capture_index: int | None = None
+    attempt_reports: list[dict[str, Any]] = []
 
-    metadata = {
+    base_metadata = {
         "source": "snapshot-capture",
         "run_id": run_id,
         "policy_id": config.policy_id,
@@ -178,11 +178,19 @@ async def capture_snapshot_curriculum(config: SnapshotCaptureConfig) -> dict[str
         "memory_path": str(config.memory_path),
         "selectors": list(config.auto_selectors),
         "save_slot_base": config.save_slot_base,
+        "attempts": config.attempts,
+        "reset_before_attempt": config.reset_before_attempt,
     }
     if skill_model_path is not None:
-        metadata["skill_model_path"] = str(skill_model_path)
+        base_metadata["skill_model_path"] = str(skill_model_path)
 
-    async def capture_before_action_send(step: RolloutStep) -> None:
+    async def capture_before_action_send(
+        step: RolloutStep,
+        *,
+        attempt: int,
+        trajectory_path: Path,
+        global_record_index: int,
+    ) -> None:
         nonlocal last_capture_index
         record = _record_from_rollout_step(step)
         selectors = tracker.observe(record)
@@ -195,31 +203,86 @@ async def capture_snapshot_curriculum(config: SnapshotCaptureConfig) -> dict[str
             selectors=selectors,
             line_index=step.index,
             order=len(stages),
-            trajectory=trajectory,
+            trajectory=trajectory_path,
             run_id=run_id,
+            attempt=attempt,
+            global_record_index=global_record_index,
         )
         stages.append(stage)
         tracker.mark_captured(selectors)
-        last_capture_index = step.index
+        last_capture_index = global_record_index
 
     try:
-        async for step in client.stream_rollout(
-            policy,
-            reward_engine=reward,
-            max_states=config.max_states,
-            trajectory_jsonl=config.trajectory_jsonl,
-            reconnect=config.reconnect,
-            backoff=BackoffConfig(max_attempts=config.max_reconnects),
-            on_step_before_action_send=capture_before_action_send,
-            rollout_metadata=metadata,
-        ):
-            records_seen += 1
-            if (
-                config.stop_after_captured
-                and tracker.complete
-                and last_capture_index is not None
-                and step.index - last_capture_index >= config.settle_states_after_capture
+        for attempt in range(1, max(1, config.attempts) + 1):
+            attempt_started_records = records_seen
+            attempt_trajectory = _attempt_trajectory_path(
+                config.trajectory_jsonl,
+                attempt=attempt,
+                attempts=config.attempts,
+            )
+            attempt_report: dict[str, Any] = {
+                "attempt": attempt,
+                "trajectory_jsonl": str(attempt_trajectory) if attempt_trajectory else None,
+                "records_before": records_seen,
+                "captured_before": sorted(tracker.captured),
+            }
+            if config.reset_before_attempt:
+                attempt_report["reset"] = await _reset_capture_attempt(
+                    client,
+                    config,
+                    run_id=run_id,
+                    attempt=attempt,
+                )
+
+            policy = BrainPolicy(
+                memory=memory,
+                params=params,
+                policy_id=f"{config.policy_id}-attempt-{attempt}",
+                skill_model=skill_model,
+            )
+            reward = RewardEngine(goal_preset(config.goal_preset))
+            metadata = {
+                **base_metadata,
+                "attempt": attempt,
+                "trajectory_jsonl": str(attempt_trajectory) if attempt_trajectory else None,
+                "reset": attempt_report.get("reset"),
+            }
+            stop_attempt = False
+
+            async def attempt_capture(step: RolloutStep) -> None:
+                await capture_before_action_send(
+                    step,
+                    attempt=attempt,
+                    trajectory_path=attempt_trajectory or Path("<stream>"),
+                    global_record_index=attempt_started_records + step.index,
+                )
+
+            async for step in client.stream_rollout(
+                policy,
+                reward_engine=reward,
+                max_states=config.max_states,
+                trajectory_jsonl=attempt_trajectory,
+                reconnect=config.reconnect,
+                backoff=BackoffConfig(max_attempts=config.max_reconnects),
+                on_step_before_action_send=attempt_capture,
+                rollout_metadata=metadata,
             ):
+                records_seen += 1
+                if (
+                    config.stop_after_captured
+                    and tracker.complete
+                    and last_capture_index is not None
+                    and records_seen - last_capture_index >= config.settle_states_after_capture
+                ):
+                    stop_attempt = True
+                    break
+
+            attempt_report["records_after"] = records_seen
+            attempt_report["records_seen"] = records_seen - attempt_started_records
+            attempt_report["captured_after"] = sorted(tracker.captured)
+            attempt_report["complete"] = tracker.complete
+            attempt_reports.append(attempt_report)
+            if stop_attempt or tracker.complete:
                 break
 
         if not stages:
@@ -238,6 +301,7 @@ async def capture_snapshot_curriculum(config: SnapshotCaptureConfig) -> dict[str
         stages=stages,
         records_seen=records_seen,
         skill_model_path=skill_model_path,
+        attempt_reports=attempt_reports,
     )
     config.output_path.parent.mkdir(parents=True, exist_ok=True)
     config.output_path.write_text(
@@ -253,6 +317,54 @@ async def capture_snapshot_curriculum(config: SnapshotCaptureConfig) -> dict[str
     return manifest
 
 
+async def _reset_capture_attempt(
+    client: DoomAgentClient,
+    config: SnapshotCaptureConfig,
+    *,
+    run_id: str,
+    attempt: int,
+) -> dict[str, Any]:
+    seed = int(config.reset_seed_base) + max(0, int(attempt) - 1)
+    response = await client.reset_episode(
+        skill=int(config.reset_skill),
+        episode=int(config.reset_episode),
+        map=int(config.reset_map),
+        seed=seed,
+        run_id=f"{run_id}-attempt-{attempt}-reset",
+    )
+    reset = {
+        "schema": "restfuldoom.snapshot_capture_reset.v1",
+        "attempt": int(attempt),
+        "accepted": bool(response.accepted),
+        "message": response.message,
+        "skill": int(response.skill),
+        "episode": int(response.episode),
+        "map": int(response.map),
+        "seed": int(response.seed),
+        "seed_applied": bool(response.seed_applied),
+        "start_queued": bool(response.start_queued),
+    }
+    if not response.accepted:
+        raise RuntimeError(
+            f"snapshot capture reset rejected on attempt {attempt}: {response.message}"
+        )
+    return reset
+
+
+def _attempt_trajectory_path(
+    path: Path | None,
+    *,
+    attempt: int,
+    attempts: int,
+) -> Path | None:
+    if path is None:
+        return None
+    if attempts <= 1:
+        return path
+    suffix = path.suffix or ".jsonl"
+    return path.with_name(f"{path.stem}-attempt-{attempt:03d}{suffix}")
+
+
 async def _capture_stage(
     client: DoomAgentClient,
     config: SnapshotCaptureConfig,
@@ -263,9 +375,16 @@ async def _capture_stage(
     order: int,
     trajectory: Path,
     run_id: str,
+    attempt: int = 1,
+    global_record_index: int | None = None,
 ) -> dict[str, Any]:
     selector = selectors[0]
     slot = config.save_slot_base + order
+    if slot < 0 or slot > MAX_NATIVE_SAVE_SLOT:
+        raise RuntimeError(
+            "native snapshot save slot range exhausted: "
+            f"requested slot {slot}, valid range is 0..{MAX_NATIVE_SAVE_SLOT}"
+        )
     description = f"{selector}-{line_index}"
     response = await client.save_snapshot(
         slot=slot,
@@ -276,6 +395,12 @@ async def _capture_stage(
         raise RuntimeError(
             f"snapshot save rejected for slot {slot}: {response.message}"
         )
+    if response.slot != slot:
+        raise RuntimeError(
+            "snapshot save slot was normalized by the server: "
+            f"requested {slot}, got {response.slot}; choose a save-slot-base "
+            f"that keeps all stages in 0..{MAX_NATIVE_SAVE_SLOT}"
+        )
     stage = _stage_from_record(
         record,
         line_index=line_index,
@@ -285,14 +410,20 @@ async def _capture_stage(
         trajectory=trajectory,
         name=config.name,
         snapshot_dir=config.snapshot_dir,
-        save_slot=slot,
+        save_slot=response.slot,
         capsule=config.capsule,
         microvm_id=config.microvm_id,
     )
     stage["validated"] = True
+    stage["evidence"]["capture_attempt"] = int(attempt)
+    stage["evidence"]["attempt_record_index"] = int(line_index)
+    if global_record_index is not None:
+        stage["evidence"]["global_record_index"] = int(global_record_index)
     stage["capture"] = {
         "schema": NATIVE_SNAPSHOT_CAPTURE_SCHEMA,
         "method": "grpc_save_snapshot",
+        "attempt": int(attempt),
+        "attempt_record_index": int(line_index),
         "slot": response.slot,
         "accepted": response.accepted,
         "save_queued": response.save_queued,
@@ -323,6 +454,7 @@ def _build_manifest(
     stages: list[dict[str, Any]],
     records_seen: int,
     skill_model_path: Path | None,
+    attempt_reports: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     source: dict[str, Any] = {
         "schema": SNAPSHOT_CAPTURE_SOURCE_SCHEMA,
@@ -333,6 +465,9 @@ def _build_manifest(
         },
         "save_slot_base": config.save_slot_base,
         "records_seen": records_seen,
+        "attempts": max(1, int(config.attempts)),
+        "max_states_per_attempt": int(config.max_states),
+        "reset_before_attempt": bool(config.reset_before_attempt),
         "generated_at_epoch_seconds": int(time.time()),
         "endpoint_host": safe_endpoint_host(config.endpoint),
         "memory_path": str(config.memory_path),
@@ -342,6 +477,16 @@ def _build_manifest(
         "snapshot_dir": str(config.snapshot_dir),
         "verify_loads": config.verify_loads,
     }
+    if attempt_reports is not None:
+        source["attempt_reports"] = attempt_reports
+    if config.reset_before_attempt:
+        source["reset"] = {
+            "schema": "restfuldoom.snapshot_capture_reset_config.v1",
+            "skill": int(config.reset_skill),
+            "episode": int(config.reset_episode),
+            "map": int(config.reset_map),
+            "seed_base": int(config.reset_seed_base),
+        }
     if skill_model_path is not None:
         source["skill_model_path"] = str(skill_model_path)
     return {
@@ -483,6 +628,15 @@ def _config_from_args(args: argparse.Namespace) -> SnapshotCaptureConfig:
     selectors = tuple(args.auto or ())
     if not selectors:
         raise ValueError("choose at least one --auto selector")
+    if args.attempts <= 0:
+        raise ValueError("--attempts must be positive")
+    max_requested_slot = int(args.save_slot_base) + len(selectors) - 1
+    if args.save_slot_base < 0 or max_requested_slot > MAX_NATIVE_SAVE_SLOT:
+        raise ValueError(
+            "--save-slot-base plus selected milestones must fit native slots "
+            f"0..{MAX_NATIVE_SAVE_SLOT}; requested range "
+            f"{args.save_slot_base}..{max_requested_slot}"
+        )
     return SnapshotCaptureConfig(
         endpoint=str(endpoint),
         token=token,
@@ -502,6 +656,12 @@ def _config_from_args(args: argparse.Namespace) -> SnapshotCaptureConfig:
         goal_preset=args.goal_preset,
         mission=args.mission,
         max_states=args.max_states,
+        attempts=args.attempts,
+        reset_before_attempt=args.reset_before_attempt,
+        reset_skill=args.reset_skill,
+        reset_episode=args.reset_episode,
+        reset_map=args.reset_map,
+        reset_seed_base=args.reset_seed_base,
         policy_id=args.policy_id,
         reconnect=not args.no_reconnect,
         max_reconnects=args.max_reconnects,
@@ -545,6 +705,24 @@ def _main(argv: list[str] | None = None) -> int:
         default="capture progressed-map bottleneck snapshots",
     )
     parser.add_argument("--max-states", type=int, default=12000)
+    parser.add_argument(
+        "--attempts",
+        type=int,
+        default=1,
+        help=(
+            "number of independent capture attempts to run; --max-states applies "
+            "to each attempt"
+        ),
+    )
+    parser.add_argument(
+        "--reset-before-attempt",
+        action="store_true",
+        help="queue a fast ResetEpisode before each capture attempt",
+    )
+    parser.add_argument("--reset-skill", type=int, default=2)
+    parser.add_argument("--reset-episode", type=int, default=1)
+    parser.add_argument("--reset-map", type=int, default=1)
+    parser.add_argument("--reset-seed-base", type=int, default=0)
     parser.add_argument("--policy-id", default="snapshot_capture_brain")
     parser.add_argument("--no-reconnect", action="store_true")
     parser.add_argument("--max-reconnects", type=int, default=5)
@@ -569,6 +747,7 @@ def _main(argv: list[str] | None = None) -> int:
                 "output": str(config.output_path),
                 "stage_count": len(manifest["stages"]),
                 "selectors": list(config.auto_selectors),
+                "attempts": config.attempts,
                 "validation_valid": manifest.get("validation", {}).get("valid"),
             },
             sort_keys=True,
