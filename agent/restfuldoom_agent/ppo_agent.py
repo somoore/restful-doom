@@ -109,6 +109,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     "required_kills": args.required_kills,
                     "first_visible_bonus": args.first_visible_bonus,
                     "first_shootable_bonus": args.first_shootable_bonus,
+                    "visible_contact_progress_reward": args.visible_contact_progress_reward,
                     "terminate_on_first_visible": args.terminate_on_first_visible,
                     "terminate_on_first_shootable": args.terminate_on_first_shootable,
                 },
@@ -143,6 +144,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                         "required_kills": args.required_kills,
                         "first_visible_bonus": args.first_visible_bonus,
                         "first_shootable_bonus": args.first_shootable_bonus,
+                        "visible_contact_progress_reward": args.visible_contact_progress_reward,
                         "terminate_on_first_visible": args.terminate_on_first_visible,
                         "terminate_on_first_shootable": args.terminate_on_first_shootable,
                     },
@@ -216,6 +218,7 @@ async def evaluate(args: argparse.Namespace) -> dict[str, object]:
         reset_warmup_until_shootable=args.reset_warmup_until_shootable,
         first_visible_bonus=args.first_visible_bonus,
         first_shootable_bonus=args.first_shootable_bonus,
+        visible_contact_progress_reward=args.visible_contact_progress_reward,
         terminate_on_first_visible=args.terminate_on_first_visible,
         terminate_on_first_shootable=args.terminate_on_first_shootable,
     )
@@ -303,6 +306,7 @@ def _env_config_for_start(
         reset_warmup_until_shootable=args.reset_warmup_until_shootable,
         first_visible_bonus=args.first_visible_bonus,
         first_shootable_bonus=args.first_shootable_bonus,
+        visible_contact_progress_reward=args.visible_contact_progress_reward,
         terminate_on_first_visible=args.terminate_on_first_visible,
         terminate_on_first_shootable=args.terminate_on_first_shootable,
     )
@@ -579,6 +583,22 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
             ),
             4,
         ),
+        "visible_contact_distance_delta": round(
+            sum(
+                float(record.info.get("visible_contact_distance_delta", 0.0))
+                for record in records
+                if isinstance(record.info, dict)
+            ),
+            4,
+        ),
+        "visible_contact_progress_reward": round(
+            sum(
+                float(record.info.get("visible_contact_progress_reward", 0.0))
+                for record in records
+                if isinstance(record.info, dict)
+            ),
+            4,
+        ),
         "route_attempt_steps": sum(1 for outcome in route_outcomes if outcome.get("attempted")),
         "route_reached_steps": sum(1 for outcome in route_outcomes if outcome.get("reached")),
         "route_failed_steps": sum(1 for outcome in route_outcomes if outcome.get("failed")),
@@ -664,6 +684,7 @@ def main() -> None:
     parser.add_argument("--reset-warmup-until-shootable", action="store_true")
     parser.add_argument("--first-visible-bonus", type=float, default=0.0)
     parser.add_argument("--first-shootable-bonus", type=float, default=0.0)
+    parser.add_argument("--visible-contact-progress-reward", type=float, default=0.0)
     parser.add_argument("--terminate-on-first-visible", action="store_true")
     parser.add_argument("--terminate-on-first-shootable", action="store_true")
     parser.add_argument("--updates", type=int, default=1)

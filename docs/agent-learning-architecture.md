@@ -343,12 +343,31 @@ The environment now also supports a first-contact curriculum:
   episode.
 - `first_shootable_bonus` rewards the first shootable enemy target in an
   episode.
+- `visible_contact_progress_reward` optionally rewards positive distance
+  progress toward the nearest visible, living, non-shootable enemy. It is
+  computed from protobuf enemy ids and `distance_fp` across adjacent macro-step
+  ticks, then reported as `visible_contact_distance_delta` and
+  `visible_contact_progress_reward` in rollout summaries.
 - `terminate_on_first_visible` and `terminate_on_first_shootable` can end that
   curriculum episode as soon as the contact objective is reached.
 
 This does not change promotion. A first-contact checkpoint is useful only as a
 navigation curriculum artifact; promotion still requires level completion and
 kills against the deterministic baseline.
+
+The visible-contact progress reward is a narrow bridge from "the protobuf stream
+can see the monster" to "the learner gets feedback for moving into a position
+where combat can begin." It is not a substitute for richer observation. If this
+reward produces positive distance deltas without first-shootable contacts, the
+next missing observation is likely topology or progressed-map state, not another
+scalar reward.
+
+The named `e1m1-contact-to-combat` curriculum trains the next boundary
+directly. Its early stages are fresh-reset visible-contact positions validated
+from `ppo-first-visible-train`; they begin with line-of-sight enemy contact but
+no shootable target. The final stage is the known shootable `combat_start`.
+This lets PPO collect many contact-to-shootable attempts without replaying the
+full spawn route every episode.
 
 The next observation upgrades should be staged rather than speculative:
 
@@ -515,6 +534,16 @@ Recent PPO evidence:
   shootable mask to include `seek_enemy` gives PPO another legal option at
   contact, but live forced-action and widened-mask probes still did not reach
   shootable contact.
+- The contact starts from `ppo-first-visible-train` were validated as fresh
+  `ResetEpisode` starts with `visible_enemy_on_reset=true` and
+  `shootable_target_on_reset=false`, so unlike earlier trajectory route starts
+  they are safe to use in a named fresh-reset curriculum.
+- `ppo-contact-progress-probe`: added dense visible-contact distance progress
+  and ran two updates over `e1m1-contact-to-combat`. The run confirmed the new
+  reward and summary fields work (`visible_contact_distance_delta=64.714` then
+  `6.6995`), but still produced zero first-shootable contacts, zero damage, and
+  zero kills. This narrows the next gap to topology/progressed-state context or
+  a stronger contact primitive rather than missing scalar feedback.
 
 ## Next Architecture Work
 

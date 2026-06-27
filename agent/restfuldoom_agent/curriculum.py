@@ -105,7 +105,84 @@ E1M1_SPAWN_TO_COMBAT_STAGES: list[CurriculumStage] = [
     ),
 ]
 
+E1M1_CONTACT_TO_COMBAT_STAGES: list[CurriculumStage] = [
+    CurriculumStage(
+        index=0,
+        name="visible_contact_fast",
+        reset_start={
+            "x_fp": 84138436,
+            "y_fp": -204540457,
+            "health": 100,
+            "armor": 0,
+            "ammo_bullets": 50,
+            "face_nearest_enemy": True,
+        },
+        note="Fresh-reset visible-contact point reached early by first-visible PPO curriculum.",
+        evidence={
+            "fresh_reset_validated": True,
+            "visible_enemy_on_reset": True,
+            "shootable_target_on_reset": False,
+            "source_run": "ppo-first-visible-train-buffer-0003",
+            "source_record_index": 47,
+            "doom_units": {"x": 1283.85, "y": -3121.04},
+        },
+    ),
+    CurriculumStage(
+        index=1,
+        name="visible_contact_route",
+        reset_start={
+            "x_fp": 84355741,
+            "y_fp": -204445474,
+            "health": 100,
+            "armor": 0,
+            "ammo_bullets": 50,
+            "face_nearest_enemy": True,
+        },
+        note="Fresh-reset visible-contact point from first-visible route-progress rollout.",
+        evidence={
+            "fresh_reset_validated": True,
+            "visible_enemy_on_reset": True,
+            "shootable_target_on_reset": False,
+            "source_run": "ppo-first-visible-train-buffer-0000",
+            "source_record_index": 238,
+            "doom_units": {"x": 1287.17, "y": -3119.59},
+        },
+    ),
+    CurriculumStage(
+        index=2,
+        name="visible_contact_seek",
+        reset_start={
+            "x_fp": 82784606,
+            "y_fp": -204304576,
+            "health": 100,
+            "armor": 0,
+            "ammo_bullets": 50,
+            "face_nearest_enemy": True,
+        },
+        note="Fresh-reset visible-contact point from first-visible seek rollout.",
+        evidence={
+            "fresh_reset_validated": True,
+            "visible_enemy_on_reset": True,
+            "shootable_target_on_reset": False,
+            "source_run": "ppo-first-visible-train-buffer-0001",
+            "source_record_index": 237,
+            "doom_units": {"x": 1263.19, "y": -3117.44},
+        },
+    ),
+    CurriculumStage(
+        index=3,
+        name="combat_start",
+        reset_start=E1M1_SPAWN_TO_COMBAT_STAGES[0].reset_start,
+        note="Known shootable combat start used as the bridge target after visible-contact starts.",
+        evidence={
+            **(E1M1_SPAWN_TO_COMBAT_STAGES[0].evidence or {}),
+            "bridge_target": "shootable combat",
+        },
+    ),
+]
+
 CURRICULUM_PRESETS: dict[str, list[CurriculumStage]] = {
+    "e1m1-contact-to-combat": E1M1_CONTACT_TO_COMBAT_STAGES,
     "e1m1-spawn-to-combat": E1M1_SPAWN_TO_COMBAT_STAGES,
 }
 

@@ -294,10 +294,11 @@ The training API is:
   delta, enemy-distance trend, route-distance trend, same-cell streak, recent
   visible/shootable contact, and rolling route failure/progress signals.
 - `--first-visible-bonus`, `--first-shootable-bonus`,
-  `--terminate-on-first-visible`, and `--terminate-on-first-shootable` enable
-  a first-contact curriculum for true-spawn training. This trains route-to-first
-  combat separately without weakening the promotion gate for full-level
-  completion and kills.
+  `--visible-contact-progress-reward`, `--terminate-on-first-visible`, and
+  `--terminate-on-first-shootable` enable first-contact and
+  contact-to-shootable curricula. This trains route-to-first-combat and
+  visible-contact closing separately without weakening the promotion gate for
+  full-level completion and kills.
 - Checkpoints and rollout buffers carry `restfuldoom.observation.v1` and
   `restfuldoom.skill_action.v1`, including feature descriptors and
   machine-readable definitions for each PPO skill.
@@ -379,6 +380,31 @@ validation evidence for the reset start. Trajectory-derived first-contact
 coordinates are intentionally not in this curriculum because a fresh
 `ResetEpisode` does not restore opened doors, enemy movement, or other
 progressed-map mutations.
+
+`e1m1-contact-to-combat` is a second named curriculum for the current
+contact-to-shootable bottleneck. It rotates through fresh-reset positions that
+start with a visible enemy but no shootable target, then bridges back to the
+known shootable `combat_start`. Use it with `--first-shootable-bonus` and
+`--terminate-on-first-shootable` to train the contact boundary directly. Add
+`--visible-contact-progress-reward` when the learner needs dense feedback for
+closing distance to a visible but not yet shootable enemy.
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
+    --endpoint 127.0.0.1:50051 \
+    --goal-preset navigation \
+    --updates 4 \
+    --rollout-steps 256 \
+    --checkpoint-dir agent_models/ppo \
+    --buffer-dir trajectories/ppo \
+    --memory-path agent_memory/e1m1.json \
+    --resume-checkpoint agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0007.pt \
+    --curriculum e1m1-contact-to-combat \
+    --curriculum-mode round_robin \
+    --first-shootable-bonus 20 \
+    --visible-contact-progress-reward 0.01 \
+    --terminate-on-first-shootable
+```
 
 Continue from an existing PPO checkpoint:
 

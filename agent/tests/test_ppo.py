@@ -310,6 +310,27 @@ def test_named_curriculum_selects_e1m1_stages():
     assert spawn["evidence"]["shootable_target_on_reset"] is False
 
 
+def test_named_curriculum_selects_contact_to_combat_stages():
+    curriculum = build_curriculum(
+        name="e1m1-contact-to-combat",
+        manual_reset_start={},
+        mode="round_robin",
+        start_index=0,
+        seed=7,
+    )
+
+    visible = stage_for_update(curriculum, 0)
+    combat = stage_for_update(curriculum, 3)
+
+    assert curriculum["schema"] == "restfuldoom.ppo_curriculum.v1"
+    assert visible["name"] == "visible_contact_fast"
+    assert visible["evidence"]["visible_enemy_on_reset"] is True
+    assert visible["evidence"]["shootable_target_on_reset"] is False
+    assert visible["reset_start"]["face_nearest_enemy"] is True
+    assert combat["name"] == "combat_start"
+    assert combat["evidence"]["shootable_target_on_reset"] is True
+
+
 def test_curriculum_rejects_manual_start_mix():
     with pytest.raises(ValueError, match="cannot be combined"):
         build_curriculum(
@@ -406,6 +427,8 @@ def test_rollout_summary_counts_first_contact_events():
             "first_visible_contact": True,
             "first_shootable_contact": False,
             "contact_reward": 3.0,
+            "visible_contact_distance_delta": 16.0,
+            "visible_contact_progress_reward": 0.16,
             "transition": {},
             "state": {"health": 100, "kills": 0},
         },
@@ -425,6 +448,8 @@ def test_rollout_summary_counts_first_contact_events():
             "first_visible_contact": False,
             "first_shootable_contact": True,
             "contact_reward": 5.0,
+            "visible_contact_distance_delta": 8.0,
+            "visible_contact_progress_reward": 0.08,
             "transition": {},
             "state": {"health": 100, "kills": 0},
         },
@@ -437,6 +462,8 @@ def test_rollout_summary_counts_first_contact_events():
     assert summary["first_visible_contacts"] == 1
     assert summary["first_shootable_contacts"] == 1
     assert summary["contact_reward"] == 8.0
+    assert summary["visible_contact_distance_delta"] == 24.0
+    assert summary["visible_contact_progress_reward"] == 0.24
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")

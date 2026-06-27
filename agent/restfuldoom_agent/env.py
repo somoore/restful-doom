@@ -16,6 +16,7 @@ from .brain import (
     AgentMemory,
     BrainPolicy,
     BrainPolicyParams,
+    MANUAL_USE_LINE_SPECIALS,
     extract_features,
     raw_ticcmd_action,
 )
@@ -80,6 +81,7 @@ class DoomEnvConfig:
     route_failure_penalty: float = 0.03
     first_visible_bonus: float = 0.0
     first_shootable_bonus: float = 0.0
+    visible_contact_progress_reward: float = 0.0
     terminate_on_first_visible: bool = False
     terminate_on_first_shootable: bool = False
 
@@ -382,6 +384,10 @@ class SkillController:
             mask["engage"] = True
             if shootable is None and self.policy._select_known_enemy(features) is not None:
                 mask["seek_enemy"] = True
+            if shootable is None and self._contact_route_waypoint(features) is not None:
+                mask["route_progression"] = True
+            if shootable is None and self._contact_use_line(features) is not None:
+                mask["open_use_line"] = True
             nearest_visible = min(
                 (float(enemy["distance"]) for enemy in features.visible_enemies),
                 default=99999.0,
@@ -448,6 +454,15 @@ class SkillController:
             )
 
         if skill == "seek_enemy":
+            enemy = features.visible_enemies[0] if features.visible_enemies else None
+            if enemy is not None:
+                return self.policy._turn_toward_or_move(
+                    features,
+                    enemy["angle_delta"],
+                    "ppo_seek_visible_enemy",
+                    stuck,
+                    enemy=enemy,
+                )
             enemy = self.policy._select_known_enemy(features)
             if enemy is not None:
                 return self.policy._turn_toward_or_move(
@@ -461,6 +476,8 @@ class SkillController:
 
         if skill == "open_use_line":
             line = self.policy._select_nearby_use_line(features)
+            if line is None:
+                line = self._contact_use_line(features)
             if line is not None:
                 return self.policy._use_nearby_line(features, line, stuck)
             ray = self.policy._select_use_ray(features)
@@ -474,6 +491,8 @@ class SkillController:
 
         if skill == "route_progression":
             line = self.policy._select_progression_line(features)
+            if line is None:
+                line = self._contact_route_waypoint(features)
             if line is not None:
                 return self.policy._advance_progression_line(features, line, stuck)
             return self.policy._explore(features, stuck)
@@ -510,6 +529,45 @@ class SkillController:
             )
 
         return self.policy._explore(features, stuck)
+
+    def _contact_route_waypoint(self, features: Any) -> dict[str, Any] | None:
+        """Returns a route waypoint usable for visible-but-not-shootable contact."""
+        if not features.visible_enemies or self.policy._shootable_enemy(features) is not None:
+            return None
+        route = features.navigation.get("route_waypoint", {})
+        if not isinstance(route, dict):
+            return None
+        line = route.get("line", {})
+        if not isinstance(line, dict) or int(line.get("line_id", 0)) <= 0:
+            return None
+        if float(line.get("distance", 999999.0)) > 2600.0:
+            return None
+        return line
+
+    def _contact_use_line(self, features: Any) -> dict[str, Any] | None:
+        """Returns a manual line worth approaching during visible contact."""
+        if not features.visible_enemies or self.policy._shootable_enemy(features) is not None:
+            return None
+        candidates = []
+        for line in features.navigation.get("use_lines", []):
+            if int(line.get("special", 0)) not in MANUAL_USE_LINE_SPECIALS:
+                continue
+            if float(line.get("distance", 999999.0)) > 800.0:
+                continue
+            if abs(float(line.get("angle_delta", 999.0))) > 75.0:
+                continue
+            if self.policy._is_line_blocked(features, line):
+                continue
+            candidates.append(line)
+        if not candidates:
+            return None
+        return min(
+            candidates,
+            key=lambda line: (
+                abs(float(line.get("angle_delta", 999.0))),
+                float(line.get("distance", 999999.0)),
+            ),
+        )
 
 
 class DoomAgentEnv:
@@ -654,6 +712,8 @@ class DoomAgentEnv:
         first_visible_contact = False
         first_shootable_contact = False
         contact_reward = 0.0
+        visible_contact_distance_delta = 0.0
+        visible_contact_progress_reward = 0.0
         transition_summaries: list[dict[str, Any]] = []
         for _ in range(action_tics):
             tick_previous = current
@@ -665,6 +725,12 @@ class DoomAgentEnv:
             done, reason, reward = self._terminal_reward(tick_previous, current, transition)
             total_reward += reward
             transition_summaries.append(_transition_summary(transition))
+            contact_delta = _visible_contact_distance_delta(tick_previous, current)
+            if contact_delta:
+                visible_contact_distance_delta += contact_delta
+                progress_reward = self._visible_contact_progress_reward(contact_delta)
+                visible_contact_progress_reward += progress_reward
+                total_reward += progress_reward
             if done:
                 break
             contact = self._contact_reward(current)
@@ -713,6 +779,8 @@ class DoomAgentEnv:
                 "combat_action_reward": combat_action_reward,
                 "route_action_reward": route_action_reward,
                 "contact_reward": contact_reward,
+                "visible_contact_distance_delta": round(visible_contact_distance_delta, 4),
+                "visible_contact_progress_reward": round(visible_contact_progress_reward, 4),
                 "had_visible_enemy": had_visible_enemy,
                 "route_outcome": route_outcome,
                 "had_shootable_target": had_shootable_target,
@@ -779,6 +847,12 @@ class DoomAgentEnv:
             "first_visible": first_visible,
             "first_shootable": first_shootable,
         }
+
+    def _visible_contact_progress_reward(self, distance_delta: float) -> float:
+        if self.config.visible_contact_progress_reward == 0.0:
+            return 0.0
+        reward = distance_delta * self.config.visible_contact_progress_reward
+        return max(-1.0, min(1.0, reward))
 
     async def _ensure_stream(self) -> None:
         if self.client is None:
@@ -964,6 +1038,67 @@ def _has_visible_enemy(state: Any) -> bool:
         if bool(getattr(enemy, "line_of_sight", False)):
             return True
     return False
+
+
+def _visible_contact_distance_delta(previous: Any, current: Any) -> float:
+    """Returns positive Doom-unit distance gained toward a visible, non-shootable enemy."""
+    if _has_shootable_enemy(previous) or not _has_visible_enemy(previous):
+        return 0.0
+    target = _nearest_visible_enemy(previous)
+    if target is None:
+        return 0.0
+    target_id, previous_distance = target
+    if target_id <= 0 or previous_distance <= 0.0:
+        return 0.0
+    current_distance = _enemy_distance_by_id(current, target_id)
+    if current_distance <= 0.0:
+        return 0.0
+    return previous_distance - current_distance
+
+
+def _nearest_visible_enemy(state: Any) -> tuple[int, float] | None:
+    candidates: list[tuple[float, int]] = []
+    for enemy in getattr(state, "enemies", []) or []:
+        if not bool(getattr(enemy, "line_of_sight", False)):
+            continue
+        obj = getattr(enemy, "object", None)
+        if obj is None or int(getattr(obj, "health", 0)) <= 0:
+            continue
+        enemy_id = int(getattr(obj, "id", 0))
+        distance = _enemy_distance_units(state, enemy)
+        if enemy_id > 0 and distance > 0.0:
+            candidates.append((distance, enemy_id))
+    if not candidates:
+        return None
+    distance, enemy_id = min(candidates, key=lambda item: item[0])
+    return enemy_id, distance
+
+
+def _enemy_distance_by_id(state: Any, enemy_id: int) -> float:
+    for enemy in getattr(state, "enemies", []) or []:
+        obj = getattr(enemy, "object", None)
+        if obj is None or int(getattr(obj, "id", 0)) != enemy_id:
+            continue
+        if int(getattr(obj, "health", 0)) <= 0:
+            return 0.0
+        return _enemy_distance_units(state, enemy)
+    return 0.0
+
+
+def _enemy_distance_units(state: Any, enemy: Any) -> float:
+    obj = getattr(enemy, "object", None)
+    if obj is None:
+        return 0.0
+    distance_fp = float(getattr(obj, "distance_fp", 0) or 0)
+    if distance_fp > 0.0:
+        return distance_fp / 65536.0
+    player_x, player_y = _player_xy_units(state)
+    position = getattr(obj, "position", None)
+    if position is None:
+        return 0.0
+    enemy_x = float(getattr(position, "x_fp", 0)) / 65536.0
+    enemy_y = float(getattr(position, "y_fp", 0)) / 65536.0
+    return ((player_x - enemy_x) ** 2 + (player_y - enemy_y) ** 2) ** 0.5
 
 
 def _route_outcome(skill: str, previous: Any, current: Any) -> dict[str, Any]:

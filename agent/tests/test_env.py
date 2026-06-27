@@ -143,10 +143,14 @@ def test_skill_controller_action_mask_uses_affordances():
     controller = SkillController()
     combat_state = _state(enemy=True, combat=True)
     visible_not_shootable_state = _state(enemy=True, combat=False)
+    visible_route_state = _state(enemy=True, combat=False, route=True)
+    visible_use_state = _state(enemy=True, combat=False, contact_use=True)
     quiet_state = _state(enemy=False, combat=False)
 
     combat_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(combat_state)))
     visible_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(visible_not_shootable_state)))
+    visible_route_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(visible_route_state)))
+    visible_use_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(visible_use_state)))
     quiet_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(quiet_state)))
 
     assert combat_mask["fire"]
@@ -158,7 +162,37 @@ def test_skill_controller_action_mask_uses_affordances():
     assert not visible_mask["fire"]
     assert visible_mask["engage"]
     assert visible_mask["seek_enemy"]
+    assert visible_route_mask["route_progression"]
+    assert visible_use_mask["open_use_line"]
     assert quiet_mask["route_progression"]
+
+
+def test_skill_controller_contact_actions_use_visible_enemy_and_route_waypoint():
+    controller = SkillController()
+    state = _state(enemy=True, combat=False, route=True, contact_use=True)
+
+    _seek_action, seek_decision = controller.action_for(SKILL_ACTIONS.index("seek_enemy"), state)
+    _route_action, route_decision = controller.action_for(
+        SKILL_ACTIONS.index("route_progression"),
+        state,
+    )
+    _use_action, use_decision = controller.action_for(
+        SKILL_ACTIONS.index("open_use_line"),
+        state,
+    )
+
+    assert seek_decision["skill"] == "ppo_seek_visible_enemy"
+    assert seek_decision["enemy"]["id"] == 7
+    assert route_decision["ppo_skill"] == "route_progression"
+    assert route_decision["skill"] in {
+        "approach_progression_line",
+        "cross_progression_line",
+        "turn_to_progression_line",
+        "route_to_progression_line",
+        "use_progression_line",
+    }
+    assert use_decision["ppo_skill"] == "open_use_line"
+    assert use_decision["use_line"]["line_id"] == 151
 
 
 def test_skill_controller_observation_includes_sector_and_route_features():
@@ -345,6 +379,35 @@ def test_doom_agent_env_rewards_and_terminates_on_first_shootable_target():
     assert step.reward == pytest.approx(5.0 - 0.05)
 
 
+def test_doom_agent_env_rewards_visible_contact_distance_progress():
+    first = _state(tick=1, enemy=True, combat=False, enemy_distance=512)
+    second = _state(tick=2, enemy=True, combat=False, enemy_distance=384)
+    client = _DurationAwareFakeClient([first, second])
+    env = DoomAgentEnv(
+        DoomEnvConfig(
+            max_steps=10,
+            goal_preset="custom",
+            max_action_tics=1,
+            visible_contact_progress_reward=0.001,
+        ),
+        client=client,
+        controller=_FixedDurationController(duration_tics=1),
+    )
+
+    async def run():
+        await env.reset(seed=5)
+        step = await env.step(0)
+        await env.close()
+        return step
+
+    step = asyncio.run(run())
+
+    assert not step.done
+    assert step.info["visible_contact_distance_delta"] == pytest.approx(128.0)
+    assert step.info["visible_contact_progress_reward"] == pytest.approx(0.128)
+    assert step.reward == pytest.approx(0.128)
+
+
 def test_doom_agent_env_records_route_outcome_and_reward():
     first = _state(tick=1, route=True, x_units=0)
     second = _state(tick=2, route=True, x_units=128)
@@ -494,6 +557,7 @@ def _state(
     enemy_distance=256,
     hazard=False,
     route=False,
+    contact_use=False,
     x_units=0,
     y_units=0,
 ):
@@ -562,6 +626,20 @@ def _state(
         ),
         route_waypoint=None,
     )
+    if contact_use:
+        navigation.use_lines = [
+            SimpleNamespace(
+                line_id=151,
+                midpoint=SimpleNamespace(x_fp=640 * 65536, y_fp=0, z_fp=0),
+                start=SimpleNamespace(x_fp=640 * 65536, y_fp=-64 * 65536, z_fp=0),
+                end=SimpleNamespace(x_fp=640 * 65536, y_fp=64 * 65536, z_fp=0),
+                nearest_point=SimpleNamespace(x_fp=640 * 65536, y_fp=0, z_fp=0),
+                special=1,
+                tag=0,
+                distance_fp=640 * 65536,
+                nearest_distance_fp=640 * 65536,
+            )
+        ]
     if route:
         route_distance_units = abs(512 - x_units)
         route_line = SimpleNamespace(
