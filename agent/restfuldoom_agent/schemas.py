@@ -33,6 +33,10 @@ ACTION_HISTORY_FEATURE_NAMES = [
     "failed_route_attempt_count_norm",
 ]
 
+PRE_FRONTIER_TACTICAL_FEATURE_NAMES = [
+    name for name in TACTICAL_FEATURE_NAMES if name != "topology_frontier_count_norm"
+]
+
 TEMPORAL_CONTEXT_FEATURE_NAMES = [
     "delta_x_norm",
     "delta_y_norm",
@@ -259,6 +263,21 @@ def pad_observation_features(features: list[float]) -> list[float]:
     """Pad older tactical-only feature rows to the current PPO observation contract."""
     if len(features) == len(PPO_FEATURE_NAMES):
         return list(features)
+    if len(features) == len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES):
+        return [
+            *_insert_neutral_tactical_features(features),
+            *encode_action_history_features(
+                previous_action_index=None,
+                previous_had_shootable_target=False,
+                same_skill_streak=0,
+                previous_route_progression=False,
+                previous_route_progress_units=0.0,
+                route_waypoint_reached_recently=False,
+                route_waypoint_failed_recently=False,
+                failed_route_attempt_count=0,
+            ),
+            *encode_temporal_context_features(),
+        ]
     if len(features) == len(TACTICAL_FEATURE_NAMES):
         return [
             *features,
@@ -275,17 +294,46 @@ def pad_observation_features(features: list[float]) -> list[float]:
             *encode_temporal_context_features(),
         ]
     legacy_action_history_len = len(TACTICAL_FEATURE_NAMES) + len(ACTION_HISTORY_FEATURE_NAMES)
+    pre_frontier_action_history_len = (
+        len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES) + len(ACTION_HISTORY_FEATURE_NAMES)
+    )
+    if len(features) == pre_frontier_action_history_len:
+        return [
+            *_insert_neutral_tactical_features(features[: len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)]),
+            *features[len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES) :],
+            *encode_temporal_context_features(),
+        ]
     if len(features) == legacy_action_history_len:
         return [
             *features,
             *encode_temporal_context_features(),
         ]
+    pre_frontier_ppo_len = (
+        len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)
+        + len(ACTION_HISTORY_FEATURE_NAMES)
+        + len(TEMPORAL_CONTEXT_FEATURE_NAMES)
+    )
+    if len(features) == pre_frontier_ppo_len:
+        return [
+            *_insert_neutral_tactical_features(features[: len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)]),
+            *features[len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES) :],
+        ]
     raise ValueError(
         "feature vector length does not match tactical or PPO observation schema: "
         f"got {len(features)}, expected {len(TACTICAL_FEATURE_NAMES)}, "
-        f"{legacy_action_history_len}, or "
+        f"{len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)}, "
+        f"{legacy_action_history_len}, {pre_frontier_action_history_len}, "
+        f"{pre_frontier_ppo_len}, or "
         f"{len(PPO_FEATURE_NAMES)}"
     )
+
+
+def _insert_neutral_tactical_features(features: list[float]) -> list[float]:
+    """Insert neutral values for tactical features added after older checkpoints."""
+    values = list(features)
+    frontier_index = TACTICAL_FEATURE_NAMES.index("topology_frontier_count_norm")
+    values.insert(frontier_index, 0.0)
+    return values
 
 
 def _feature_descriptors(names: list[str], *, source: str) -> list[dict[str, Any]]:
@@ -336,6 +384,7 @@ def _feature_meaning(name: str) -> str:
         "nav_open_probe_ratio": "Fraction of direction probes that are open.",
         "nav_use_probe_ratio": "Fraction of direction probes with use lines.",
         "nav_best_open_angle_norm": "Closest open probe angle normalized by 90 degrees.",
+        "topology_frontier_count_norm": "Open direction probes that lead to unseen or low-visit nearby cells, normalized by probe count.",
         "has_use_line": "At least one nearby use line is available.",
         "use_line_distance_norm": "Nearest use-line distance normalized by 1600 Doom units.",
         "use_line_angle_sin": "Sine of angle to nearest use line.",
@@ -390,7 +439,7 @@ OBSERVATION_SCHEMA = {
     "source_groups": [
         {
             "name": "protobuf_state",
-            "producer": "Doom gRPC GameState",
+            "producer": "Doom gRPC GameState plus AgentMemory for topology frontier count",
             "features": [
                 "health_norm",
                 "ammo_norm",
@@ -410,6 +459,7 @@ OBSERVATION_SCHEMA = {
                 "nav_left_open",
                 "nav_right_open",
                 "nav_use_line_ahead",
+                "topology_frontier_count_norm",
                 "has_use_line",
                 "sector_damaging",
                 "sector_damage_norm",
@@ -485,6 +535,7 @@ OBSERVATION_SCHEMA = {
             "current live state must expose local combat and navigation affordances",
             "memory queries must preserve useful target context after line of sight drops",
             "macro-action history must show whether the last selected skill helped or failed",
+            "frontier count should expose nearby open directions that memory has not exhausted",
             "temporal context must distinguish progress from stationary loops",
             "reset metadata must say whether a state is fresh, warmed up, or snapshot-restored",
         ],
@@ -493,6 +544,7 @@ OBSERVATION_SCHEMA = {
             "memory-derived enemy recall gives PPO a target when line of sight is lost",
             "macro-action history tells PPO whether it just ignored or used a shootable target",
             "current-sector hazard fields tell PPO when navigation is causing floor damage",
+            "topology frontier count tells PPO when open probes lead to low-visit nearby cells",
             "route-waypoint fields give spawn-to-contact training an explicit progression target",
             "route-outcome history tells PPO whether the last progression decision reached, stalled, or moved toward its waypoint",
             "bounded temporal features expose recent movement, enemy-distance, route-distance, and shootable-contact trends",
@@ -506,7 +558,6 @@ OBSERVATION_SCHEMA = {
         "next_feature_candidates": [
             "recent_damage_window_norm",
             "enemy_projectile_threat_norm",
-            "topology_frontier_count_norm",
             "route_waypoint_repeat_count_norm",
         ],
         "upgrade_queue": [
@@ -933,6 +984,14 @@ ACTION_SCHEMA = {
                 "meaning": (
                     "visible-but-not-shootable contact exposes engage, seek_enemy, "
                     "and contact use-line actions when those affordances exist"
+                ),
+            },
+            {
+                "name": "recent_contact_route_backoff",
+                "meaning": (
+                    "after visible contact drops, repeated failed route_progression "
+                    "macro-steps suppress route sampling while engage/seek contact "
+                    "recovery is still available"
                 ),
             },
         ],

@@ -5,6 +5,7 @@ import pytest
 
 from restfuldoom_agent.client import EpisodeReset
 from restfuldoom_agent.client import agent_pb2
+from restfuldoom_agent.brain import AgentMemory
 from restfuldoom_agent.env import DoomAgentEnv, DoomEnvConfig, SKILL_ACTIONS, SkillController
 from restfuldoom_agent.schemas import OBSERVATION_SCHEMA
 
@@ -266,6 +267,119 @@ def test_skill_controller_recent_contact_mask_suppresses_generic_route():
     assert not mask["route_progression"]
 
 
+def test_skill_controller_recent_visible_contact_suppresses_generic_route():
+    controller = SkillController()
+    first = _state(tick=5, enemy=True, combat=False)
+    second = _state(
+        tick=20,
+        enemy=True,
+        enemy_line_of_sight=False,
+        combat=False,
+    )
+    expired = _state(
+        tick=500,
+        enemy=True,
+        enemy_line_of_sight=False,
+        combat=False,
+    )
+
+    controller.action_mask(first)
+    contact_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(second)))
+    expired_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(expired)))
+
+    assert contact_mask["engage"]
+    assert contact_mask["seek_enemy"]
+    assert not contact_mask["route_progression"]
+    assert expired_mask["route_progression"]
+
+
+def test_skill_controller_recent_contact_route_failures_suppress_progression_line():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    first = _state(tick=5, kills=1, enemy=True, combat=False)
+    route_state = _state(
+        tick=20,
+        kills=1,
+        enemy=True,
+        enemy_line_of_sight=False,
+        combat=False,
+        route=True,
+    )
+    route_index = SKILL_ACTIONS.index("route_progression")
+
+    controller.action_mask(first)
+    before_failures = dict(zip(SKILL_ACTIONS, controller.action_mask(route_state)))
+    controller.record_action_history(
+        action_index=route_index,
+        had_shootable_target=False,
+        route_outcome={
+            "attempted": True,
+            "progress_units": -8.0,
+            "reached": False,
+            "failed": True,
+        },
+    )
+    after_failure = dict(zip(SKILL_ACTIONS, controller.action_mask(route_state)))
+    combat_state = _state(
+        tick=22,
+        kills=1,
+        enemy=True,
+        enemy_line_of_sight=True,
+        combat=True,
+        route=True,
+    )
+    combat_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(combat_state)))
+
+    assert before_failures["route_progression"]
+    assert after_failure["engage"]
+    assert after_failure["seek_enemy"]
+    assert not after_failure["route_progression"]
+    assert combat_mask["fire"]
+    assert not combat_mask["route_progression"]
+
+
+def test_skill_controller_successful_route_outcome_resets_contact_route_backoff():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    first = _state(tick=5, kills=1, enemy=True, combat=False)
+    route_state = _state(
+        tick=20,
+        kills=1,
+        enemy=True,
+        enemy_line_of_sight=False,
+        combat=False,
+        route=True,
+    )
+    route_index = SKILL_ACTIONS.index("route_progression")
+
+    controller.action_mask(first)
+    controller.record_action_history(
+        action_index=route_index,
+        had_shootable_target=False,
+        route_outcome={
+            "attempted": True,
+            "progress_units": -8.0,
+            "reached": False,
+            "failed": True,
+        },
+    )
+    suppressed = dict(zip(SKILL_ACTIONS, controller.action_mask(route_state)))
+    controller.record_action_history(
+        action_index=route_index,
+        had_shootable_target=False,
+        route_outcome={
+            "attempted": True,
+            "progress_units": 32.0,
+            "reached": False,
+            "failed": False,
+        },
+    )
+    restored = dict(zip(SKILL_ACTIONS, controller.action_mask(route_state)))
+
+    assert not suppressed["route_progression"]
+    assert restored["route_progression"]
+
+
 def test_skill_controller_observation_includes_sector_and_route_features():
     controller = SkillController()
     state = _state(hazard=True, route=True)
@@ -279,6 +393,29 @@ def test_skill_controller_observation_includes_sector_and_route_features():
     assert features["route_waypoint_distance_norm"] > 0.0
     assert features["route_waypoint_angle_cos"] == pytest.approx(1.0)
     assert features["route_waypoint_walk_trigger"] == 1.0
+
+
+def test_skill_controller_observation_includes_topology_frontier_count(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    controller = SkillController(memory=memory)
+    state = _state(
+        direction_probes=[
+            {"angle_offset_degrees": 0, "open": True},
+            {"angle_offset_degrees": 90, "open": True},
+            {"angle_offset_degrees": -90, "open": True},
+        ],
+    )
+
+    open_frontier = dict(zip(OBSERVATION_SCHEMA["feature_names"], controller.observation(state)))
+    memory.data["cells"] = {
+        "1:0": {"visits": 3},
+        "0:1": {"visits": 3},
+        "0:-1": {"visits": 3},
+    }
+    exhausted = dict(zip(OBSERVATION_SCHEMA["feature_names"], controller.observation(state)))
+
+    assert open_frontier["topology_frontier_count_norm"] == pytest.approx(1.0)
+    assert exhausted["topology_frontier_count_norm"] == pytest.approx(0.0)
 
 
 def test_doom_agent_env_reset_sends_curriculum_start():
@@ -630,6 +767,7 @@ def _state(
     hazard=False,
     route=False,
     contact_use=False,
+    direction_probes=None,
     x_units=0,
     y_units=0,
 ):
@@ -700,6 +838,17 @@ def _state(
         ),
         route_waypoint=None,
     )
+    if direction_probes is not None:
+        navigation.direction_probes = [
+            SimpleNamespace(
+                angle_offset_degrees=probe["angle_offset_degrees"],
+                open=probe.get("open", True),
+                block_distance_fp=int(probe.get("block_distance", 128) * 65536),
+                blocking_line_special=probe.get("blocking_line_special", 0),
+                use_line_ahead=probe.get("use_line_ahead", False),
+            )
+            for probe in direction_probes
+        ]
     if contact_use:
         navigation.use_lines = [
             SimpleNamespace(
@@ -727,6 +876,7 @@ def _state(
             distance_fp=route_distance_units * 65536,
             nearest_distance_fp=route_distance_units * 65536,
         )
+        navigation.use_lines.append(route_line)
         navigation.route_waypoint = SimpleNamespace(
             line=route_line,
             priority=0,

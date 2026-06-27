@@ -140,6 +140,29 @@ def test_navigation_defaults_are_conservative():
 
     assert nav["forward_open"] is True
     assert nav["use_line_ahead"] is False
+    assert nav["topology_frontier_count"] == 0
+
+
+def test_extract_features_counts_low_visit_direction_frontiers(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    game_state = state(
+        direction_probes=[
+            {"angle_offset_degrees": 0, "open": True},
+            {"angle_offset_degrees": 90, "open": True},
+            {"angle_offset_degrees": -90, "open": True},
+        ]
+    )
+
+    open_frontier = extract_features(game_state, memory, BrainPolicyParams())
+    memory.data["cells"] = {
+        "1:0": {"visits": 2},
+        "0:1": {"visits": 2},
+        "0:-1": {"visits": 2},
+    }
+    exhausted = extract_features(game_state, memory, BrainPolicyParams())
+
+    assert open_frontier.navigation["topology_frontier_count"] == 3
+    assert exhausted.navigation["topology_frontier_count"] == 0
 
 
 def test_combat_defaults_are_conservative():

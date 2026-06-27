@@ -190,7 +190,7 @@ learning observation. The current pipeline is:
    features.
 4. `SkillController` appends macro-action history.
 5. `SkillController` appends bounded temporal context.
-6. PPO consumes the final 80-feature `restfuldoom.observation.v1` vector.
+6. PPO consumes the final 81-feature `restfuldoom.observation.v1` vector.
 
 The current observation covers:
 
@@ -200,6 +200,8 @@ The current observation covers:
 - front/back/left/right navigation probes
 - nearby use-line and exit-line affordances
 - current sector damage/hazard fields
+- topology frontier count from open direction probes leading to low-visit
+  nearby cells
 - one route waypoint with distance, angle, priority, and type
 - previous skill, shootable opportunity, and route outcome history
 - short temporal deltas for movement, enemy distance, route distance, contact,
@@ -209,7 +211,7 @@ The remaining learning gap is real. Known missing pieces:
 
 | Gap | Why It Matters | Current Workaround | Needed Upgrade |
 | --- | --- | --- | --- |
-| topology graph | spawn-to-contact requires memory of route structure | one local waypoint plus coarse cells | compact graph/frontier observation |
+| topology graph | spawn-to-contact requires memory of route structure | one local waypoint, coarse cells, and frontier count | compact graph observation |
 | progressed-map state | fresh teleport starts do not replay opened doors/enemy movement | named fresh-reset curriculum | save-state or Hellbox/Shrink snapshot restore |
 | recurrent context | feed-forward PPO sees only hand-built short history | bounded temporal features | recurrent policy if features stay insufficient |
 | combat target quality | shootable yes/no hides aim margin and weapon quality | fire mask and action reward | richer combat probe fields |

@@ -139,6 +139,7 @@ class SkillController:
         self._recent_route_progress_units: list[float] = []
         self._recent_route_failure_flags: list[bool] = []
         self._recent_contact_use_line: dict[str, int] | None = None
+        self._recent_visible_contact: dict[str, int] | None = None
 
     def observation(self, state: Any) -> list[float]:
         """Encodes a protobuf state as the stable PPO feature vector."""
@@ -175,6 +176,7 @@ class SkillController:
         self._recent_route_progress_units.clear()
         self._recent_route_failure_flags.clear()
         self._recent_contact_use_line = None
+        self._recent_visible_contact = None
 
     def record_action_history(
         self,
@@ -323,6 +325,7 @@ class SkillController:
 
         features = extract_features(state, self.memory, self.params)
         self.policy.last_features = features
+        self._remember_visible_contact(features)
         if self.policy._start_kills is None:
             self.policy._start_kills = features.kills
         self.policy._episode_cell_visits[features.cell] = (
@@ -378,10 +381,12 @@ class SkillController:
         features = extract_features(state, self.memory, self.params)
         stuck = self.policy._is_stuck(features)
         mask = {skill: False for skill in SKILL_ACTIONS}
-        recent_contact_active = self._recent_contact_active(features)
 
         shootable = self.policy._shootable_enemy(features)
+        if shootable is None:
+            self._remember_visible_contact(features)
         can_fire = shootable is not None and self.policy._can_shoot(features, shootable)
+        recent_contact_active = self._recent_contact_active(features)
         if can_fire:
             mask["fire"] = True
 
@@ -420,10 +425,11 @@ class SkillController:
         ):
             mask["open_use_line"] = True
 
-        if not can_fire and (
-            self.policy._select_progression_line(features) is not None
-            or (not features.visible_enemies and not recent_contact_active)
-        ):
+        progression_line = self.policy._select_progression_line(features)
+        if not can_fire and progression_line is not None:
+            if not self._suppress_route_after_contact_failures(features, recent_contact_active):
+                mask["route_progression"] = True
+        elif not can_fire and not features.visible_enemies and not recent_contact_active:
             mask["route_progression"] = True
 
         if stuck:
@@ -620,6 +626,20 @@ class SkillController:
             "map": int(features.map),
         }
 
+    def _remember_visible_contact(self, features: Any) -> None:
+        """Remember recent visible-but-not-shootable contact for recovery masks."""
+        if not features.visible_enemies:
+            return
+        if self.policy._shootable_enemy(features) is not None:
+            return
+        enemy = features.visible_enemies[0]
+        self._recent_visible_contact = {
+            "enemy_id": int(enemy["id"]),
+            "tick": int(features.tick),
+            "episode": int(features.episode),
+            "map": int(features.map),
+        }
+
     def _recent_contact_use_line_for(self, features: Any) -> dict[str, Any] | None:
         recent = self._recent_contact_use_line
         if recent is None:
@@ -649,12 +669,42 @@ class SkillController:
         if self._recent_contact_use_line_for(features) is not None:
             return True
         contact = self.policy._last_contact_ray
-        if contact is None:
+        if contact is not None:
+            age = int(features.tick) - int(contact.get("tick", 0))
+            if 0 <= age <= 90 and self.policy._select_known_enemy(features) is not None:
+                return True
+        return self._recent_visible_contact_active(features)
+
+    def _recent_visible_contact_active(self, features: Any) -> bool:
+        recent = self._recent_visible_contact
+        if recent is None:
             return False
-        age = int(features.tick) - int(contact.get("tick", 0))
-        if age < 0 or age > 90:
+        if int(recent.get("episode", 0)) != int(features.episode):
             return False
+        if int(recent.get("map", 0)) != int(features.map):
+            return False
+        age = int(features.tick) - int(recent.get("tick", 0))
+        if age < 0 or age > 420:
+            return False
+        enemy_id = int(recent.get("enemy_id", 0))
+        for enemy in features.known_enemies:
+            if int(enemy["id"]) == enemy_id:
+                return not self.policy._is_blocked_target(features, enemy)
         return self.policy._select_known_enemy(features) is not None
+
+    def _suppress_route_after_contact_failures(
+        self,
+        features: Any,
+        recent_contact_active: bool,
+    ) -> bool:
+        """Avoid re-sampling route when it has repeatedly failed after contact."""
+        if not recent_contact_active:
+            return False
+        if features.visible_enemies:
+            return False
+        if self._failed_route_attempt_count < 1:
+            return False
+        return self._recent_visible_contact_active(features)
 
 
 class DoomAgentEnv:

@@ -27,6 +27,7 @@ from restfuldoom_agent.schemas import (
     DECISION_CYCLE_SCHEMA,
     MEMORY_CONTRACT,
     OBSERVATION_SCHEMA,
+    PRE_FRONTIER_TACTICAL_FEATURE_NAMES,
     PPO_SKILL_ACTIONS,
     pad_observation_features,
     map_expert_skill_to_ppo_action,
@@ -168,6 +169,10 @@ def test_training_schemas_describe_features_and_actions():
         rule["name"] == "shootable_followthrough"
         for rule in ACTION_SCHEMA["mask_semantics"]["rules"]
     )
+    assert any(
+        rule["name"] == "recent_contact_route_backoff"
+        for rule in ACTION_SCHEMA["mask_semantics"]["rules"]
+    )
     assert ACTION_SCHEMA["representation"]["learned_now"] == (
         "PPO learns when to choose each option"
     )
@@ -226,6 +231,7 @@ def test_training_schemas_describe_features_and_actions():
     assert "failed_route_attempt_count_norm" in OBSERVATION_SCHEMA["feature_names"]
     assert "enemy_distance_delta_norm" in OBSERVATION_SCHEMA["feature_names"]
     assert "recent_route_failure_ratio" in OBSERVATION_SCHEMA["feature_names"]
+    assert "topology_frontier_count_norm" in OBSERVATION_SCHEMA["feature_names"]
     assert "temporal_context" in {
         group["name"] for group in OBSERVATION_SCHEMA["source_groups"]
     }
@@ -251,6 +257,38 @@ def test_pad_observation_features_adds_neutral_action_history():
     assert len(padded) == len(OBSERVATION_SCHEMA["feature_names"])
     assert padded[: len(FEATURE_NAMES)] == tactical
     assert all(value == 0.0 for value in padded[len(FEATURE_NAMES) :])
+
+
+def test_pad_observation_features_adds_neutral_frontier_to_old_tactical_rows():
+    old_tactical = [0.125 for _ in PRE_FRONTIER_TACTICAL_FEATURE_NAMES]
+    frontier_index = OBSERVATION_SCHEMA["feature_names"].index(
+        "topology_frontier_count_norm"
+    )
+
+    padded = pad_observation_features(old_tactical)
+
+    assert len(padded) == len(OBSERVATION_SCHEMA["feature_names"])
+    assert padded[frontier_index] == 0.0
+    assert padded[:frontier_index] == old_tactical[:frontier_index]
+    assert padded[frontier_index + 1 : len(FEATURE_NAMES)] == old_tactical[
+        frontier_index:
+    ]
+
+
+def test_pad_observation_features_adds_neutral_frontier_to_old_ppo_rows():
+    old_row = [0.25 for _ in PRE_FRONTIER_TACTICAL_FEATURE_NAMES]
+    old_row.extend([0.5 for _ in OBSERVATION_SCHEMA["action_history_feature_names"]])
+    old_row.extend([0.75 for _ in OBSERVATION_SCHEMA["temporal_context_feature_names"]])
+    frontier_index = OBSERVATION_SCHEMA["feature_names"].index(
+        "topology_frontier_count_norm"
+    )
+
+    padded = pad_observation_features(old_row)
+
+    assert len(padded) == len(OBSERVATION_SCHEMA["feature_names"])
+    assert padded[frontier_index] == 0.0
+    assert padded[:frontier_index] == old_row[:frontier_index]
+    assert padded[frontier_index + 1 :] == old_row[frontier_index:]
 
 
 def test_pad_observation_features_adds_neutral_temporal_context_to_legacy_rows():

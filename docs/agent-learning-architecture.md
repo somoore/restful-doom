@@ -293,7 +293,7 @@ The memory lifecycle is:
 PPO receives the feature vector declared in
 `restfuldoom_agent.schemas.OBSERVATION_SCHEMA`. It is derived from protobuf
 state, memory, and macro-action history, not screenshots. The current schema has
-80 features: 54 base tactical features, 15 action-history features, and
+81 features: 55 base tactical features, 15 action-history features, and
 11 bounded temporal-context features.
 
 The base feature groups are:
@@ -307,6 +307,7 @@ The base feature groups are:
 - usable-line and exit-line affordances
 - stuck and blocked-target indicators
 - current sector damage/hazard affordances
+- topology frontier count from open probes leading to low-visit nearby cells
 - route waypoint distance, angle, priority, and type
 
 The action-history group is:
@@ -341,7 +342,8 @@ The schema now also declares source groups:
 This is good enough for early skill learning, but it is not yet a complete
 learning observation. Known gaps:
 
-- No compact topological map graph, only local probes plus coarse cell memory.
+- No compact topological map graph, only local probes, frontier count, and
+  coarse cell memory.
 - The temporal window is hand-built and bounded; there is no recurrent neural
   state yet.
 - Route waypoints are a single local progression target, not a full route plan

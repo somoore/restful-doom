@@ -2708,6 +2708,13 @@ def extract_features(
     y = position.y_fp / FP
     angle = float(obj.angle_degrees % 360)
     navigation = navigation_from_state(getattr(state, "navigation", None))
+    annotate_topology_frontiers(
+        navigation,
+        memory=memory,
+        x_units=x,
+        y_units=y,
+        angle=angle,
+    )
     combat = combat_from_state(getattr(state, "combat", None))
     for line in navigation.get("use_lines", []):
         annotate_navigation_line(line, x_units=x, y_units=y, angle=angle)
@@ -2788,6 +2795,7 @@ def navigation_from_state(navigation: Any | None) -> dict[str, Any]:
             "probe_distance_fp": 0,
             "direction_probes": [],
             "use_lines": [],
+            "topology_frontier_count": 0,
             "current_sector": {
                 "sector_id": 0,
                 "special": 0,
@@ -2868,6 +2876,7 @@ def navigation_from_state(navigation: Any | None) -> dict[str, Any]:
         "probe_distance_fp": int(getattr(navigation, "probe_distance_fp", 0)),
         "direction_probes": direction_probes,
         "use_lines": use_lines,
+        "topology_frontier_count": 0,
         "current_sector": {
             "sector_id": int(getattr(current_sector, "sector_id", 0)),
             "special": int(getattr(current_sector, "special", 0)),
@@ -2880,6 +2889,43 @@ def navigation_from_state(navigation: Any | None) -> dict[str, Any]:
         },
         "route_waypoint": route_waypoint,
     }
+
+
+def annotate_topology_frontiers(
+    navigation: dict[str, Any],
+    *,
+    memory: AgentMemory,
+    x_units: float,
+    y_units: float,
+    angle: float,
+) -> None:
+    """Add a cheap count of open directions leading to low-visit nearby cells."""
+    probes = navigation.get("direction_probes")
+    if not isinstance(probes, list):
+        navigation["topology_frontier_count"] = 0
+        return
+    frontier_cells: set[str] = set()
+    persistent_cells = memory.data.get("cells", {})
+    if not isinstance(persistent_cells, dict):
+        persistent_cells = {}
+    probe_distance = float(navigation.get("probe_distance_fp", 0) or 0) / FP
+    for probe in probes:
+        if not isinstance(probe, dict) or not probe.get("open"):
+            continue
+        offset = float(probe.get("angle_offset_degrees", 0.0))
+        distance = float(probe.get("block_distance_fp", 0) or 0) / FP
+        step = max(CELL_UNITS, min(1.5 * CELL_UNITS, distance or probe_distance or CELL_UNITS))
+        heading = math.radians((angle + offset) % 360)
+        projected_x = x_units + math.cos(heading) * step
+        projected_y = y_units + math.sin(heading) * step
+        projected_cell = cell_key(
+            0.0 if abs(projected_x) < 1e-6 else projected_x,
+            0.0 if abs(projected_y) < 1e-6 else projected_y,
+        )
+        visits = int(persistent_cells.get(projected_cell, {}).get("visits", 0))
+        if visits <= 1:
+            frontier_cells.add(projected_cell)
+    navigation["topology_frontier_count"] = len(frontier_cells)
 
 
 def _use_line_from_state(line: Any | None) -> dict[str, Any]:
