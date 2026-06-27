@@ -90,6 +90,8 @@ class DoomEnvConfig:
     visible_contact_progress_reward: float = 0.0
     terminate_on_first_visible: bool = False
     terminate_on_first_shootable: bool = False
+    curriculum: dict[str, Any] | None = None
+    curriculum_stage: dict[str, Any] | None = None
 
     def reward_goal(self) -> Goal:
         """Returns the reward goal for the configured preset."""
@@ -1080,40 +1082,45 @@ class DoomAgentEnv:
                 had_shootable_target=had_shootable_target,
                 route_outcome=route_outcome,
             )
+        info = {
+            "skill": skill,
+            "action_index": action_index,
+            "decision_cycle": {
+                "schema": DECISION_CYCLE_SCHEMA["schema"],
+                "observation_schema": OBSERVATION_SCHEMA["schema"],
+                "action_schema": ACTION_SCHEMA["schema"],
+                "memory_contract": MEMORY_CONTRACT["schema"],
+                "input_tick": int(getattr(previous, "tick", 0)),
+                "output_tick": int(getattr(current, "tick", 0)),
+                "macro_tics": len(transition_summaries),
+            },
+            "decision": decision,
+            "transition": _combine_transition_summaries(transition_summaries),
+            "macro_tics": len(transition_summaries),
+            "action_reward": action_reward,
+            "combat_action_reward": combat_action_reward,
+            "route_action_reward": route_action_reward,
+            "contact_reward": contact_reward,
+            "visible_contact_distance_delta": round(visible_contact_distance_delta, 4),
+            "visible_contact_progress_reward": round(visible_contact_progress_reward, 4),
+            "had_visible_enemy": had_visible_enemy,
+            "route_outcome": route_outcome,
+            "had_shootable_target": had_shootable_target,
+            "first_visible_contact": first_visible_contact,
+            "first_shootable_contact": first_shootable_contact,
+            "reset_warmup": dict(self._last_reset_warmup),
+            "state": summarize_state(current),
+            "done_reason": reason,
+        }
+        if self.config.curriculum is not None:
+            info["curriculum"] = dict(self.config.curriculum)
+        if self.config.curriculum_stage is not None:
+            info["curriculum_stage"] = dict(self.config.curriculum_stage)
         return EnvStep(
             observation=self.controller.observation(current),
             reward=total_reward,
             done=done,
-            info={
-                "skill": skill,
-                "action_index": action_index,
-                "decision_cycle": {
-                    "schema": DECISION_CYCLE_SCHEMA["schema"],
-                    "observation_schema": OBSERVATION_SCHEMA["schema"],
-                    "action_schema": ACTION_SCHEMA["schema"],
-                    "memory_contract": MEMORY_CONTRACT["schema"],
-                    "input_tick": int(getattr(previous, "tick", 0)),
-                    "output_tick": int(getattr(current, "tick", 0)),
-                    "macro_tics": len(transition_summaries),
-                },
-                "decision": decision,
-                "transition": _combine_transition_summaries(transition_summaries),
-                "macro_tics": len(transition_summaries),
-                "action_reward": action_reward,
-                "combat_action_reward": combat_action_reward,
-                "route_action_reward": route_action_reward,
-                "contact_reward": contact_reward,
-                "visible_contact_distance_delta": round(visible_contact_distance_delta, 4),
-                "visible_contact_progress_reward": round(visible_contact_progress_reward, 4),
-                "had_visible_enemy": had_visible_enemy,
-                "route_outcome": route_outcome,
-                "had_shootable_target": had_shootable_target,
-                "first_visible_contact": first_visible_contact,
-                "first_shootable_contact": first_shootable_contact,
-                "reset_warmup": dict(self._last_reset_warmup),
-                "state": summarize_state(current),
-                "done_reason": reason,
-            },
+            info=info,
         )
 
     def action_mask(self) -> list[bool]:

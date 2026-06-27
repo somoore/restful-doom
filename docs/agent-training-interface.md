@@ -252,3 +252,13 @@ The remaining learning gap is real. Known missing pieces:
 The promotion rule stays strict while those gaps are open. Dense rewards can
 train intermediate checkpoints, but promotion still requires level completion,
 kills, survival, and baseline comparison.
+
+Within-rollout curriculum mixing is available as a short-run regularizer:
+`--rollout-stage-mix round_robin|random` changes reset starts between
+`done=True` episodes inside one PPO buffer, and
+`--rollout-stage-segment-tics` can shorten each reset episode so a small buffer
+contains multiple stages. Rollout rows keep per-record `curriculum_stage`
+metadata, and summaries report `curriculum_stage_counts`. This helps a single
+PPO update see several fresh-reset stages, but it does not solve the
+progressed-map gap; snapshot restore is still required for true mid-trajectory
+curriculum.

@@ -25,6 +25,17 @@ The punchline is:
 > Freeze an AI agent's game environment mid-policy rollout, thaw it later, and
 > continue from the same simulation state.
 
+## Current Status
+
+- Protobuf/gRPC observe-act loop runs inside Doom.
+- Headless Hellbox/Shrink capsule exposes authenticated gRPC.
+- Deterministic structured brain has completed E1M1 with multiple kills.
+- Behavior-cloned skill selector is trained from a successful trajectory, but
+  this is supervised imitation rather than independent RL.
+- PPO combat-start curriculum can learn kills from reward feedback.
+- Full independent PPO level completion from E1M1 spawn is not proven yet.
+- Next major unlock: snapshot-backed curriculum for progressed map states.
+
 ## Architecture
 
 ```mermaid
@@ -287,6 +298,11 @@ The training API is:
   `ppo_best_checkpoint`. This is slower than rollout-only selection, but it
   helps avoid preserving a checkpoint that overfit one contact stage while
   regressing combat-start or another visible-contact start.
+- `--rollout-stage-mix round_robin|random` can rotate curriculum stages between
+  episode resets inside one PPO rollout buffer. Pair it with
+  `--rollout-stage-segment-tics <n>` for short experiments that need multiple
+  reset starts in the same update. Stage switches happen only at `done=True`
+  boundaries so GAE does not leak across unrelated starts.
 - `restfuldoom_agent.ppo` provides actor-critic PPO, GAE, clipped objective,
   entropy bonus, rollout JSONL buffers, checkpoint save/load, and a promotion
   gate.
@@ -441,6 +457,28 @@ PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
     --terminate-on-first-shootable \
     --checkpoint-eval-curriculum \
     --checkpoint-eval-max-steps 128
+```
+
+For short contact-curriculum probes, mix stages within each PPO buffer so one
+update sees the visible-contact variants and the combat bridge before the
+checkpoint is scored:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
+    --endpoint 127.0.0.1:50051 \
+    --goal-preset navigation \
+    --updates 2 \
+    --rollout-steps 128 \
+    --checkpoint-dir agent_models/ppo \
+    --buffer-dir trajectories/ppo \
+    --memory-path agent_memory/e1m1.json \
+    --resume-best-checkpoint \
+    --curriculum e1m1-contact-to-combat \
+    --curriculum-mode round_robin \
+    --rollout-stage-mix round_robin \
+    --rollout-stage-segment-tics 64 \
+    --first-shootable-bonus 20 \
+    --visible-contact-progress-reward 0.01
 ```
 
 Continue from an existing PPO checkpoint:

@@ -8,7 +8,7 @@ import random
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .env import DoomAgentEnv, EnvStep
 from .learning_trace import LEARNING_TRACE_SCHEMA, build_learning_trace
@@ -256,11 +256,16 @@ class PPOTrainer:
         *,
         steps: int | None = None,
         seed: int | None = None,
+        before_reset: Callable[[int], None] | None = None,
     ) -> RolloutBuffer:
         """Collects on-policy transitions from the Doom environment."""
         target_steps = steps or self.config.rollout_steps
         buffer = RolloutBuffer()
+        reset_index = 0
+        if before_reset is not None:
+            before_reset(reset_index)
         obs = await env.reset(seed=seed)
+        reset_index += 1
         while len(buffer) < target_steps:
             action_mask = env.action_mask()
             action, logprob, value = self.model.act(obs, action_mask=action_mask)
@@ -286,7 +291,10 @@ class PPOTrainer:
             )
             obs = transition.observation
             if transition.done and len(buffer) < target_steps:
+                if before_reset is not None:
+                    before_reset(reset_index)
                 obs = await env.reset(seed=None if seed is None else seed + len(buffer))
+                reset_index += 1
         with torch.no_grad():
             _, last_value = self.model(
                 torch.tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)

@@ -150,6 +150,7 @@ seeded replay until that field is true in a verified build.
 - Watch stderr for reconnect notices. Each notice includes the gRPC status, delay, and last observed Doom tick.
 - Confirm the trajectory file grows with `state`, `reward`, `next_action`, `last_seen_tick`, `reconnect_attempts`, and `metadata` fields.
 - For PPO demos, confirm `trajectories/ppo/*.jsonl` contains rollout records with `obs`, `action`, `reward`, `done`, `value`, and `logprob`, and confirm `agent_models/ppo/*.pt` checkpoints are written.
+- For mixed-stage PPO demos, confirm rollout summaries include `curriculum_stage_counts` with more than one stage and JSONL rows preserve per-record `info.curriculum_stage.name`.
 - Export a resume bundle after PPO training and confirm the manifest includes `ppo_checkpoints`, `observation_schema`, `action_schema`, `reward_config`, and `eval_history`.
 - Check `metadata.reconnect_count`, `metadata.policy_errors`, `metadata.bedrock_fallback_count`, and `metadata.llm_latency_ms` when debugging a run.
 - Confirm `metadata.rollout.token_present` is true and that no raw token appears in the JSONL.

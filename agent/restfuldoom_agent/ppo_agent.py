@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import random
 import time
 from collections import Counter
 from dataclasses import replace
@@ -84,17 +85,29 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
     best_checkpoint: dict[str, object] | None = None
     try:
         for update_index in range(args.updates):
-            curriculum_stage = stage_for_update(curriculum, update_index)
-            env.config = replace(
-                _env_config_for_start(args, curriculum_stage.get("reset_start", {})),
-                run_id=f"{args.run_id}-{curriculum_stage['name']}",
-            )
-            buffer = await trainer.collect_rollout(
-                env,
-                steps=args.rollout_steps,
-                seed=args.seed + update_index,
-            )
-            _annotate_buffer_curriculum(buffer, curriculum, curriculum_stage)
+            if _rollout_stage_mixing_enabled(args, curriculum):
+                curriculum_stage = _mixed_curriculum_stage_descriptor(args, curriculum)
+                buffer = await _collect_mixed_curriculum_rollout(
+                    trainer,
+                    env,
+                    args,
+                    curriculum=curriculum,
+                    update_index=update_index,
+                )
+            else:
+                curriculum_stage = stage_for_update(curriculum, update_index)
+                env.config = _env_config_for_stage(
+                    args,
+                    curriculum,
+                    curriculum_stage,
+                    run_id=f"{args.run_id}-{curriculum_stage['name']}",
+                )
+                buffer = await trainer.collect_rollout(
+                    env,
+                    steps=args.rollout_steps,
+                    seed=args.seed + update_index,
+                )
+                _annotate_buffer_curriculum(buffer, curriculum, curriculum_stage)
             buffer_path = args.buffer_dir / f"{args.run_id}-buffer-{update_index:04d}.jsonl"
             buffer.save_jsonl(buffer_path)
             rollout_summary = _summarize_buffer(buffer)
@@ -361,6 +374,134 @@ def _env_config_for_start(
     )
 
 
+def _env_config_for_stage(
+    args: argparse.Namespace,
+    curriculum: dict[str, object],
+    curriculum_stage: dict[str, object],
+    *,
+    run_id: str,
+    max_steps: int | None = None,
+) -> DoomEnvConfig:
+    """Builds environment config with auditable curriculum metadata."""
+    return replace(
+        _env_config_for_start(args, curriculum_stage.get("reset_start", {})),
+        run_id=run_id,
+        max_steps=args.max_steps if max_steps is None else int(max_steps),
+        curriculum=_curriculum_metadata(curriculum),
+        curriculum_stage=dict(curriculum_stage),
+    )
+
+
+async def _collect_mixed_curriculum_rollout(
+    trainer: PPOTrainer,
+    env: DoomAgentEnv,
+    args: argparse.Namespace,
+    *,
+    curriculum: dict[str, object],
+    update_index: int,
+) -> object:
+    """Collects one PPO buffer while rotating curriculum stages between resets."""
+    segment_tics = _effective_rollout_stage_segment_tics(args)
+
+    def before_reset(reset_index: int) -> None:
+        stage = _mixed_curriculum_stage_for_reset(
+            curriculum,
+            update_index=update_index,
+            reset_index=reset_index,
+            mode=args.rollout_stage_mix,
+        )
+        env.config = _env_config_for_stage(
+            args,
+            curriculum,
+            stage,
+            run_id=f"{args.run_id}-{stage['name']}-mix{reset_index:03d}",
+            max_steps=segment_tics,
+        )
+
+    return await trainer.collect_rollout(
+        env,
+        steps=args.rollout_steps,
+        seed=args.seed + update_index,
+        before_reset=before_reset,
+    )
+
+
+def _rollout_stage_mixing_enabled(
+    args: argparse.Namespace,
+    curriculum: dict[str, object],
+) -> bool:
+    if getattr(args, "rollout_stage_mix", "off") == "off":
+        return False
+    stages = curriculum.get("stages", [])
+    return isinstance(stages, list) and len(stages) > 1
+
+
+def _mixed_curriculum_stage_for_reset(
+    curriculum: dict[str, object],
+    *,
+    update_index: int,
+    reset_index: int,
+    mode: str,
+) -> dict[str, object]:
+    """Selects the curriculum stage used by one reset inside a mixed rollout."""
+    stages = curriculum.get("stages", [])
+    if not isinstance(stages, list) or not stages:
+        raise ValueError("curriculum has no stages")
+    start_index = int(curriculum.get("start_index", 0))
+    if mode == "round_robin":
+        index = (start_index + int(update_index) + int(reset_index)) % len(stages)
+    elif mode == "random":
+        rng = random.Random(
+            int(curriculum.get("seed", 0)) + int(update_index) * 1009 + int(reset_index)
+        )
+        index = rng.randrange(len(stages))
+    else:
+        raise ValueError(f"unsupported rollout stage mix mode {mode!r}")
+    stage = dict(stages[index])
+    stage["selected_index"] = index
+    stage["mixed_rollout_reset_index"] = int(reset_index)
+    return stage
+
+
+def _mixed_curriculum_stage_descriptor(
+    args: argparse.Namespace,
+    curriculum: dict[str, object],
+) -> dict[str, object]:
+    """Describes an update whose records contain multiple curriculum stages."""
+    stages = curriculum.get("stages", [])
+    stage_names = [
+        str(stage.get("name", f"stage_{index}"))
+        for index, stage in enumerate(stages)
+        if isinstance(stage, dict)
+    ]
+    return {
+        "schema": "restfuldoom.ppo_mixed_curriculum_stage.v1",
+        "name": "mixed_curriculum",
+        "mode": args.rollout_stage_mix,
+        "segment_tics": int(args.rollout_stage_segment_tics),
+        "effective_segment_tics": _effective_rollout_stage_segment_tics(args),
+        "stage_count": len(stage_names),
+        "stages": stage_names,
+    }
+
+
+def _effective_rollout_stage_segment_tics(args: argparse.Namespace) -> int:
+    max_steps = max(1, int(args.max_steps))
+    requested = int(args.rollout_stage_segment_tics)
+    if requested > 0:
+        return min(max_steps, requested)
+    return max_steps
+
+
+def _curriculum_metadata(curriculum: dict[str, object]) -> dict[str, object]:
+    return {
+        "schema": curriculum.get("schema"),
+        "name": curriculum.get("name"),
+        "mode": curriculum.get("mode"),
+        "start_index": curriculum.get("start_index"),
+    }
+
+
 def _annotate_buffer_curriculum(
     buffer: object,
     curriculum: dict[str, object],
@@ -368,11 +509,7 @@ def _annotate_buffer_curriculum(
 ) -> None:
     for record in getattr(buffer, "records", []):
         if isinstance(getattr(record, "info", None), dict):
-            record.info["curriculum"] = {
-                "schema": curriculum.get("schema"),
-                "name": curriculum.get("name"),
-                "mode": curriculum.get("mode"),
-            }
+            record.info["curriculum"] = _curriculum_metadata(curriculum)
             record.info["curriculum_stage"] = dict(curriculum_stage)
 
 
@@ -1035,6 +1172,24 @@ def main() -> None:
     parser.add_argument("--terminate-on-first-shootable", action="store_true")
     parser.add_argument("--updates", type=int, default=1)
     parser.add_argument("--rollout-steps", type=int, default=512)
+    parser.add_argument(
+        "--rollout-stage-mix",
+        choices=["off", "round_robin", "random"],
+        default="off",
+        help=(
+            "Rotate curriculum stages between episode resets inside one PPO rollout "
+            "buffer. Stage changes happen only after done=True boundaries."
+        ),
+    )
+    parser.add_argument(
+        "--rollout-stage-segment-tics",
+        type=int,
+        default=0,
+        help=(
+            "When stage mixing is enabled, cap each reset episode to this many Doom "
+            "tics so short rollouts can include multiple stages. 0 uses --max-steps."
+        ),
+    )
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("agent_models/ppo"))
     parser.add_argument("--buffer-dir", type=Path, default=Path("trajectories/ppo"))
     parser.add_argument("--device", default="cpu")

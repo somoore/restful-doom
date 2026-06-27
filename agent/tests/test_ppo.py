@@ -1,9 +1,11 @@
+import asyncio
 import json
 from types import SimpleNamespace
 
 import pytest
 
 from restfuldoom_agent.curriculum import build_curriculum, stage_for_update
+from restfuldoom_agent.env import EnvStep
 from restfuldoom_agent.brain import AgentMemory, _memory_ppo_checkpoint_paths
 from restfuldoom_agent.ppo_agent import (
     _annotate_buffer_curriculum,
@@ -595,6 +597,43 @@ def test_rollout_summary_counts_curriculum_stages():
     assert summary["curriculum_stage_counts"] == {"combat_start": 1}
 
 
+def test_rollout_summary_preserves_mixed_curriculum_stages_in_jsonl(tmp_path):
+    buffer = RolloutBuffer()
+    for stage_name in ["combat_start", "fresh_spawn", "combat_start"]:
+        buffer.add(
+            obs=[0.0, 1.0],
+            action_mask=[True, False],
+            action=0,
+            reward=1.0,
+            done=False,
+            value=0.0,
+            logprob=0.0,
+            info={
+                "skill": "engage",
+                "transition": {},
+                "state": {"health": 100, "kills": 0},
+                "curriculum": {
+                    "schema": "restfuldoom.ppo_curriculum.v1",
+                    "name": "e1m1-contact-to-combat",
+                },
+                "curriculum_stage": {"name": stage_name},
+            },
+        )
+
+    summary = _summarize_buffer(buffer)
+    path = buffer.save_jsonl(tmp_path / "mixed.jsonl")
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+
+    assert summary["curriculum_stage_counts"] == {
+        "combat_start": 2,
+        "fresh_spawn": 1,
+    }
+    assert [
+        row["info"]["curriculum_stage"]["name"]
+        for row in rows[1:]
+    ] == ["combat_start", "fresh_spawn", "combat_start"]
+
+
 def test_rollout_summary_counts_route_outcomes():
     buffer = RolloutBuffer()
     for index, route_outcome in enumerate(
@@ -1092,6 +1131,71 @@ def test_ppo_actor_respects_action_mask():
 
     assert actions == {1}
     assert deterministic == 2
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")
+def test_ppo_collect_rollout_calls_before_reset_for_episode_stages():
+    class FakeEnv:
+        def __init__(self) -> None:
+            self.stage = 0
+            self.steps_in_episode = 0
+            self.reset_seeds: list[int | None] = []
+
+        async def reset(self, *, seed=None):
+            self.reset_seeds.append(seed)
+            self.steps_in_episode = 0
+            return [float(self.stage), 0.0]
+
+        def action_mask(self):
+            return [True, False]
+
+        async def step(self, _action):
+            self.steps_in_episode += 1
+            done = self.steps_in_episode >= 2
+            return EnvStep(
+                observation=[float(self.stage), float(self.steps_in_episode)],
+                reward=1.0,
+                done=done,
+                info={
+                    "skill": "engage",
+                    "transition": {},
+                    "state": {"health": 100, "kills": 0},
+                    "curriculum_stage": {"name": f"stage_{self.stage}"},
+                },
+            )
+
+    async def collect():
+        env = FakeEnv()
+        reset_calls: list[int] = []
+        trainer = PPOTrainer(
+            obs_dim=2,
+            action_dim=2,
+            config=PPOConfig(update_epochs=1, minibatch_size=4, rollout_steps=5, seed=17),
+        )
+
+        def before_reset(reset_index: int) -> None:
+            reset_calls.append(reset_index)
+            env.stage = reset_index
+
+        buffer = await trainer.collect_rollout(
+            env,  # type: ignore[arg-type]
+            steps=5,
+            seed=99,
+            before_reset=before_reset,
+        )
+        return env, reset_calls, buffer
+
+    env, reset_calls, buffer = asyncio.run(collect())
+
+    assert reset_calls == [0, 1, 2]
+    assert env.reset_seeds == [99, 101, 103]
+    assert [record.info["curriculum_stage"]["name"] for record in buffer.records] == [
+        "stage_0",
+        "stage_0",
+        "stage_1",
+        "stage_1",
+        "stage_2",
+    ]
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")
