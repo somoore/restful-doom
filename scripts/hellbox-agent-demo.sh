@@ -95,8 +95,9 @@ ensure_token_json() {
     local schema
     schema="$(json_value "$TOKEN_JSON" schema || true)"
     if [ "$schema" != "shrink.auth.v1" ]; then
-        echo "token JSON must use schema shrink.auth.v1; got '${schema:-missing}'" >&2
-        echo "regenerate it with: $HELLBOX_CLI token $NAME --port $AGENT_PORT --minutes $TOKEN_MINUTES --raw" >&2
+        echo "Expected token JSON schema shrink.auth.v1, got '${schema:-missing}'." >&2
+        echo "You may be using an old token file at $TOKEN_JSON." >&2
+        echo "Regenerate it with: $HELLBOX_CLI token $NAME --port $AGENT_PORT --minutes $TOKEN_MINUTES --raw" >&2
         exit 2
     fi
 }
