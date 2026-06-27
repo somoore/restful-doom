@@ -164,11 +164,25 @@ def test_training_schemas_describe_features_and_actions():
         "PPO learns when to choose each option"
     )
     assert ACTION_SCHEMA["skill_definition_contract"]["storage"].startswith("Python schema")
+    assert ACTION_SCHEMA["current_model"]["learned_object"] == (
+        "top-level selector over stable skill indexes"
+    )
     assert DECISION_CYCLE_SCHEMA["schema"] == "restfuldoom.decision_cycle.v1"
+    assert [phase["phase"] for phase in DECISION_CYCLE_SCHEMA["runtime_trace"]] == [
+        "observe",
+        "mask",
+        "decide",
+        "execute",
+        "score",
+        "macro_history",
+    ]
     assert "controller_input" in DECISION_CYCLE_SCHEMA["controller_decision_interface"]
     assert "rollout_record.action_mask" in DECISION_CYCLE_SCHEMA["trace_fields"]
     assert "rollout_record.info.route_outcome" in DECISION_CYCLE_SCHEMA["trace_fields"]
     assert MEMORY_CONTRACT["memory_schema"] == "restfuldoom.agent_memory.v1"
+    assert MEMORY_CONTRACT["write_frequency"]["ppo_collection"].startswith("read-only")
+    assert "cells" in MEMORY_CONTRACT["persisted_shape"]
+    assert "enemies" in MEMORY_CONTRACT["persisted_shape"]
     assert any(
         phase["phase"] == "learn" and "ppo_checkpoints" in phase["writes"]
         for phase in MEMORY_CONTRACT["query_update_lifecycle"]

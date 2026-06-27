@@ -503,6 +503,44 @@ OBSERVATION_SCHEMA = {
 DECISION_CYCLE_SCHEMA = {
     "schema": "restfuldoom.decision_cycle.v1",
     "clock": "one learned decision per bounded macro-step, not one raw ticcmd per Doom tic",
+    "runtime_trace": [
+        {
+            "phase": "observe",
+            "code": "SkillController.observation(state)",
+            "payload": "restfuldoom.observation.v1 feature vector",
+            "persistent_writes": [],
+        },
+        {
+            "phase": "mask",
+            "code": "DoomAgentEnv.action_mask() -> SkillController.action_mask(state)",
+            "payload": "restfuldoom.skill_action_mask.v1 boolean list",
+            "persistent_writes": [],
+        },
+        {
+            "phase": "decide",
+            "code": "ActorCritic.sample/action() or heuristic_action_index()",
+            "payload": "integer index into restfuldoom.skill_action.v1",
+            "persistent_writes": [],
+        },
+        {
+            "phase": "execute",
+            "code": "SkillController.action_for(action_index, state)",
+            "payload": "protobuf PlayerAction plus rollout_record.info.decision",
+            "persistent_writes": [],
+        },
+        {
+            "phase": "score",
+            "code": "DoomAgentEnv.step(action_index)",
+            "payload": "next observation, reward, done, transition metadata",
+            "persistent_writes": ["rollout buffer row"],
+        },
+        {
+            "phase": "macro_history",
+            "code": "SkillController.record_action_history(...)",
+            "payload": "previous-skill and route/contact outcome features for the next observation",
+            "persistent_writes": [],
+        },
+    ],
     "controller_decision_interface": {
         "decision_layer_input": [
             "restfuldoom.observation.v1 feature vector",
@@ -566,6 +604,46 @@ MEMORY_CONTRACT = {
     "memory_schema": "restfuldoom.agent_memory.v1",
     "default_path": "agent_memory/e1m1.json",
     "role": "inspectable world ledger and training checkpoint index, not a neural hidden state",
+    "write_frequency": {
+        "ppo_collection": "read-only persistent memory; only SkillController episode-local history mutates during macro-steps",
+        "ppo_checkpoint": "writes checkpoint lineage, rollout summary, reward config, and eval history",
+        "deterministic_episode": "writes step observations during the episode and appends a compact episode summary at finish",
+        "export": "copies memory JSON plus referenced checkpoints and trajectories into a portable bundle",
+    },
+    "persisted_shape": {
+        "cells": {
+            "key": "coarse cell id such as '23:-36'",
+            "fields": [
+                "first_seen_tick",
+                "visits",
+                "enemy_sightings",
+                "damage_events",
+                "last_seen_tick",
+                "last_seen_at",
+            ],
+        },
+        "enemies": {
+            "key": "Doom object id as a string",
+            "fields": [
+                "first_seen_tick",
+                "last_seen_tick",
+                "last_position",
+                "last_distance",
+                "last_health",
+                "line_of_sight",
+                "visible_count",
+                "max_threat",
+            ],
+        },
+        "training": [
+            "episodes",
+            "policy",
+            "learned_policy",
+            "ppo_policy",
+            "ppo_checkpoints",
+            "lessons",
+        ],
+    },
     "query_update_lifecycle": [
         {
             "phase": "reset",
@@ -678,6 +756,12 @@ ACTION_SCHEMA = {
     "schema": "restfuldoom.skill_action.v1",
     "actions": PPO_SKILL_ACTIONS,
     "definitions": ACTION_DEFINITIONS,
+    "current_model": {
+        "skill_definition": "code-defined option",
+        "learned_object": "top-level selector over stable skill indexes",
+        "not_learned_yet": "raw movement primitive or per-tic ticcmd policy",
+        "runtime_dispatch": "SkillController._execute_skill(skill, features, stuck)",
+    },
     "representation": {
         "current": "code-defined options implemented by SkillController._execute_skill",
         "learned_now": "PPO learns when to choose each option",

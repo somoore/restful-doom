@@ -42,6 +42,10 @@ The loop has these concrete implementations:
   trajectory decisions.
 - `PPOTrainer` is the independent RL learner for skill selection.
 
+For a shorter implementation contract that maps this stack to concrete schema
+objects, JSONL fields, memory query/update paths, and the current observation
+gap register, see `docs/agent-runtime-contracts.md`.
+
 ## Fast Controller vs Decision Layer
 
 The fast controller is the code that knows how to execute local movement and

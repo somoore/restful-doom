@@ -1,0 +1,156 @@
+# Agent Runtime Contracts
+
+This document answers four implementation questions that matter for training
+and cloud resume. Every contract below maps to code, JSONL fields, or exported
+schemas.
+
+## 1. Decision Layer To Fast Controller
+
+The learned decision layer does not drive raw Doom input. It chooses one
+high-level skill index per macro-step, and the fast controller turns that skill
+into one protobuf `PlayerAction`.
+
+Runtime trace:
+
+| Phase | Code | Data | Writes |
+| --- | --- | --- | --- |
+| Observe | `SkillController.observation(state)` | `restfuldoom.observation.v1` vector | none |
+| Mask | `DoomAgentEnv.action_mask()` -> `SkillController.action_mask(state)` | `restfuldoom.skill_action_mask.v1` booleans | none |
+| Decide | `PPOTrainer` / `ActorCritic` | integer index into `restfuldoom.skill_action.v1` | rollout `action`, `action_mask`, logprob |
+| Execute | `SkillController.action_for(index, state)` | latest protobuf `GameState`, selected skill | one protobuf `PlayerAction` and `info.decision` |
+| Simulate | `DoomAgentEnv.step()` | action stream over `DoomAgentClient` | next `GameState`, reward, done, metadata |
+| Remember | `SkillController.record_action_history()` | macro-step outcome | next observation history features |
+
+The boundary is strict:
+
+- PPO sees feature vectors, masks, rewards, and trajectory metadata.
+- `SkillController` sees a selected skill index and the current protobuf state.
+- `BrainPolicy` owns the local mechanics: aim, movement, firing cadence, use
+  timing, stuck recovery, and fallback behavior.
+- PPO never sends raw `ticcmd` and never receives controller internals such as
+  logits or gradients.
+
+The exported schema for this handshake is
+`restfuldoom_agent.schemas.DECISION_CYCLE_SCHEMA`
+(`restfuldoom.decision_cycle.v1`). Rollout rows include a compact
+`info.decision_cycle` payload with input/output ticks and schema ids, so a
+training artifact can be audited without replaying the code.
+
+## 2. Memory Layer
+
+`AgentMemory` is not a hidden neural state. It is a JSON world ledger and
+training checkpoint index, persisted at `agent_memory/e1m1.json` using schema
+`restfuldoom.agent_memory.v1`.
+
+Concrete persisted shape:
+
+```json
+{
+  "schema": "restfuldoom.agent_memory.v1",
+  "cells": {
+    "23:-36": {
+      "visits": 42,
+      "enemy_sightings": 3,
+      "damage_events": 0,
+      "last_seen_tick": 12345
+    }
+  },
+  "enemies": {
+    "57": {
+      "last_seen_tick": 12345,
+      "last_position": [1526.1, -2538.7],
+      "last_distance": 717.0,
+      "last_health": 20,
+      "line_of_sight": true
+    }
+  },
+  "episodes": [],
+  "policy": {},
+  "learned_policy": {},
+  "ppo_policy": {},
+  "ppo_checkpoints": []
+}
+```
+
+Concrete query paths:
+
+| Query | Reader | Purpose |
+| --- | --- | --- |
+| `AgentMemory.best_params()` | deterministic trainer | load promoted controller parameters |
+| `AgentMemory.remembered_enemies(x, y, tick, max_age_tics)` | `extract_features()` | recover recent enemy sightings when line of sight drops |
+| `AgentMemory.summary()` | CLI / MCP operator surface | inspect progress and failures |
+
+Concrete update paths:
+
+| Update | Writer | Purpose |
+| --- | --- | --- |
+| `AgentMemory.record_step(...)` | deterministic `run_brain_episode()` | write cells, enemy sightings, damage events, and lessons |
+| `AgentMemory.finish_episode(...)` | deterministic `run_brain_episode()` | append compact episode summary and promote params |
+| `ppo_agent._record_ppo_checkpoint(...)` | PPO training | write checkpoint lineage and rollout summary |
+| `ppo_agent._record_eval_history(...)` | PPO eval | write promotion-gate outcomes |
+| `train_skill_policy_from_memory(...)` | behavior cloning | write learned selector metadata |
+
+PPO does not write persistent memory on every macro-step. During collection,
+memory-backed features are read-only; episode-local controller history is
+updated in `SkillController`. Persistent writes happen after checkpoints,
+evals, or deterministic episode completion. This keeps the inner loop fast and
+makes resume/export auditable.
+
+## 3. Skill Definitions
+
+Skills are currently code-defined options, not learned functions and not
+external config. The stable action space is:
+
+| Index | Skill | Learned Today | Code-Owned Today |
+| --- | --- | --- | --- |
+| 0 | `engage` | whether to approach/strafe a visible enemy | aim and movement primitive |
+| 1 | `fire` | when a shot opportunity is worth taking | target validation, cooldown, attack pulse |
+| 2 | `seek_enemy` | when remembered pursuit is useful | enemy selection and pursuit primitive |
+| 3 | `open_use_line` | when to act on a door/switch/use affordance | line targeting, turn/use timing |
+| 4 | `route_progression` | when route exploration beats combat | waypoint/progression movement |
+| 5 | `retreat` | when danger warrants distance | backing/strafe mechanics |
+| 6 | `recover_stuck` | when to interrupt for recovery | unstuck sequence |
+| 7 | `press_exit` | when exit affordances should dominate | exit alignment and use |
+
+The machine-readable definition is
+`restfuldoom_agent.schemas.ACTION_SCHEMA` (`restfuldoom.skill_action.v1`).
+Each checkpoint and rollout buffer carries the action schema, including index,
+name, controller entrypoint, role, primary signal, fallback, mask semantics,
+and evolution rule.
+
+The important rule: PPO learns the selector, not the primitive. A future skill
+may become config-backed or internally learned only if the same index/name
+contract remains valid for old checkpoints.
+
+## 4. Protobuf State To Learning Observation
+
+The protobuf stream is richer than screenshots but still not equal to a full
+learning observation. The current observation contract is
+`restfuldoom.observation.v1`; it combines:
+
+- live protobuf state: player, level, enemies, combat probe, navigation probes,
+  use lines, current sector, route waypoint
+- memory queries: remembered enemies and blocked-target state
+- controller state: stuck status and previous macro-action summary
+- bounded temporal context: movement delta, enemy-distance trend,
+  route-distance trend, cell streak, recent visible/shootable flags, route
+  progress/failure
+
+This is enough for local combat-start PPO: from-scratch masked PPO learned to
+kill from a validated combat reset. It is not enough yet for full spawn-to-exit
+competence. Current live evidence says spawn-only PPO can make route progress,
+but still often fails to bridge from spawn to first shootable contact.
+
+Observation gap register:
+
+| Gap | Current Signal | Missing Signal | Next Implementation |
+| --- | --- | --- | --- |
+| Spawn to first combat | route waypoint, temporal route progress, remembered enemies | compact route/topology state or progressed-map snapshot | add topology graph features or Hellbox/Shrink snapshot curriculum |
+| Contact to shootable | visible enemy distance, contact use-line memory, first-shootable reward | doorway/contact local geometry over time | validate shootable reset stage or add contact-ray/topology features |
+| Combat target quality | shootable yes/no, target distance, enemy health | aim error, weapon range quality, cooldown window | extend protobuf combat probe |
+| Survival threat | sector hazard, health deltas | projectile and incoming-damage prediction | add projectile/threat affordances |
+| Replayability | reset label and fresh starts | deterministic RNG and progressed map state | wire `seed_applied=true` and snapshot restore |
+
+The promotion rule should stay strict while this is incomplete. Reward shaping
+can train intermediate curricula, but a promoted full policy still needs level
+completion, kills, survival, and baseline comparison.

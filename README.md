@@ -175,8 +175,9 @@ promote better policies.
 
 For the concrete boundary between the fast controller, learned decision layer,
 memory file, skill action space, and PPO observation vector, see
-`docs/agent-learning-architecture.md`. The same contracts are exported in
-trajectory/checkpoint metadata as `restfuldoom.decision_cycle.v1`,
+`docs/agent-learning-architecture.md` and `docs/agent-runtime-contracts.md`.
+The same contracts are exported in trajectory/checkpoint metadata as
+`restfuldoom.decision_cycle.v1`,
 `restfuldoom.agent_memory_contract.v1`, `restfuldoom.observation.v1`, and
 `restfuldoom.skill_action.v1`.
 
