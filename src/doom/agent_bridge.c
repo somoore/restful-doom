@@ -9,6 +9,7 @@
 #include "g_game.h"
 #include "info.h"
 #include "p_local.h"
+#include "r_main.h"
 #include "r_state.h"
 #include "tables.h"
 
@@ -18,6 +19,8 @@ static fixed_t agent_probe_height;
 static int agent_probe_blocking_line_special;
 static int agent_probe_block_distance_fp;
 static boolean agent_probe_use_line_ahead;
+static boolean agent_pending_start_active = false;
+static agent_control_request_t agent_pending_start;
 
 #define AGENT_NAV_PROBE_DISTANCE (96 * FRACUNIT)
 
@@ -55,6 +58,18 @@ static uint32_t AngleToDegrees(angle_t angle)
 static angle_t DegreesToAngleOffset(int degrees)
 {
     return (angle_t) (((int64_t) degrees * (int64_t) ANG_MAX) / 360);
+}
+
+static angle_t DegreesToAngle(int degrees)
+{
+    int normalized = degrees % 360;
+
+    if (normalized < 0)
+    {
+        normalized += 360;
+    }
+
+    return (angle_t) (((uint64_t) normalized * (uint64_t) ANG_MAX) / 360ULL);
 }
 
 static uint32_t WeaponMask(const player_t *player)
@@ -393,6 +408,130 @@ static boolean IsLivingEnemy(const mobj_t *obj)
     return obj != NULL && obj->health > 0 && (obj->flags & MF_COUNTKILL) != 0;
 }
 
+static mobj_t *FindNearestLivingEnemy(const mobj_t *player)
+{
+    thinker_t *thinker;
+    mobj_t *nearest = NULL;
+    fixed_t nearest_distance = INT32_MAX;
+
+    if (player == NULL)
+    {
+        return NULL;
+    }
+
+    for (thinker = thinkercap.next; thinker != &thinkercap; thinker = thinker->next)
+    {
+        mobj_t *obj;
+        fixed_t distance;
+
+        if (thinker->function.acp1 != (actionf_p1) P_MobjThinker)
+        {
+            continue;
+        }
+
+        obj = (mobj_t *) thinker;
+        if (!IsLivingEnemy(obj))
+        {
+            continue;
+        }
+
+        distance = P_AproxDistance(player->x - obj->x, player->y - obj->y);
+        if (nearest == NULL || distance < nearest_distance)
+        {
+            nearest = obj;
+            nearest_distance = distance;
+        }
+    }
+
+    return nearest;
+}
+
+static void ApplyPendingStart(void)
+{
+    player_t *player;
+    mobj_t *mo;
+
+    if (!agent_pending_start_active)
+    {
+        return;
+    }
+
+    if (gamestate != GS_LEVEL
+        || consoleplayer < 0
+        || consoleplayer >= MAXPLAYERS
+        || !playeringame[consoleplayer])
+    {
+        return;
+    }
+
+    player = &players[consoleplayer];
+    mo = player->mo;
+    if (mo == NULL)
+    {
+        return;
+    }
+
+    if (agent_pending_start.episode != gameepisode
+        || agent_pending_start.map != gamemap)
+    {
+        return;
+    }
+
+    if ((agent_pending_start.flags & AGENT_CONTROL_FLAG_START_POSITION) != 0)
+    {
+        if (P_TeleportMove(
+                mo,
+                (fixed_t) agent_pending_start.start_x_fp,
+                (fixed_t) agent_pending_start.start_y_fp))
+        {
+            mo->z = mo->floorz;
+            player->viewz = mo->z + player->viewheight;
+            mo->momx = mo->momy = mo->momz = 0;
+            mo->reactiontime = 0;
+        }
+    }
+
+    if ((agent_pending_start.flags & AGENT_CONTROL_FLAG_FACE_NEAREST_ENEMY) != 0)
+    {
+        mobj_t *enemy = FindNearestLivingEnemy(mo);
+        if (enemy != NULL)
+        {
+            mo->angle = R_PointToAngle2(mo->x, mo->y, enemy->x, enemy->y);
+        }
+    }
+    else if ((agent_pending_start.flags & AGENT_CONTROL_FLAG_START_POSITION) != 0)
+    {
+        mo->angle = DegreesToAngle(agent_pending_start.start_angle_degrees);
+    }
+
+    if ((agent_pending_start.flags & AGENT_CONTROL_FLAG_APPLY_RESOURCES) != 0)
+    {
+        const int health = ClampInt(agent_pending_start.start_health, 1, 200);
+
+        player->health = health;
+        mo->health = health;
+        player->armorpoints = ClampInt(agent_pending_start.start_armor, 0, 200);
+        player->ammo[am_clip] = ClampInt(
+            agent_pending_start.start_ammo_bullets,
+            0,
+            player->maxammo[am_clip]);
+        player->ammo[am_shell] = ClampInt(
+            agent_pending_start.start_ammo_shells,
+            0,
+            player->maxammo[am_shell]);
+        player->ammo[am_cell] = ClampInt(
+            agent_pending_start.start_ammo_cells,
+            0,
+            player->maxammo[am_cell]);
+        player->ammo[am_misl] = ClampInt(
+            agent_pending_start.start_ammo_rockets,
+            0,
+            player->maxammo[am_misl]);
+    }
+
+    agent_pending_start_active = false;
+}
+
 static void FillPlayerState(agent_game_state_snapshot_t *snapshot)
 {
     player_t *player;
@@ -506,6 +645,8 @@ void AgentBridge_AfterTic(int completed_tic)
         return;
     }
 
+    ApplyPendingStart();
+
     memset(&snapshot, 0, sizeof(snapshot));
     snapshot.tick = (uint64_t) completed_tic;
     snapshot.episode = gameepisode;
@@ -548,6 +689,14 @@ void AgentBridge_BeforeTic(void)
                 G_DeferedInitNew((skill_t) ClampInt(request.skill, sk_baby, sk_nightmare),
                                  request.episode,
                                  request.map);
+                if ((request.flags
+                     & (AGENT_CONTROL_FLAG_START_POSITION
+                        | AGENT_CONTROL_FLAG_FACE_NEAREST_ENEMY
+                        | AGENT_CONTROL_FLAG_APPLY_RESOURCES)) != 0)
+                {
+                    agent_pending_start = request;
+                    agent_pending_start_active = true;
+                }
                 break;
             default:
                 break;

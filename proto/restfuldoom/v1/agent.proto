@@ -36,6 +36,29 @@ message ResetEpisodeRequest {
 
   // Optional caller run identifier for logs and trajectory correlation.
   string run_id = 5;
+
+  // Optional curriculum start applied after the fresh level reset.
+  EpisodeStart start = 6;
+}
+
+// Optional post-reset curriculum start for focused learning.
+message EpisodeStart {
+  // Target player map position. If omitted, the normal map spawn is used.
+  Vec3Fixed position = 1;
+
+  // Target player facing when face_nearest_enemy is false.
+  uint32 angle_degrees = 2;
+
+  // When true, face the nearest living enemy after the optional teleport.
+  bool face_nearest_enemy = 3;
+
+  // Optional player resources applied only when apply_resources is true.
+  int32 health = 4;
+  int32 armor = 5;
+  Ammo ammo = 6;
+
+  // Applies health, armor, and ammo values when true.
+  bool apply_resources = 7;
 }
 
 // Reset acceptance details from the gRPC bridge.
@@ -56,6 +79,9 @@ message ResetEpisodeResponse {
 
   // True only when the engine bridge applies the requested seed.
   bool seed_applied = 7;
+
+  // True when an optional EpisodeStart was queued with the reset.
+  bool start_queued = 8;
 }
 
 // A full game-state observation optimized for AI agents.

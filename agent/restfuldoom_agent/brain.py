@@ -438,6 +438,37 @@ class AgentMemory:
         if decision.get("skill") == "open_or_probe":
             stats.opened_or_used += 1
 
+    def remembered_enemies(
+        self,
+        *,
+        x_units: float,
+        y_units: float,
+        tick: int,
+        max_age_tics: int,
+    ) -> list[dict[str, Any]]:
+        """Return recent enemy sightings from persistent memory for the current pose."""
+        remembered = []
+        for enemy_id, entry in self.data.get("enemies", {}).items():
+            last_tick = int(entry.get("last_seen_tick", -999999))
+            tick_age = int(tick) - last_tick
+            if tick_age < 0 or tick_age > max_age_tics:
+                continue
+            last_position = entry.get("last_position")
+            if not isinstance(last_position, list) or len(last_position) != 2:
+                continue
+            ex, ey = float(last_position[0]), float(last_position[1])
+            remembered.append(
+                {
+                    "id": int(enemy_id),
+                    "x": ex,
+                    "y": ey,
+                    "distance": math.dist((x_units, y_units), (ex, ey)),
+                    "last_seen_tick": last_tick,
+                }
+            )
+        remembered.sort(key=lambda item: (item["distance"], -item["last_seen_tick"]))
+        return remembered
+
     def finish_episode(
         self,
         *,
@@ -2611,7 +2642,6 @@ def extract_features(
     )
     visible = []
     known = []
-    remembered = []
 
     for enemy in state.enemies:
         enemy_obj = enemy.object
@@ -2638,27 +2668,12 @@ def extract_features(
     visible.sort(key=lambda item: (-item["threat"], item["distance"]))
     known.sort(key=lambda item: (item["distance"], abs(item["angle_delta"])))
 
-    enemies = memory.data.get("enemies", {})
-    for enemy_id, entry in enemies.items():
-        last_tick = int(entry.get("last_seen_tick", -999999))
-        tick_age = int(state.tick) - last_tick
-        if tick_age < 0 or tick_age > params.enemy_memory_tics:
-            continue
-        last_position = entry.get("last_position")
-        if not isinstance(last_position, list) or len(last_position) != 2:
-            continue
-        ex, ey = float(last_position[0]), float(last_position[1])
-        distance = math.dist((x, y), (ex, ey))
-        remembered.append(
-            {
-                "id": int(enemy_id),
-                "x": ex,
-                "y": ey,
-                "distance": distance,
-                "last_seen_tick": last_tick,
-            }
-        )
-    remembered.sort(key=lambda item: (item["distance"], -item["last_seen_tick"]))
+    remembered = memory.remembered_enemies(
+        x_units=x,
+        y_units=y,
+        tick=int(state.tick),
+        max_age_tics=params.enemy_memory_tics,
+    )
 
     return TacticalFeatures(
         tick=int(state.tick),

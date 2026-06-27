@@ -264,6 +264,9 @@ The training API is:
 - `--reset-warmup-*` can run bounded heuristic curriculum warmup before PPO
   collection starts, with warmup tics and stop reasons reported in rollout
   summaries.
+- `--reset-start-*` can request a fresh-reset curriculum start: position,
+  facing, health, armor, and ammo are applied inside Doom before the first
+  training observation is published.
 - `restfuldoom_agent.ppo` provides actor-critic PPO, GAE, clipped objective,
   entropy bonus, rollout JSONL buffers, checkpoint save/load, and a promotion
   gate.
@@ -271,6 +274,9 @@ The training API is:
   can receive feedback before a full kill lands. They also include nearest-enemy
   distance progress from protobuf enemy distances, so early policies get
   navigation signal before line of sight.
+- Checkpoints and rollout buffers carry `restfuldoom.observation.v1` and
+  `restfuldoom.skill_action.v1`, including feature descriptors and
+  machine-readable definitions for each PPO skill.
 
 Run a small PPO batch against a live gRPC Doom endpoint:
 
@@ -300,10 +306,29 @@ PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
     --memory-path agent_memory/e1m1.json
 ```
 
-Bounded curriculum warmup is available for experiments, but current local
+Fresh combat-start curriculum is available for fast PPO experiments:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
+    --endpoint 127.0.0.1:50051 \
+    --goal-preset combat \
+    --updates 8 \
+    --rollout-steps 128 \
+    --checkpoint-dir agent_models/ppo \
+    --buffer-dir trajectories/ppo \
+    --memory-path agent_memory/e1m1.json \
+    --reset-start-x-fp 212860928 \
+    --reset-start-y-fp -214958080 \
+    --reset-start-face-nearest-enemy \
+    --reset-start-health 100 \
+    --reset-start-ammo-bullets 50
+```
+
+Bounded curriculum warmup is still available for experiments, but current local
 evidence shows that repeatedly warming from the default E1M1 spawn is too slow
-for the PPO inner loop. The next training unlock is cached combat starts or
-server-side snapshot restore.
+for the PPO inner loop. Fresh-reset `EpisodeStart` is useful for combat
+curriculum, while true save-state or Hellbox/Shrink snapshot restore is still
+needed for progressed-map curriculum.
 
 The checkpoint schema is `restfuldoom.ppo_checkpoint.v1`. Each checkpoint
 stores model weights, optimizer state, PPO config, observation/action schemas,

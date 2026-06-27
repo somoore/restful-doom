@@ -6,6 +6,7 @@ import pytest
 from restfuldoom_agent.client import EpisodeReset
 from restfuldoom_agent.client import agent_pb2
 from restfuldoom_agent.env import DoomAgentEnv, DoomEnvConfig, SKILL_ACTIONS, SkillController
+from restfuldoom_agent.schemas import OBSERVATION_SCHEMA
 
 
 def test_skill_controller_encodes_observation_and_executes_each_skill(tmp_path):
@@ -14,7 +15,7 @@ def test_skill_controller_encodes_observation_and_executes_each_skill(tmp_path):
 
     obs = controller.observation(state)
 
-    assert len(obs) > 10
+    assert len(obs) == len(OBSERVATION_SCHEMA["feature_names"])
     for index, skill in enumerate(SKILL_ACTIONS):
         action, decision = controller.action_for(index, state)
         assert action is not None
@@ -41,10 +42,59 @@ def test_doom_agent_env_reset_step_with_fake_client():
     obs, step = asyncio.run(run())
 
     assert len(obs) == len(step.observation)
-    assert client.reset_requests == [{"skill": 2, "episode": 1, "map": 1, "seed": 99}]
+    assert len(obs) == len(OBSERVATION_SCHEMA["feature_names"])
+    assert client.reset_requests == [
+        {"skill": 2, "episode": 1, "map": 1, "seed": 99, "start": None}
+    ]
     assert step.reward > 0
     assert step.info["skill"] == "fire"
     assert not step.done
+
+
+def test_skill_controller_observation_includes_previous_action_history():
+    controller = SkillController()
+    state = _state(enemy=True, combat=True)
+
+    initial = dict(zip(OBSERVATION_SCHEMA["feature_names"], controller.observation(state)))
+    controller.record_action_history(action_index=1, had_shootable_target=True)
+    after_fire = dict(zip(OBSERVATION_SCHEMA["feature_names"], controller.observation(state)))
+
+    assert initial["prev_skill_fire"] == 0.0
+    assert initial["prev_had_shootable_target"] == 0.0
+    assert after_fire["prev_skill_fire"] == 1.0
+    assert after_fire["prev_had_shootable_target"] == 1.0
+    assert after_fire["same_skill_streak_norm"] > 0.0
+
+
+def test_doom_agent_env_reset_sends_curriculum_start():
+    first = _state(tick=1, enemy=False)
+    client = _FakeClient([first])
+    env = DoomAgentEnv(
+        DoomEnvConfig(
+            reset_start_x_fp=1024 * 65536,
+            reset_start_y_fp=-512 * 65536,
+            reset_start_angle_degrees=90,
+            reset_start_face_nearest_enemy=True,
+            reset_start_health=95,
+            reset_start_ammo_bullets=37,
+        ),
+        client=client,
+        controller=SkillController(),
+    )
+
+    async def run():
+        await env.reset(seed=99)
+        await env.close()
+
+    asyncio.run(run())
+
+    start = client.reset_requests[0]["start"]
+    assert start.x_fp == 1024 * 65536
+    assert start.y_fp == -512 * 65536
+    assert start.angle_degrees == 90
+    assert start.face_nearest_enemy
+    assert start.health == 95
+    assert start.ammo_bullets == 37
 
 
 def test_doom_agent_env_aggregates_macro_action_tics():
@@ -180,9 +230,9 @@ class _FakeClient:
         self.actions = []
         self.reset_requests = []
 
-    async def reset_episode(self, *, skill, episode, map, seed, run_id):
+    async def reset_episode(self, *, skill, episode, map, seed, run_id, start=None):
         self.reset_requests.append(
-            {"skill": skill, "episode": episode, "map": map, "seed": seed}
+            {"skill": skill, "episode": episode, "map": map, "seed": seed, "start": start}
         )
         return EpisodeReset(
             accepted=True,
@@ -192,6 +242,7 @@ class _FakeClient:
             map=map,
             seed=seed,
             seed_applied=False,
+            start_queued=False,
         )
 
     async def session(self, actions):

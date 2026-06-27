@@ -27,6 +27,8 @@ flowchart TD
     Decision --> Memory
     Memory --> Features
     Memory --> Decision
+    Controller --> History["Macro-action history"]
+    History --> Features
 ```
 
 The loop has these concrete implementations:
@@ -62,11 +64,25 @@ three decision sources:
 - `PPOTrainer`: actor-critic model that independently chooses one of the PPO
   skill actions from reward feedback.
 
-`SkillController.action_for(action_index, state)` is the bridge. PPO selects a
-skill index. The controller maps that skill into the existing fast controller
-logic and returns a concrete protobuf `PlayerAction`. `DoomAgentEnv.step()`
-then waits through the action duration and reports one aggregated macro-step
-back to PPO.
+The bridge is an explicit macro-step handshake:
+
+1. `DoomAgentEnv.step(action_index)` receives one PPO skill action.
+2. `SkillController.action_for(action_index, state)` extracts tactical features
+   from the latest protobuf `GameState` and returns one concrete protobuf
+   `PlayerAction`.
+3. `DoomAgentEnv` sends that action over the bidirectional gRPC stream and
+   waits through its bounded `duration_tics`.
+4. The environment aggregates reward, transition metadata, and terminal state
+   across those tics.
+5. `SkillController.record_action_history()` stores the previous skill,
+   shootable-target opportunity, and same-skill streak for the next
+   observation.
+6. The next PPO observation is current protobuf state plus memory-derived
+   features plus that macro-action history.
+
+`SkillController.reset_episode_context()` clears the action-history features at
+episode boundaries and after heuristic reset warmup, so PPO does not inherit
+stale controller state from a previous episode.
 
 ## Skill Representation
 
@@ -81,10 +97,17 @@ The PPO skill action space is in `restfuldoom_agent.schemas.PPO_SKILL_ACTIONS`:
 - `recover_stuck`
 - `press_exit`
 
-These are currently code-defined skills, not external config. That is
-intentional while the low-level behavior is still being hardened. Each skill is
-implemented as a branch in `SkillController._execute_skill()` and delegates to
-small controller methods in `BrainPolicy`.
+These are currently code-defined skills, not learned movement primitives. Each
+skill is implemented as a branch in `SkillController._execute_skill()` and
+delegates to small controller methods in `BrainPolicy`.
+
+The action space is now also exported as data through
+`restfuldoom_agent.schemas.ACTION_SCHEMA` using schema
+`restfuldoom.skill_action.v1`. Checkpoints, rollout buffers, and training-job
+bundles carry a definition for every skill: index, name, controller entrypoint,
+role, primary signal, and fallback. This is enough for a future cloud worker or
+MCP surface to inspect "what action 3 means" without importing private
+controller internals.
 
 The learned policies do not learn the movement primitive itself yet. They learn
 when to call the primitive. That keeps the first independent RL objective
@@ -111,10 +134,17 @@ The important sections are:
   and eval history.
 - `ppo_checkpoints`: exported PPO checkpoint lineage.
 
-Memory is updated during real rollouts by `AgentMemory.record_step()` and
-`AgentMemory.finish_episode()`. PPO writes checkpoint metadata through
-`ppo_agent._record_ppo_checkpoint()` and writes eval outcomes through
-`ppo_agent._record_eval_history()`.
+Memory has named update and query paths:
+
+- `AgentMemory.record_step()` updates cells, enemy sightings, damage events,
+  and per-episode stats after each real rollout transition.
+- `AgentMemory.finish_episode()` appends compact rollout summaries and promotes
+  deterministic policy parameters when the candidate beats stored policy memory.
+- `AgentMemory.remembered_enemies()` is the explicit query path for feature
+  extraction. It returns recent enemy sightings by id, last position, last tick,
+  and current distance while rejecting stale or future-tick records.
+- PPO writes checkpoint metadata through `ppo_agent._record_ppo_checkpoint()`
+  and eval outcomes through `ppo_agent._record_eval_history()`.
 
 Memory is not a neural hidden state. It is an explicit, inspectable world and
 training ledger. The learned model gets compact features derived from current
@@ -124,8 +154,11 @@ stuck state, and blocked targets.
 ## Observation Contract
 
 PPO receives the feature vector declared in
-`restfuldoom_agent.skill_policy.FEATURE_NAMES`. It is derived from protobuf
-state, not screenshots. Current feature groups are:
+`restfuldoom_agent.schemas.OBSERVATION_SCHEMA`. It is derived from protobuf
+state, memory, and macro-action history, not screenshots. The current schema has
+52 features: 42 base tactical features plus 10 action-history features.
+
+The base feature groups are:
 
 - player health, ammo, kills, and items
 - normalized map position and facing
@@ -136,13 +169,19 @@ state, not screenshots. Current feature groups are:
 - usable-line and exit-line affordances
 - stuck and blocked-target indicators
 
+The action-history group is:
+
+- one-hot previous PPO skill
+- whether the previous macro-step had a shootable target
+- same-skill streak normalized by 8
+
 This is good enough for early skill learning, but it is not yet a complete
 learning observation. Known gaps:
 
 - No compact topological map graph, only local probes plus coarse cell memory.
 - No explicit sector type, floor damage, or hazard affordance in the PPO vector.
-- No recent action history beyond what the recurrent-free policy can infer from
-  state changes.
+- Only one macro-step of action history; there is no recurrent state or longer
+  temporal context yet.
 - No normalized objective/route waypoint beyond optional target coordinates in
   reward config.
 - No enemy projectile or incoming-damage prediction.
@@ -184,8 +223,25 @@ reward and the promotion gate still decide whether the checkpoint is useful.
 
 ## Reset Curriculum
 
-`DoomAgentEnv` can optionally run heuristic-only warmup after reset and before
-PPO starts collecting transitions. Warmup can stop on:
+`DoomAgentEnv` has two curriculum mechanisms.
+
+First, it can ask the server to apply a fresh-reset `EpisodeStart` through
+`ResetEpisode`. The start can include:
+
+- player position
+- explicit angle or `face_nearest_enemy`
+- health and armor
+- starting ammo
+
+The C game loop applies this on the simulation thread after `G_DeferedInitNew`
+and before publishing the next protobuf state. This is not a save-state restore:
+the level is still freshly reset, so opened doors, enemy movement, and map
+mutations from a later trajectory are not replayed. It is useful for cheap
+combat starts and should eventually be replaced or complemented by true
+snapshot restore for long-route curriculum.
+
+Second, the environment can optionally run heuristic-only warmup after reset and
+before PPO starts collecting transitions. Warmup can stop on:
 
 - first visible enemy
 - first shootable combat target
@@ -195,22 +251,45 @@ PPO starts collecting transitions. Warmup can stop on:
 
 The rollout summary reports warmup steps, tics, and stop reasons. Current local
 evidence shows naive warmup from the default E1M1 spawn is too expensive for the
-inner PPO loop and often hits the tic limit before reaching combat. The next
-real unlock is cached start states or server-side snapshot restore so PPO can
-train from combat-relevant initial states without replaying the whole route
-from spawn every reset.
+inner PPO loop and often hits the tic limit before reaching combat.
+
+The useful fresh-reset combat start found so far is:
+
+- Doom units: `x=3248`, `y=-3280`
+- fixed-point: `x_fp=212860928`, `y_fp=-214958080`
+- flags: `face_nearest_enemy=true`, `health=100`, `ammo_bullets=50`
+
+From that start, protobuf reports line of sight to three enemies and an
+immediate shootable target after reset.
+
+## Current Learning Evidence
+
+The deterministic structured brain has already met the project's first good
+state: complete E1M1 and kill enemies along the way. PPO is still in transition.
+
+Recent PPO evidence:
+
+- `ppo-episode-start-combat-smoke`: BC-warm PPO from the fresh combat start got
+  `max_kills=1` in all three 128-transition updates, with `damage_delta` 60,
+  65, and 70. This proves the PPO environment/reward/controller loop can score
+  combat, but it is not pure independent learning because BC initialized the
+  actor.
+- `ppo-independent-combat-start-smoke`: PPO from scratch improved fire
+  selections from 15/128 to 43/128, action reward from `1.91` to `11.73`, total
+  reward from `12.4953` to `23.2953`, and late-update damage back to 40. It did
+  not score a kill in eight short updates. This is the first independent
+  reward-driven learning signal, not a promotable policy.
 
 ## Next Architecture Work
 
 The next useful changes are:
 
 - Add hazard/sector features to the PPO observation vector.
-- Add short action-history features, such as previous skill and previous
-  shootable-target state.
-- Add server-side curriculum starts, either through save-state restore or
-  Hellbox/Shrink snapshot restore, so PPO can train from cached combat states.
+- Extend action history beyond one macro-step or add a recurrent policy.
+- Add true save-state or Hellbox/Shrink snapshot restore so PPO can train from
+  progressed map states, not only fresh-reset teleport starts.
 - Promote combat affordances from binary target presence to richer target
   quality, including aim error, weapon range, and cooldown.
-- Make skill definitions data-described after the set stabilizes, so training
-  jobs can declare the action space without reading code.
+- Move skill definitions from exported descriptors to optional external config
+  after the action set stabilizes.
 - Wire true deterministic seed application in the Doom reset path.

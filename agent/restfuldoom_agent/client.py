@@ -97,6 +97,23 @@ class EpisodeReset:
     map: int
     seed: int
     seed_applied: bool
+    start_queued: bool
+
+
+@dataclass(frozen=True)
+class EpisodeStart:
+    """Optional post-reset curriculum start."""
+
+    x_fp: int | None = None
+    y_fp: int | None = None
+    angle_degrees: int = 0
+    face_nearest_enemy: bool = False
+    health: int | None = None
+    armor: int | None = None
+    ammo_bullets: int | None = None
+    ammo_shells: int | None = None
+    ammo_cells: int | None = None
+    ammo_rockets: int | None = None
 
 
 class DoomAgentStreamError(RuntimeError):
@@ -120,6 +137,46 @@ def semantic_action(
         action=action,
         amount=amount,
         duration_tics=duration_tics,
+    )
+
+
+def _episode_start_proto(start: EpisodeStart | None) -> Any | None:
+    if start is None:
+        return None
+
+    position = None
+    if start.x_fp is not None and start.y_fp is not None:
+        position = agent_pb2.Vec3Fixed(
+            x_fp=int(start.x_fp),
+            y_fp=int(start.y_fp),
+            z_fp=0,
+        )
+
+    apply_resources = any(
+        value is not None
+        for value in (
+            start.health,
+            start.armor,
+            start.ammo_bullets,
+            start.ammo_shells,
+            start.ammo_cells,
+            start.ammo_rockets,
+        )
+    )
+    ammo = agent_pb2.Ammo(
+        bullets=0 if start.ammo_bullets is None else int(start.ammo_bullets),
+        shells=0 if start.ammo_shells is None else int(start.ammo_shells),
+        cells=0 if start.ammo_cells is None else int(start.ammo_cells),
+        rockets=0 if start.ammo_rockets is None else int(start.ammo_rockets),
+    )
+    return agent_pb2.EpisodeStart(
+        position=position,
+        angle_degrees=int(start.angle_degrees) % 360,
+        face_nearest_enemy=bool(start.face_nearest_enemy),
+        health=100 if start.health is None else int(start.health),
+        armor=0 if start.armor is None else int(start.armor),
+        ammo=ammo,
+        apply_resources=apply_resources,
     )
 
 
@@ -168,6 +225,7 @@ class DoomAgentClient:
         map: int = 1,
         seed: int = 0,
         run_id: str = "",
+        start: EpisodeStart | None = None,
     ) -> EpisodeReset:
         """Queues a fast episode reset on Doom's simulation thread."""
         response = await self.stub.ResetEpisode(
@@ -177,6 +235,7 @@ class DoomAgentClient:
                 map=int(map),
                 seed=int(seed),
                 run_id=run_id,
+                start=_episode_start_proto(start),
             ),
             metadata=self.metadata,
         )
@@ -188,6 +247,7 @@ class DoomAgentClient:
             map=int(response.map),
             seed=int(response.seed),
             seed_applied=bool(response.seed_applied),
+            start_queued=bool(getattr(response, "start_queued", False)),
         )
 
     async def observe_reconnecting(

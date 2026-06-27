@@ -28,6 +28,7 @@ __pycache__
 agent/restfuldoom_agent/generated
 trajectories/
 training-jobs/*.tar.gz
+agent_models/ppo/*.pt
 
 # These are the default patterns globally ignored by Subversion:
 *.o

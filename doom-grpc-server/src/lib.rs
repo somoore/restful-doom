@@ -132,6 +132,7 @@ impl DoomAgent for AgentRuntime {
             map: control.map,
             seed: control.seed,
             seed_applied: false,
+            start_queued: control.flags & AGENT_CONTROL_FLAG_START_POSITION != 0,
         }))
     }
 }
@@ -348,16 +349,41 @@ fn control_request_from_proto(request: &ResetEpisodeRequest) -> AgentControlRequ
         request.episode
     };
     let map = if request.map <= 0 { 1 } else { request.map };
-
-    AgentControlRequest {
+    let mut control = AgentControlRequest {
         command: AGENT_CONTROL_RESET_EPISODE,
         skill,
         episode,
         map,
         seed: request.seed,
-        flags: 0,
-        _reserved: [0; 4],
+        ..AgentControlRequest::default()
+    };
+
+    if let Some(start) = request.start.as_ref() {
+        if let Some(position) = start.position.as_ref() {
+            control.flags |= AGENT_CONTROL_FLAG_START_POSITION;
+            control.start_x_fp = position.x_fp;
+            control.start_y_fp = position.y_fp;
+        }
+        if start.face_nearest_enemy {
+            control.flags |= AGENT_CONTROL_FLAG_FACE_NEAREST_ENEMY;
+        }
+        if start.apply_resources {
+            control.flags |= AGENT_CONTROL_FLAG_APPLY_RESOURCES;
+            control.start_health = start.health.max(1);
+            control.start_armor = start.armor.max(0);
+            if let Some(ammo) = start.ammo.as_ref() {
+                control.start_ammo_bullets = ammo.bullets.max(0);
+                control.start_ammo_shells = ammo.shells.max(0);
+                control.start_ammo_cells = ammo.cells.max(0);
+                control.start_ammo_rockets = ammo.rockets.max(0);
+            }
+        }
+        if start.angle_degrees > 0 || start.face_nearest_enemy {
+            control.start_angle_degrees = (start.angle_degrees % 360) as i32;
+        }
     }
+
+    control
 }
 
 fn state_from_snapshot(snapshot: &AgentGameStateSnapshot) -> GameState {
@@ -701,6 +727,9 @@ pub struct AgentPlayerAction {
 }
 
 const AGENT_CONTROL_RESET_EPISODE: u32 = 1;
+const AGENT_CONTROL_FLAG_START_POSITION: u32 = 1;
+const AGENT_CONTROL_FLAG_FACE_NEAREST_ENEMY: u32 = 2;
+const AGENT_CONTROL_FLAG_APPLY_RESOURCES: u32 = 4;
 
 /// Fixed-size control request returned to Doom's game thread.
 #[repr(C)]
@@ -712,6 +741,15 @@ pub struct AgentControlRequest {
     pub map: i32,
     pub seed: u64,
     pub flags: u32,
+    pub start_x_fp: i32,
+    pub start_y_fp: i32,
+    pub start_angle_degrees: i32,
+    pub start_health: i32,
+    pub start_armor: i32,
+    pub start_ammo_bullets: i32,
+    pub start_ammo_shells: i32,
+    pub start_ammo_cells: i32,
+    pub start_ammo_rockets: i32,
     pub _reserved: [u8; 4],
 }
 
@@ -899,6 +937,7 @@ impl Default for AgentGameStateSnapshot {
 mod tests {
     use super::*;
     use proto::doom_agent_client::DoomAgentClient;
+    use proto::EpisodeStart;
     use tokio::time::{sleep, timeout, Duration};
 
     #[test]
@@ -935,6 +974,7 @@ mod tests {
             map: 0,
             seed: 123,
             run_id: "ppo-smoke".to_string(),
+            start: None,
         };
 
         let control = control_request_from_proto(&request);
@@ -944,6 +984,47 @@ mod tests {
         assert_eq!(control.episode, 1);
         assert_eq!(control.map, 1);
         assert_eq!(control.seed, 123);
+    }
+
+    #[test]
+    fn reset_request_carries_curriculum_start() {
+        let request = ResetEpisodeRequest {
+            skill: 2,
+            episode: 1,
+            map: 1,
+            seed: 123,
+            run_id: "combat-start".to_string(),
+            start: Some(EpisodeStart {
+                position: Some(Vec3Fixed {
+                    x_fp: 1_024 * 65_536,
+                    y_fp: -512 * 65_536,
+                    z_fp: 0,
+                }),
+                angle_degrees: 450,
+                face_nearest_enemy: true,
+                health: 95,
+                armor: 0,
+                ammo: Some(Ammo {
+                    bullets: 37,
+                    ..Ammo::default()
+                }),
+                apply_resources: true,
+            }),
+        };
+
+        let control = control_request_from_proto(&request);
+
+        assert_eq!(
+            control.flags,
+            AGENT_CONTROL_FLAG_START_POSITION
+                | AGENT_CONTROL_FLAG_FACE_NEAREST_ENEMY
+                | AGENT_CONTROL_FLAG_APPLY_RESOURCES
+        );
+        assert_eq!(control.start_x_fp, 1_024 * 65_536);
+        assert_eq!(control.start_y_fp, -512 * 65_536);
+        assert_eq!(control.start_angle_degrees, 90);
+        assert_eq!(control.start_health, 95);
+        assert_eq!(control.start_ammo_bullets, 37);
     }
 
     #[test]
@@ -1097,6 +1178,7 @@ mod tests {
                 map: 0,
                 seed: 321,
                 run_id: "roundtrip".to_string(),
+                start: None,
             })
             .await
             .expect("reset queues")

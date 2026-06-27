@@ -19,8 +19,14 @@ from .brain import (
     raw_ticcmd_action,
 )
 from .client import DoomAgentClient, agent_pb2, semantic_action, summarize_state
+from .client import EpisodeStart as ClientEpisodeStart
 from .reward import Goal, RewardEngine, TransitionReward, goal_preset
-from .schemas import ACTION_SCHEMA, OBSERVATION_SCHEMA, PPO_SKILL_ACTIONS
+from .schemas import (
+    ACTION_SCHEMA,
+    OBSERVATION_SCHEMA,
+    PPO_SKILL_ACTIONS,
+    encode_action_history_features,
+)
 from .skill_policy import features_from_tactical
 
 SKILL_ACTIONS = PPO_SKILL_ACTIONS
@@ -49,6 +55,13 @@ class DoomEnvConfig:
     required_kills: int = 1
     memory_path: Path | None = None
     reset_timeout_seconds: float = 5.0
+    reset_start_x_fp: int | None = None
+    reset_start_y_fp: int | None = None
+    reset_start_angle_degrees: int = 0
+    reset_start_face_nearest_enemy: bool = False
+    reset_start_health: int | None = None
+    reset_start_armor: int | None = None
+    reset_start_ammo_bullets: int | None = None
     max_action_tics: int = 8
     reset_warmup_steps: int = 0
     reset_warmup_max_tics: int = 0
@@ -97,11 +110,41 @@ class SkillController:
             policy_id=policy_id,
         )
         self.last_decision: dict[str, Any] = {}
+        self._previous_action_index: int | None = None
+        self._previous_had_shootable_target = False
+        self._same_skill_streak = 0
 
     def observation(self, state: Any) -> list[float]:
         """Encodes a protobuf state as the stable PPO feature vector."""
         features = extract_features(state, self.memory, self.params)
-        return features_from_tactical(features)
+        return [
+            *features_from_tactical(features),
+            *encode_action_history_features(
+                previous_action_index=self._previous_action_index,
+                previous_had_shootable_target=self._previous_had_shootable_target,
+                same_skill_streak=self._same_skill_streak,
+            ),
+        ]
+
+    def reset_episode_context(self) -> None:
+        """Clears stateful observation features at episode boundaries."""
+        self._previous_action_index = None
+        self._previous_had_shootable_target = False
+        self._same_skill_streak = 0
+
+    def record_action_history(
+        self,
+        *,
+        action_index: int,
+        had_shootable_target: bool,
+    ) -> None:
+        """Records the previous macro action for the next PPO observation."""
+        if self._previous_action_index == action_index:
+            self._same_skill_streak += 1
+        else:
+            self._same_skill_streak = 1
+        self._previous_action_index = action_index
+        self._previous_had_shootable_target = bool(had_shootable_target)
 
     def action_for(self, action_index: int, state: Any) -> tuple[Any, dict[str, Any]]:
         """Returns the PlayerAction for a PPO skill index."""
@@ -121,6 +164,14 @@ class SkillController:
         decision = dict(decision)
         decision["ppo_skill"] = skill
         decision["ppo_action_index"] = action_index
+        decision["previous_ppo_action_index"] = self._previous_action_index
+        decision["previous_ppo_skill"] = (
+            SKILL_ACTIONS[self._previous_action_index]
+            if self._previous_action_index is not None
+            else None
+        )
+        decision["previous_had_shootable_target"] = self._previous_had_shootable_target
+        decision["same_skill_streak"] = self._same_skill_streak
         self.policy.last_decision = decision
         self.last_decision = decision
         return action, decision
@@ -297,6 +348,8 @@ class DoomAgentEnv:
         await self._ensure_stream()
         self._steps = 0
         self._episode_index += 1
+        if hasattr(self.controller, "reset_episode_context"):
+            self.controller.reset_episode_context()
         reset_seed = self.config.seed if seed is None else seed
         reset = await self.client.reset_episode(
             skill=self.config.skill,
@@ -304,6 +357,7 @@ class DoomAgentEnv:
             map=self.config.map,
             seed=reset_seed,
             run_id=f"{self.config.run_id}-{self._episode_index}",
+            start=self._episode_start(),
         )
         state = await self._next_reset_state(reset.episode, reset.map)
         self._last_reset_warmup = {
@@ -314,11 +368,33 @@ class DoomAgentEnv:
         }
         if self.config.reset_warmup_steps > 0:
             state = await self._run_reset_warmup(state)
+            if hasattr(self.controller, "reset_episode_context"):
+                self.controller.reset_episode_context()
         self._reward_engine = RewardEngine(self.config.reward_goal())
         self._current_state = state
         self._start_level = (state.level.episode, state.level.map)
         self._start_kills = state.player.kills
         return self.controller.observation(state)
+
+    def _episode_start(self) -> ClientEpisodeStart | None:
+        if (
+            self.config.reset_start_x_fp is None
+            and self.config.reset_start_y_fp is None
+            and not self.config.reset_start_face_nearest_enemy
+            and self.config.reset_start_health is None
+            and self.config.reset_start_armor is None
+            and self.config.reset_start_ammo_bullets is None
+        ):
+            return None
+        return ClientEpisodeStart(
+            x_fp=self.config.reset_start_x_fp,
+            y_fp=self.config.reset_start_y_fp,
+            angle_degrees=self.config.reset_start_angle_degrees,
+            face_nearest_enemy=self.config.reset_start_face_nearest_enemy,
+            health=self.config.reset_start_health,
+            armor=self.config.reset_start_armor,
+            ammo_bullets=self.config.reset_start_ammo_bullets,
+        )
 
     async def step(self, action_index: int) -> EnvStep:
         """Applies one high-level PPO skill and returns a transition."""
@@ -359,6 +435,11 @@ class DoomAgentEnv:
         action_reward = self._combat_action_reward(skill, had_shootable_target)
         total_reward += action_reward
         self._current_state = current
+        if hasattr(self.controller, "record_action_history"):
+            self.controller.record_action_history(
+                action_index=action_index,
+                had_shootable_target=had_shootable_target,
+            )
         return EnvStep(
             observation=self.controller.observation(current),
             reward=total_reward,

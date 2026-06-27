@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from restfuldoom_agent.ppo_agent import _summarize_buffer
+from restfuldoom_agent.ppo_agent import _reset_start_from_trajectory, _summarize_buffer
 from restfuldoom_agent.ppo import (
     PPOConfig,
     PPOTrainer,
@@ -13,7 +13,14 @@ from restfuldoom_agent.ppo import (
     TORCH_AVAILABLE,
 )
 from restfuldoom_agent.ppo_eval import EpisodeEval, PolicyEval, decide_promotion
-from restfuldoom_agent.schemas import map_expert_skill_to_ppo_action
+from restfuldoom_agent.schemas import (
+    ACTION_SCHEMA,
+    OBSERVATION_SCHEMA,
+    PPO_SKILL_ACTIONS,
+    pad_observation_features,
+    map_expert_skill_to_ppo_action,
+)
+from restfuldoom_agent.skill_policy import FEATURE_NAMES
 
 
 def test_rollout_buffer_saves_jsonl(tmp_path):
@@ -125,6 +132,28 @@ def test_expert_skill_labels_map_to_ppo_actions():
     assert map_expert_skill_to_ppo_action("not_a_skill") is None
 
 
+def test_training_schemas_describe_features_and_actions():
+    assert OBSERVATION_SCHEMA["base_feature_names"] == FEATURE_NAMES
+    assert len(OBSERVATION_SCHEMA["feature_names"]) > len(FEATURE_NAMES)
+    assert len(OBSERVATION_SCHEMA["feature_descriptors"]) == len(
+        OBSERVATION_SCHEMA["feature_names"]
+    )
+    assert ACTION_SCHEMA["actions"] == PPO_SKILL_ACTIONS
+    assert [definition["skill"] for definition in ACTION_SCHEMA["definitions"]] == (
+        PPO_SKILL_ACTIONS
+    )
+
+
+def test_pad_observation_features_adds_neutral_action_history():
+    tactical = [0.0 for _ in FEATURE_NAMES]
+
+    padded = pad_observation_features(tactical)
+
+    assert len(padded) == len(OBSERVATION_SCHEMA["feature_names"])
+    assert padded[: len(FEATURE_NAMES)] == tactical
+    assert all(value == 0.0 for value in padded[len(FEATURE_NAMES) :])
+
+
 def test_rollout_summary_deduplicates_reset_warmup_metadata():
     buffer = SimpleNamespace(
         records=[
@@ -168,6 +197,34 @@ def test_rollout_summary_deduplicates_reset_warmup_metadata():
     assert summary["reset_warmup_steps"] == 12
     assert summary["reset_warmup_tics"] == 30
     assert summary["reset_warmup_stop_reasons"] == {"visible": 1}
+
+
+def test_reset_start_from_trajectory_row(tmp_path):
+    trajectory = tmp_path / "combat.jsonl"
+    trajectory.write_text(
+        json.dumps(
+            {
+                "state": {
+                    "position_fp": [123, -456, 0],
+                    "health": 95,
+                    "armor": 7,
+                    "ammo_bullets": 37,
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    start = _reset_start_from_trajectory(trajectory, index=0)
+
+    assert start == {
+        "x_fp": 123,
+        "y_fp": -456,
+        "health": 95,
+        "armor": 7,
+        "ammo_bullets": 37,
+    }
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")

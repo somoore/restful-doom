@@ -18,13 +18,14 @@ from .ppo_eval import (
     evaluate_heuristic_policy,
     evaluate_random_policy,
 )
-from .schemas import map_expert_skill_to_ppo_action
+from .schemas import map_expert_skill_to_ppo_action, pad_observation_features
 from .skill_policy import features_from_record
 
 
 async def train(args: argparse.Namespace) -> dict[str, object]:
     """Runs PPO collection and update batches."""
     require_torch()
+    reset_start = _resolve_reset_start(args)
     env_config = DoomEnvConfig(
         endpoint=args.endpoint,
         token=args.token,
@@ -44,6 +45,13 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
         kill_goal_bonus=args.kill_goal_bonus,
         required_kills=args.required_kills,
         memory_path=args.memory_path,
+        reset_start_x_fp=reset_start.get("x_fp"),
+        reset_start_y_fp=reset_start.get("y_fp"),
+        reset_start_angle_degrees=int(reset_start.get("angle_degrees", 0)),
+        reset_start_face_nearest_enemy=bool(reset_start.get("face_nearest_enemy", False)),
+        reset_start_health=reset_start.get("health"),
+        reset_start_armor=reset_start.get("armor"),
+        reset_start_ammo_bullets=reset_start.get("ammo_bullets"),
         reset_warmup_steps=args.reset_warmup_steps,
         reset_warmup_max_tics=args.reset_warmup_max_tics,
         reset_warmup_until_visible=args.reset_warmup_until_visible,
@@ -112,6 +120,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     "skill": args.skill,
                     "rollout_summary": rollout_summary,
                     "behavior_clone": behavior_clone_summary or {},
+                    "reset_start": reset_start,
                 },
             )
             if memory is not None:
@@ -149,6 +158,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
         "run_id": args.run_id,
         "updates": summaries,
         "behavior_clone": behavior_clone_summary or {},
+        "reset_start": reset_start,
         "observation_schema": OBSERVATION_SCHEMA,
         "action_schema": ACTION_SCHEMA,
     }
@@ -156,6 +166,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
 
 async def evaluate(args: argparse.Namespace) -> dict[str, object]:
     """Evaluates a PPO checkpoint against a baseline."""
+    reset_start = _resolve_reset_start(args)
     env_config = DoomEnvConfig(
         endpoint=args.endpoint,
         token=args.token,
@@ -175,6 +186,13 @@ async def evaluate(args: argparse.Namespace) -> dict[str, object]:
         kill_goal_bonus=args.kill_goal_bonus,
         required_kills=args.required_kills,
         memory_path=args.memory_path,
+        reset_start_x_fp=reset_start.get("x_fp"),
+        reset_start_y_fp=reset_start.get("y_fp"),
+        reset_start_angle_degrees=int(reset_start.get("angle_degrees", 0)),
+        reset_start_face_nearest_enemy=bool(reset_start.get("face_nearest_enemy", False)),
+        reset_start_health=reset_start.get("health"),
+        reset_start_armor=reset_start.get("armor"),
+        reset_start_ammo_bullets=reset_start.get("ammo_bullets"),
         reset_warmup_steps=args.reset_warmup_steps,
         reset_warmup_max_tics=args.reset_warmup_max_tics,
         reset_warmup_until_visible=args.reset_warmup_until_visible,
@@ -291,7 +309,7 @@ def _load_behavior_clone_samples(
                 if action is None:
                     skipped += 1
                     continue
-                samples.append((features_from_record(record), action))
+                samples.append((pad_observation_features(features_from_record(record)), action))
                 mapped_counts[ACTION_SCHEMA["actions"][action]] += 1
         if len(samples) >= max_samples:
             break
@@ -305,6 +323,55 @@ def _load_behavior_clone_samples(
         "expert_skill_counts": dict(sorted(label_counts.items())),
         "ppo_skill_counts": dict(sorted(mapped_counts.items())),
     }
+
+
+def _resolve_reset_start(args: argparse.Namespace) -> dict[str, object]:
+    start: dict[str, object] = {}
+    if args.reset_start_trajectory is not None:
+        start.update(
+            _reset_start_from_trajectory(
+                args.reset_start_trajectory,
+                index=args.reset_start_index,
+            )
+        )
+
+    if args.reset_start_x_fp is not None:
+        start["x_fp"] = int(args.reset_start_x_fp)
+    if args.reset_start_y_fp is not None:
+        start["y_fp"] = int(args.reset_start_y_fp)
+    if args.reset_start_angle_degrees is not None:
+        start["angle_degrees"] = int(args.reset_start_angle_degrees) % 360
+    if args.reset_start_face_nearest_enemy:
+        start["face_nearest_enemy"] = True
+    if args.reset_start_health is not None:
+        start["health"] = int(args.reset_start_health)
+    if args.reset_start_armor is not None:
+        start["armor"] = int(args.reset_start_armor)
+    if args.reset_start_ammo_bullets is not None:
+        start["ammo_bullets"] = int(args.reset_start_ammo_bullets)
+    return start
+
+
+def _reset_start_from_trajectory(path: Path, *, index: int) -> dict[str, object]:
+    with path.open("r", encoding="utf-8") as handle:
+        for row_index, line in enumerate(handle):
+            if row_index != index:
+                continue
+            record = json.loads(line)
+            state = record.get("state", {}) if isinstance(record.get("state"), dict) else {}
+            position = state.get("position_fp")
+            if not isinstance(position, list) or len(position) < 2:
+                raise ValueError(
+                    f"trajectory row {index} in {path} does not include state.position_fp"
+                )
+            return {
+                "x_fp": int(position[0]),
+                "y_fp": int(position[1]),
+                "health": int(state.get("health", 100)),
+                "armor": int(state.get("armor", 0)),
+                "ammo_bullets": int(state.get("ammo_bullets", 50)),
+            }
+    raise ValueError(f"trajectory row {index} not found in {path}")
 
 
 def _record_eval_history(
@@ -421,6 +488,15 @@ def main() -> None:
     parser.add_argument("--level-complete-bonus", type=float, default=100.0)
     parser.add_argument("--kill-goal-bonus", type=float, default=10.0)
     parser.add_argument("--memory-path", type=Path, default=Path("agent_memory/e1m1.json"))
+    parser.add_argument("--reset-start-x-fp", type=int)
+    parser.add_argument("--reset-start-y-fp", type=int)
+    parser.add_argument("--reset-start-angle-degrees", type=int)
+    parser.add_argument("--reset-start-face-nearest-enemy", action="store_true")
+    parser.add_argument("--reset-start-health", type=int)
+    parser.add_argument("--reset-start-armor", type=int)
+    parser.add_argument("--reset-start-ammo-bullets", type=int)
+    parser.add_argument("--reset-start-trajectory", type=Path)
+    parser.add_argument("--reset-start-index", type=int, default=0)
     parser.add_argument("--reset-warmup-steps", type=int, default=0)
     parser.add_argument("--reset-warmup-max-tics", type=int, default=0)
     parser.add_argument("--reset-warmup-until-visible", action="store_true")

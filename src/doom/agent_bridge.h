@@ -21,6 +21,9 @@ typedef struct
 } agent_player_action_t;
 
 #define AGENT_CONTROL_RESET_EPISODE 1u
+#define AGENT_CONTROL_FLAG_START_POSITION 1u
+#define AGENT_CONTROL_FLAG_FACE_NEAREST_ENEMY 2u
+#define AGENT_CONTROL_FLAG_APPLY_RESOURCES 4u
 
 typedef struct
 {
@@ -30,6 +33,15 @@ typedef struct
     int32_t map;
     uint64_t seed;
     uint32_t flags;
+    int32_t start_x_fp;
+    int32_t start_y_fp;
+    int32_t start_angle_degrees;
+    int32_t start_health;
+    int32_t start_armor;
+    int32_t start_ammo_bullets;
+    int32_t start_ammo_shells;
+    int32_t start_ammo_cells;
+    int32_t start_ammo_rockets;
     uint8_t reserved[4];
 } agent_control_request_t;
 

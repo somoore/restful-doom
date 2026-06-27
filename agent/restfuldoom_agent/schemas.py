@@ -1,8 +1,15 @@
-"""Shared agent training schemas."""
+"""Shared agent training schemas.
+
+These dictionaries are intentionally machine-readable.  Checkpoints, rollout
+buffers, and exported training jobs carry them so a cloud worker can understand
+the observation/action contract without importing the controller code.
+"""
 
 from __future__ import annotations
 
-from .skill_policy import FEATURE_NAMES
+from typing import Any
+
+from .skill_policy import FEATURE_NAMES as TACTICAL_FEATURE_NAMES
 
 PPO_SKILL_ACTIONS = [
     "engage",
@@ -13,6 +20,17 @@ PPO_SKILL_ACTIONS = [
     "retreat",
     "recover_stuck",
     "press_exit",
+]
+
+ACTION_HISTORY_FEATURE_NAMES = [
+    *(f"prev_skill_{skill}" for skill in PPO_SKILL_ACTIONS),
+    "prev_had_shootable_target",
+    "same_skill_streak_norm",
+]
+
+PPO_FEATURE_NAMES = [
+    *TACTICAL_FEATURE_NAMES,
+    *ACTION_HISTORY_FEATURE_NAMES,
 ]
 
 EXPERT_TO_PPO_SKILL_ACTION = {
@@ -62,14 +80,190 @@ PPO_ACTION_INDEX_BY_SKILL = {
     skill: index for index, skill in enumerate(PPO_SKILL_ACTIONS)
 }
 
+ACTION_DEFINITIONS = [
+    {
+        "index": 0,
+        "skill": "engage",
+        "role": "Turn toward, approach, or strafe around a visible enemy.",
+        "controller_entrypoint": "SkillController._execute_skill('engage')",
+        "primary_signal": "visible enemy distance and threat",
+        "fallback": "explore when no enemy is visible",
+    },
+    {
+        "index": 1,
+        "skill": "fire",
+        "role": "Fire only when the combat probe reports a valid enemy target.",
+        "controller_entrypoint": "SkillController._execute_skill('fire')",
+        "primary_signal": "combat_has_target and combat_target_enemy",
+        "fallback": "aim at visible enemy or send one shoot probe",
+    },
+    {
+        "index": 2,
+        "skill": "seek_enemy",
+        "role": "Route toward the best remembered or known enemy.",
+        "controller_entrypoint": "SkillController._execute_skill('seek_enemy')",
+        "primary_signal": "known and remembered enemy memory",
+        "fallback": "explore when no enemy memory is usable",
+    },
+    {
+        "index": 3,
+        "skill": "open_use_line",
+        "role": "Turn toward and activate nearby doors, switches, or use lines.",
+        "controller_entrypoint": "SkillController._execute_skill('open_use_line')",
+        "primary_signal": "usable-line probes and manual line specials",
+        "fallback": "press use ahead",
+    },
+    {
+        "index": 4,
+        "skill": "route_progression",
+        "role": "Move toward progression lines or open exploratory space.",
+        "controller_entrypoint": "SkillController._execute_skill('route_progression')",
+        "primary_signal": "progression line priorities and navigation probes",
+        "fallback": "explore",
+    },
+    {
+        "index": 5,
+        "skill": "retreat",
+        "role": "Back up or strafe away from nearby threats.",
+        "controller_entrypoint": "SkillController._execute_skill('retreat')",
+        "primary_signal": "low health or close visible enemy",
+        "fallback": "backward movement",
+    },
+    {
+        "index": 6,
+        "skill": "recover_stuck",
+        "role": "Run the deterministic unstuck routine.",
+        "controller_entrypoint": "SkillController._execute_skill('recover_stuck')",
+        "primary_signal": "stuck and blocked-target indicators",
+        "fallback": "turn/backtrack sequence",
+    },
+    {
+        "index": 7,
+        "skill": "press_exit",
+        "role": "Prioritize exit switch approach and activation.",
+        "controller_entrypoint": "SkillController._execute_skill('press_exit')",
+        "primary_signal": "exit-line affordances",
+        "fallback": "use probe",
+    },
+]
+
+def encode_action_history_features(
+    *,
+    previous_action_index: int | None,
+    previous_had_shootable_target: bool,
+    same_skill_streak: int,
+) -> list[float]:
+    """Encode stateful PPO action-history features."""
+    one_hot = [0.0 for _ in PPO_SKILL_ACTIONS]
+    if previous_action_index is not None and 0 <= previous_action_index < len(one_hot):
+        one_hot[previous_action_index] = 1.0
+    return [
+        *one_hot,
+        1.0 if previous_had_shootable_target else 0.0,
+        max(0.0, min(1.0, float(same_skill_streak) / 8.0)),
+    ]
+
+
+def pad_observation_features(features: list[float]) -> list[float]:
+    """Pad older tactical-only feature rows to the current PPO observation contract."""
+    if len(features) == len(PPO_FEATURE_NAMES):
+        return list(features)
+    if len(features) == len(TACTICAL_FEATURE_NAMES):
+        return [
+            *features,
+            *encode_action_history_features(
+                previous_action_index=None,
+                previous_had_shootable_target=False,
+                same_skill_streak=0,
+            ),
+        ]
+    raise ValueError(
+        "feature vector length does not match tactical or PPO observation schema: "
+        f"got {len(features)}, expected {len(TACTICAL_FEATURE_NAMES)} or "
+        f"{len(PPO_FEATURE_NAMES)}"
+    )
+
+
+def _feature_descriptors(names: list[str], *, source: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": name,
+            "source": source,
+            "range": "-1..1 for normalized values, 0..1 for flags/one-hot values",
+            "meaning": _feature_meaning(name),
+        }
+        for name in names
+    ]
+
+
+def _feature_meaning(name: str) -> str:
+    if name.startswith("prev_skill_"):
+        return f"One-hot flag: previous PPO macro action was {name.removeprefix('prev_skill_')}."
+    meanings = {
+        "health_norm": "Player health normalized by 100.",
+        "ammo_norm": "Bullet ammo normalized by 80.",
+        "kills_norm": "Current kill count normalized by 10.",
+        "items_norm": "Current item count normalized by 20.",
+        "x_units_norm": "Player X map position in Doom units normalized by 4096.",
+        "y_units_norm": "Player Y map position in Doom units normalized by 4096.",
+        "angle_sin": "Sine of player facing angle.",
+        "angle_cos": "Cosine of player facing angle.",
+        "visible_enemies_norm": "Line-of-sight enemy count normalized by 8.",
+        "known_enemies_norm": "Current protobuf enemy count known to the engine normalized by 16.",
+        "remembered_enemies_norm": "Recently remembered enemy count from AgentMemory normalized by 16.",
+        "enemy_count_norm": "Total current enemy count normalized by 32.",
+        "has_enemy": "Flag that the selected enemy feature slot is occupied.",
+        "enemy_distance_norm": "Selected enemy distance normalized by 2400 Doom units.",
+        "enemy_angle_sin": "Sine of signed angle to selected enemy.",
+        "enemy_angle_cos": "Cosine of signed angle to selected enemy.",
+        "enemy_threat_norm": "Hand-built enemy threat score normalized by 10.",
+        "enemy_health_norm": "Selected enemy health normalized by 100.",
+        "combat_has_target": "Engine combat probe has a shootable target.",
+        "combat_target_enemy": "Engine combat probe target is an enemy.",
+        "combat_target_distance_norm": "Combat probe target distance normalized by 2400 Doom units.",
+        "nav_forward_open": "Navigation probe says forward movement is open.",
+        "nav_back_open": "Navigation probe says backward movement is open.",
+        "nav_left_open": "Navigation probe says left movement is open.",
+        "nav_right_open": "Navigation probe says right movement is open.",
+        "nav_use_line_ahead": "Navigation probe sees a usable line ahead.",
+        "nav_front_distance_norm": "Front blocking distance normalized by 512 Doom units.",
+        "nav_front_special_manual": "Front blocking line has a manual-use special.",
+        "nav_front_special_exit": "Front blocking line is an exit special.",
+        "nav_open_probe_ratio": "Fraction of direction probes that are open.",
+        "nav_use_probe_ratio": "Fraction of direction probes with use lines.",
+        "nav_best_open_angle_norm": "Closest open probe angle normalized by 90 degrees.",
+        "has_use_line": "At least one nearby use line is available.",
+        "use_line_distance_norm": "Nearest use-line distance normalized by 1600 Doom units.",
+        "use_line_angle_sin": "Sine of angle to nearest use line.",
+        "use_line_angle_cos": "Cosine of angle to nearest use line.",
+        "use_line_manual": "Nearest use line has a manual-use special.",
+        "use_line_exit": "Nearest use line is an exit special.",
+        "use_line_side": "Doom line side for the nearest use line.",
+        "use_line_front_distance_norm": "Distance to a point in front of the use line normalized by 1600.",
+        "stuck": "Controller-level stuck detector is active.",
+        "blocked_targets_norm": "Current blocked target count normalized by 16.",
+        "prev_had_shootable_target": "Previous macro-step had a shootable enemy target.",
+        "same_skill_streak_norm": "Consecutive same PPO skill selections normalized by 8.",
+    }
+    return meanings.get(name, "PPO observation feature.")
+
+
 OBSERVATION_SCHEMA = {
     "schema": "restfuldoom.observation.v1",
-    "feature_names": FEATURE_NAMES,
+    "source": "protobuf GameState plus AgentMemory plus previous macro-action",
+    "feature_names": PPO_FEATURE_NAMES,
+    "base_feature_names": TACTICAL_FEATURE_NAMES,
+    "action_history_feature_names": ACTION_HISTORY_FEATURE_NAMES,
+    "feature_descriptors": [
+        *_feature_descriptors(TACTICAL_FEATURE_NAMES, source="protobuf_or_memory"),
+        *_feature_descriptors(ACTION_HISTORY_FEATURE_NAMES, source="macro_step_history"),
+    ],
 }
 
 ACTION_SCHEMA = {
     "schema": "restfuldoom.skill_action.v1",
     "actions": PPO_SKILL_ACTIONS,
+    "definitions": ACTION_DEFINITIONS,
 }
 
 
