@@ -5883,8 +5883,8 @@
       "enemy_distance_progress": 1697.8906,
       "fitness": -33.0755,
       "goal": "combat",
-      "item_delta": 0,
-      "kill_delta": 1,
+      "item_delta": 4,
+      "kill_delta": 6,
       "lessons": [
         "dealt 5 damage in cell 11:-20 using fire_on_shootable_target",
         "dealt 5 damage in cell 11:-20 using fire_on_shootable_target",
@@ -5912,7 +5912,7 @@
         "dealt 10 damage in cell 2:1 using fire_on_shootable_target",
         "dealt 5 damage in cell 1:-1 using fire_on_shootable_target",
         "kill gained in cell 1:-1 using aim_at_enemy",
-        "good state reached: level_completed=True, kills=1"
+        "good state reached: level_completed=True, kills=6"
       ],
       "level_completed": true,
       "nearest_enemy_end": 353.24937438964844,
@@ -5936,6 +5936,8 @@
         "turn_amount": 7,
         "use_interval_tics": 18
       },
+      "peak_items": 4,
+      "peak_kills": 6,
       "policy_id": "cautious_combat_v1",
       "promoted": false,
       "run_id": "brain-bc83c4fdcae0",
@@ -6097,6 +6099,46 @@
       "visited_cells": 62
     }
   ],
+  "learned_policy": {
+    "checkpoint_path": "agent_models/skill-policy.json",
+    "class_count": 29,
+    "classes": [
+      "aim_at_enemy",
+      "approach_nearby_use_line",
+      "approach_progression_line",
+      "break_cell_loop",
+      "close_visible_enemy",
+      "cross_progression_line",
+      "explore_frontier",
+      "fire_on_enemy",
+      "fire_on_shootable_target",
+      "open_or_probe",
+      "pursue_last_contact_corridor",
+      "push_exit_switch",
+      "retry_exit_assist_door",
+      "route_to_progression_line",
+      "seek_known_enemy",
+      "sidestep_left",
+      "sidestep_right",
+      "turn_from_block",
+      "turn_to_exit_assist_door",
+      "turn_to_exit_switch",
+      "turn_to_nearby_use_line",
+      "turn_to_progression_line",
+      "turn_to_retry_exit_assist_door",
+      "turn_to_use_line",
+      "unstick_backtrack",
+      "unstick_turn",
+      "use_directional_line",
+      "use_exit_assist_door",
+      "wall_follow_right"
+    ],
+    "eval_accuracy": 0.882,
+    "sample_count": 2961,
+    "schema": "restfuldoom.skill_policy.v1",
+    "train_accuracy": 0.8982,
+    "trained_at": "2026-06-27T11:24:42Z"
+  },
   "lessons": [
     {
       "at": "2026-06-27T10:00:06Z",
@@ -6656,8 +6698,8 @@
       "enemy_distance_progress": 1697.8906,
       "fitness": -33.0755,
       "goal": "combat",
-      "item_delta": 0,
-      "kill_delta": 1,
+      "item_delta": 4,
+      "kill_delta": 6,
       "lessons": [
         "dealt 5 damage in cell 11:-20 using fire_on_shootable_target",
         "dealt 5 damage in cell 11:-20 using fire_on_shootable_target",
@@ -6685,7 +6727,7 @@
         "dealt 10 damage in cell 2:1 using fire_on_shootable_target",
         "dealt 5 damage in cell 1:-1 using fire_on_shootable_target",
         "kill gained in cell 1:-1 using aim_at_enemy",
-        "good state reached: level_completed=True, kills=1"
+        "good state reached: level_completed=True, kills=6"
       ],
       "level_completed": true,
       "nearest_enemy_end": 353.24937438964844,
@@ -6709,6 +6751,8 @@
         "turn_amount": 7,
         "use_interval_tics": 18
       },
+      "peak_items": 4,
+      "peak_kills": 6,
       "policy_id": "cautious_combat_v1",
       "promoted": false,
       "run_id": "brain-bc83c4fdcae0",
@@ -6870,5 +6914,5 @@
       "visited_cells": 62
     }
   ],
-  "updated_at": "2026-06-27T11:17:36Z"
+  "updated_at": "2026-06-27T11:24:42Z"
 }

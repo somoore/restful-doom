@@ -356,6 +356,7 @@ async def brain_drive(
     goal_preset: str = "combat",
     memory_path: str = "agent_memory/e1m1.json",
     trajectory_jsonl: str | None = "trajectories/brain.jsonl",
+    skill_model_path: str | None = None,
     evolve_runs: int = 1,
     seed: int = 7,
     required_kills: int = 1,
@@ -372,6 +373,7 @@ async def brain_drive(
             max_states=max_states,
             memory_path=Path(memory_path),
             trajectory_jsonl=Path(trajectory_jsonl) if trajectory_jsonl else None,
+            skill_model_path=Path(skill_model_path) if skill_model_path else None,
             evolve_runs=evolve_runs,
             seed=seed,
             required_kills=required_kills,
@@ -398,6 +400,7 @@ async def brain_train_docker(
     goal_preset: str = "combat",
     memory_path: str = "agent_memory/e1m1.json",
     trajectory_jsonl: str | None = "trajectories/brain-train.jsonl",
+    skill_model_path: str | None = None,
     episodes: int = 3,
     seed: int = 7,
     video: bool = True,
@@ -440,6 +443,9 @@ async def brain_train_docker(
                 trajectory_jsonl=(
                     _repo_path(trajectory_jsonl) if trajectory_jsonl is not None else None
                 ),
+                skill_model_path=(
+                    _repo_path(skill_model_path) if skill_model_path is not None else None
+                ),
                 evolve_runs=1,
                 seed=seed + index,
                 required_kills=required_kills,
@@ -462,6 +468,40 @@ async def brain_train_docker(
         "memory": memory.summary(),
         "success": any(summary.get("success") for summary in summaries),
     }
+
+
+@MCP.tool()
+def brain_train_skill_model(
+    output_path: str = "agent_models/skill-policy.json",
+    memory_path: str = "agent_memory/e1m1.json",
+    trajectory_paths: list[str] | None = None,
+    epochs: int = 12,
+    learning_rate: float = 0.08,
+    min_count: int = 4,
+    max_samples: int = 20000,
+    max_records_per_file: int = 6000,
+    seed: int = 7,
+) -> dict[str, Any]:
+    """Train a learned skill selector from trajectory JSONL records."""
+    _ensure_agent_path()
+    from restfuldoom_agent.brain import train_skill_policy_from_memory
+    from restfuldoom_agent.skill_policy import SkillPolicyTrainConfig
+
+    return train_skill_policy_from_memory(
+        _repo_path(output_path),
+        memory_path=_repo_path(memory_path),
+        trajectory_paths=[_repo_path(path) for path in trajectory_paths]
+        if trajectory_paths
+        else None,
+        config=SkillPolicyTrainConfig(
+            epochs=epochs,
+            learning_rate=learning_rate,
+            min_count=min_count,
+            max_samples=max_samples,
+            max_records_per_file=max_records_per_file,
+            seed=seed,
+        ),
+    )
 
 
 @MCP.tool()

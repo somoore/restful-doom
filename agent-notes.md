@@ -16,12 +16,12 @@ The first useful intelligence should be a deterministic skill-selection policy b
 
 ## Good State Definition
 
-Training is not "good" yet. The target state is: autonomously complete one level traversal and score at least one kill in that same run. Once achieved, export a portable training job so Docker progress can resume in cloud without losing memory, promoted policy parameters, notes, or trajectory evidence.
+Training reached the first "good" state on E1M1: autonomously complete one level traversal and score at least one kill in that same run. The current verified run is `brain-5b63907febc4` from `brain-train-68-current-success.jsonl`: level transition to E1M2, 6 peak kills, 3 peak items, and 60 end health. The next target is repeatability and learned skill selection beyond behavior cloning.
 
 ## Export / Resume Contract
 
 - Training job bundle schema: `restfuldoom.training_job.v1`.
-- Bundle contents: manifest, `agent_memory/e1m1.json`, `agent-notes.md`, and referenced trajectory JSONL files.
+- Bundle contents: manifest, `agent_memory/e1m1.json`, `agent-notes.md`, learned skill model checkpoints, and referenced trajectory JSONL files.
 - Resume path: import the bundle into a cloud worker or Hellbox/Shrink job, then continue structured-brain episodes against the new gRPC endpoint using the promoted parameters from memory.
 
 ## Latest Milestones
@@ -47,9 +47,10 @@ Training is not "good" yet. The target state is: autonomously complete one level
 - Strongest failed rollouts now reliably reach the final exit room: candidates 58, 60, 61, and 62 cleared the map enemies with 6 kills but stalled at line 330. The current blocker is retrying close assist doors 324/325 after line-attempt blacklisting; added an exit-specific retry path that can press line 325 with a small forward nudge once the exit push stalls.
 - Candidate 65 exposed a separate mid-map regression: after 2 kills the policy chased far walk trigger line 308 from ~1900 units away and stopped hunting the remaining monsters. Tightened progression readiness so distant walk triggers wait until more enemies are cleared, while known-enemy seeking remains active until roughly the 5-kill route.
 - Candidate 66 achieved the first good state: autonomous E1M1 completion with 6 kills on the route, assist-door retries, and a final line 330 activation into E1M2. Candidate 67 then exposed a close-exit ordering bug where line 330 at distance 16/angle 0 still routed instead of pressing; moved `press_exit_switch` ahead of blocked-front routing and fixed stats to preserve peak kills/items across map-reset counters.
+- Candidate 68 verified the current code after that fix: `success=true`, `level_completed=true`, `kill_delta=6`, `peak_kills=6`, `item_delta=3`, `peak_items=3`, and `press_exit_switch=2`. Trained the first learned skill selector from this trajectory: `agent_models/skill-policy.json`, schema `restfuldoom.skill_policy.v1`, 2,961 samples, 29 classes, train accuracy `0.8982`, eval accuracy `0.882`.
 
 ## Open Risks
 
-- The current blocker is not combat; it is final door/exit sequencing. The agent can reach the exit approach and clear enemies, but still needs to reliably open nearby manual doors 340/341 and 324/325, then close enough to activate line 330.
+- Repeatability still needs improvement; recent current-code runs can complete E1M1, but route timing varies and final door/exit sequencing remains the highest-risk segment.
 - Pistol firing cadence may need raw ticcmd or carefully timed shoot pulses if high-level `ACTION_SHOOT` is too lossy.
-- Evolution only proves learning if policy promotion is based on repeated real rollout scores, not a single lucky run.
+- The learned skill selector is behavior cloning, not independent RL yet. It predicts skill choices from successful protobuf trajectories and is exported for cloud resume, but the deterministic controller still owns live tic-level actions.

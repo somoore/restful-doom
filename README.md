@@ -205,6 +205,22 @@ The Codex MCP server exposes the same path through `brain_drive` and
 `brain_memory`, so Codex can run a goal, inspect memory, adjust rewards, and
 iterate without relying on screenshots for control.
 
+Train the learned decision layer from successful trajectory records:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.brain_agent \
+    --memory-path agent_memory/e1m1.json \
+    --train-skill-model agent_models/skill-policy.json \
+    --skill-model-trajectory trajectories/brain-train-68-current-success.jsonl
+```
+
+This writes a `restfuldoom.skill_policy.v1` JSON checkpoint. The current model
+is a dependency-light softmax classifier over compact protobuf features; it
+learns which high-level skill the structured brain selected, while the
+deterministic controller still owns tic-level movement, aiming, firing, and
+door use. Pass `--skill-model-path agent_models/skill-policy.json` during a
+rollout to attach learned skill predictions to trajectory metadata.
+
 Export the current training job before moving from Docker to cloud:
 
 ```
@@ -214,9 +230,9 @@ PYTHONPATH=agent python -m restfuldoom_agent.brain_agent \
 ```
 
 The bundle uses schema `restfuldoom.training_job.v1` and includes a manifest,
-memory, promoted parameters, `agent-notes.md`, and referenced JSONL
-trajectories. A cloud worker can import it and continue training against a new
-gRPC endpoint:
+memory, promoted parameters, `agent-notes.md`, learned model checkpoints, and
+referenced JSONL trajectories. A cloud worker can import it and continue
+training against a new gRPC endpoint:
 
 ```
 PYTHONPATH=agent python -m restfuldoom_agent.brain_agent \

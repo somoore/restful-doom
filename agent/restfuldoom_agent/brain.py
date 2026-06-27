@@ -22,6 +22,7 @@ from typing import Any
 from .client import BackoffConfig, DoomAgentClient, agent_pb2, semantic_action
 from .reward import RewardEngine, goal_preset
 from .rollout_config import safe_endpoint_host
+from .skill_policy import SkillPolicyModel, SkillPolicyTrainConfig, train_skill_policy
 
 FP = 65536.0
 CELL_UNITS = 128.0
@@ -137,6 +138,7 @@ class BrainConfig:
     max_states: int = 700
     memory_path: Path = Path("agent_memory/e1m1.json")
     trajectory_jsonl: Path | None = Path("trajectories/brain.jsonl")
+    skill_model_path: Path | None = None
     evolve_runs: int = 1
     seed: int = 7
     policy_id: str = "cautious_combat_v1"
@@ -537,10 +539,12 @@ class BrainPolicy:
         memory: AgentMemory,
         params: BrainPolicyParams,
         policy_id: str,
+        skill_model: SkillPolicyModel | None = None,
     ) -> None:
         self.memory = memory
         self.params = params
         self.policy_id = policy_id
+        self.skill_model = skill_model
         self.last_features: TacticalFeatures | None = None
         self.last_decision: dict[str, Any] = {}
         self._last_position: tuple[float, float] | None = None
@@ -565,6 +569,13 @@ class BrainPolicy:
         features = extract_features(state, self.memory, self.params)
         self.last_features = features
         action, decision = self._decide(features)
+        if self.skill_model is not None:
+            try:
+                decision = dict(decision)
+                decision["learned_skill_prediction"] = self.skill_model.predict_tactical(features)
+            except (KeyError, TypeError, ValueError, OverflowError) as exc:
+                decision = dict(decision)
+                decision["learned_skill_error"] = str(exc)
         self.last_decision = decision
         return action
 
@@ -2425,7 +2436,14 @@ async def run_brain_episode(
 ) -> dict[str, Any]:
     """Run one structured-brain episode."""
     run_id = f"brain-{uuid.uuid4().hex[:12]}"
-    policy = BrainPolicy(memory=memory, params=params, policy_id=config.policy_id)
+    skill_model_path = _resolve_skill_model_path(config, memory)
+    skill_model = SkillPolicyModel.load(skill_model_path) if skill_model_path else None
+    policy = BrainPolicy(
+        memory=memory,
+        params=params,
+        policy_id=config.policy_id,
+        skill_model=skill_model,
+    )
     reward = RewardEngine(goal_preset(config.goal_preset))
     client = DoomAgentClient(
         config.endpoint,
@@ -2451,6 +2469,8 @@ async def run_brain_episode(
         "memory_path": str(config.memory_path),
         "params": asdict(params),
     }
+    if skill_model_path is not None:
+        metadata["skill_model_path"] = str(skill_model_path)
     trajectory_path = _candidate_trajectory_path(config.trajectory_jsonl, candidate_id)
     enemy_health_by_id: dict[int, int] = {}
 
@@ -2847,6 +2867,10 @@ def export_training_job(
     trajectory_paths = [
         path for path in _episode_trajectory_paths(memory) if path.exists()
     ]
+    skill_model_path = _memory_skill_model_path(memory)
+    model_checkpoints = []
+    if skill_model_path is not None and skill_model_path.exists():
+        model_checkpoints.append(skill_model_path)
     manifest = {
         "schema": "restfuldoom.training_job.v1",
         "created_at": _iso_now(),
@@ -2856,6 +2880,10 @@ def export_training_job(
         "best_params": memory.data.get("policy", {}).get("best_params"),
         "best_score": memory.data.get("policy", {}).get("best_score"),
         "best_run_id": memory.data.get("policy", {}).get("best_run_id"),
+        "learned_policy": memory.data.get("learned_policy"),
+        "model_checkpoints": [
+            f"agent_models/{path.name}" for path in model_checkpoints
+        ],
         "successes": memory.data.get("successes", []),
         "trajectories": [f"trajectories/{path.name}" for path in trajectory_paths],
     }
@@ -2866,6 +2894,8 @@ def export_training_job(
         _tar_add_path(archive, Path(memory_path), "agent_memory/e1m1.json")
         if Path(notes_path).exists():
             _tar_add_path(archive, Path(notes_path), "agent-notes.md")
+        for checkpoint in model_checkpoints:
+            archive.add(checkpoint, arcname=f"agent_models/{checkpoint.name}")
         for trajectory in trajectory_paths:
             archive.add(trajectory, arcname=f"trajectories/{trajectory.name}")
 
@@ -2874,9 +2904,39 @@ def export_training_job(
         "output_path": str(output),
         "memory_summary": manifest["memory_summary"],
         "trajectory_count": len(manifest["trajectories"]),
+        "model_checkpoint_count": len(manifest["model_checkpoints"]),
         "success_count": len(manifest["successes"]),
         "best_score": manifest["best_score"],
         "best_run_id": manifest["best_run_id"],
+    }
+
+
+def train_skill_policy_from_memory(
+    output_path: str | Path,
+    *,
+    memory_path: str | Path = "agent_memory/e1m1.json",
+    trajectory_paths: list[str | Path] | None = None,
+    config: SkillPolicyTrainConfig | None = None,
+) -> dict[str, Any]:
+    """Train a learned skill selector from trajectory JSONL and save it in memory."""
+    memory = AgentMemory.load(memory_path)
+    paths = [Path(path) for path in trajectory_paths] if trajectory_paths else _episode_trajectory_paths(memory)
+    summary = train_skill_policy(paths, output_path, config=config)
+    memory.data["learned_policy"] = {
+        "schema": summary["schema"],
+        "checkpoint_path": summary["checkpoint_path"],
+        "trained_at": _iso_now(),
+        "sample_count": summary["sample_count"],
+        "class_count": summary["class_count"],
+        "train_accuracy": summary["train_accuracy"],
+        "eval_accuracy": summary["eval_accuracy"],
+        "classes": summary["classes"],
+    }
+    memory.data["updated_at"] = _iso_now()
+    memory.save()
+    return {
+        **summary,
+        "memory_path": str(memory.path),
     }
 
 
@@ -2907,10 +2967,32 @@ def import_training_job(
         "destination": str(dest),
         "memory_path": str(dest / manifest["memory_path"]),
         "trajectory_count": len(manifest.get("trajectories", [])),
+        "model_checkpoint_count": len(manifest.get("model_checkpoints", [])),
         "best_score": manifest.get("best_score"),
         "best_run_id": manifest.get("best_run_id"),
         "success_count": len(manifest.get("successes", [])),
     }
+
+
+def _resolve_skill_model_path(
+    config: BrainConfig,
+    memory: AgentMemory,
+) -> Path | None:
+    if config.skill_model_path is not None:
+        path = Path(config.skill_model_path)
+        return path if path.exists() else None
+    return _memory_skill_model_path(memory)
+
+
+def _memory_skill_model_path(memory: AgentMemory) -> Path | None:
+    learned = memory.data.get("learned_policy")
+    if not isinstance(learned, dict):
+        return None
+    checkpoint = learned.get("checkpoint_path")
+    if not isinstance(checkpoint, str) or not checkpoint:
+        return None
+    path = Path(checkpoint)
+    return path if path.exists() else None
 
 
 def cell_key(x_units: float, y_units: float) -> str:
