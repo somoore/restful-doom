@@ -283,12 +283,18 @@ The training API is:
   can receive feedback before a full kill lands. They also include nearest-enemy
   distance progress from protobuf enemy distances, so early policies get
   navigation signal before line of sight.
+- PPO observations include current-sector hazard fields and a cheap progression
+  route waypoint from protobuf navigation, giving spawn-to-contact training
+  more than nearest-enemy distance alone.
 - Checkpoints and rollout buffers carry `restfuldoom.observation.v1` and
   `restfuldoom.skill_action.v1`, including feature descriptors and
   machine-readable definitions for each PPO skill.
 - Rollout buffers and checkpoints also carry the decision-cycle and memory
   contracts, so a resumed cloud job can inspect how skills, masks, memory
   queries, and controller execution are meant to interact.
+- Older PPO checkpoints whose observation schema is a prefix of the current
+  schema can resume with zero-initialized weights for appended observation
+  features.
 
 Run a small PPO batch against a live gRPC Doom endpoint:
 

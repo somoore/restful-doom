@@ -569,6 +569,55 @@ def summarize_state(state: Any) -> dict[str, Any]:
                 }
                 for line in getattr(navigation, "use_lines", [])
             ],
+            "current_sector": {
+                "sector_id": int(
+                    getattr(getattr(navigation, "current_sector", None), "sector_id", 0)
+                ),
+                "special": int(
+                    getattr(getattr(navigation, "current_sector", None), "special", 0)
+                ),
+                "floor_height_fp": int(
+                    getattr(
+                        getattr(navigation, "current_sector", None),
+                        "floor_height_fp",
+                        0,
+                    )
+                ),
+                "ceiling_height_fp": int(
+                    getattr(
+                        getattr(navigation, "current_sector", None),
+                        "ceiling_height_fp",
+                        0,
+                    )
+                ),
+                "light_level": int(
+                    getattr(
+                        getattr(navigation, "current_sector", None),
+                        "light_level",
+                        0,
+                    )
+                ),
+                "damaging": bool(
+                    getattr(getattr(navigation, "current_sector", None), "damaging", False)
+                ),
+                "damage_per_32_tics": int(
+                    getattr(
+                        getattr(navigation, "current_sector", None),
+                        "damage_per_32_tics",
+                        0,
+                    )
+                ),
+                "exit_damage": bool(
+                    getattr(
+                        getattr(navigation, "current_sector", None),
+                        "exit_damage",
+                        False,
+                    )
+                ),
+            },
+            "route_waypoint": _summarize_route_waypoint(
+                getattr(navigation, "route_waypoint", None)
+            ),
         },
         "combat": {
             "has_shootable_target": bool(
@@ -581,6 +630,34 @@ def summarize_state(state: Any) -> dict[str, Any]:
             "range_fp": int(getattr(combat, "range_fp", 0)),
             "target_is_enemy": bool(getattr(combat, "target_is_enemy", False)),
         },
+    }
+
+
+def _summarize_route_waypoint(route: Any | None) -> dict[str, Any]:
+    if route is None or getattr(route, "line", None) is None:
+        return {}
+    line = route.line
+    return {
+        "line": {
+            "line_id": int(getattr(line, "line_id", 0)),
+            "midpoint_fp": [
+                int(getattr(getattr(line, "midpoint", None), "x_fp", 0)),
+                int(getattr(getattr(line, "midpoint", None), "y_fp", 0)),
+                int(getattr(getattr(line, "midpoint", None), "z_fp", 0)),
+            ],
+            "nearest_point_fp": [
+                int(getattr(getattr(line, "nearest_point", None), "x_fp", 0)),
+                int(getattr(getattr(line, "nearest_point", None), "y_fp", 0)),
+                int(getattr(getattr(line, "nearest_point", None), "z_fp", 0)),
+            ],
+            "special": int(getattr(line, "special", 0)),
+            "tag": int(getattr(line, "tag", 0)),
+            "distance_fp": int(getattr(line, "distance_fp", 0)),
+            "nearest_distance_fp": int(getattr(line, "nearest_distance_fp", 0)),
+        },
+        "priority": int(getattr(route, "priority", 0)),
+        "exit": bool(getattr(route, "exit", False)),
+        "walk_trigger": bool(getattr(route, "walk_trigger", False)),
     }
 
 

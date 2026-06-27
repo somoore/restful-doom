@@ -2615,28 +2615,10 @@ def extract_features(
     navigation = navigation_from_state(getattr(state, "navigation", None))
     combat = combat_from_state(getattr(state, "combat", None))
     for line in navigation.get("use_lines", []):
-        line["distance"] = line["nearest_distance_fp"] / FP
-        line["angle_delta"] = angle_to_target_units(
-            x,
-            y,
-            angle,
-            float(line["nearest_x_units"]),
-            float(line["nearest_y_units"]),
-        )
-        line["side"] = doom_line_side(x, y, line)
-        front_point = line_front_point_units(line, offset_units=96.0)
-        if front_point is not None:
-            front_x, front_y = front_point
-            line["front_x_units"] = front_x
-            line["front_y_units"] = front_y
-            line["front_distance"] = math.dist((x, y), (front_x, front_y))
-            line["front_angle_delta"] = angle_to_target_units(
-                x,
-                y,
-                angle,
-                front_x,
-                front_y,
-            )
+        annotate_navigation_line(line, x_units=x, y_units=y, angle=angle)
+    route_waypoint = navigation.get("route_waypoint")
+    if isinstance(route_waypoint, dict) and isinstance(route_waypoint.get("line"), dict):
+        annotate_navigation_line(route_waypoint["line"], x_units=x, y_units=y, angle=angle)
     navigation["use_lines"].sort(
         key=lambda line: (float(line["distance"]), abs(float(line["angle_delta"])))
     )
@@ -2711,6 +2693,17 @@ def navigation_from_state(navigation: Any | None) -> dict[str, Any]:
             "probe_distance_fp": 0,
             "direction_probes": [],
             "use_lines": [],
+            "current_sector": {
+                "sector_id": 0,
+                "special": 0,
+                "floor_height_fp": 0,
+                "ceiling_height_fp": 0,
+                "light_level": 0,
+                "damaging": False,
+                "damage_per_32_tics": 0,
+                "exit_damage": False,
+            },
+            "route_waypoint": {},
         }
 
     direction_probes = [
@@ -2752,41 +2745,20 @@ def navigation_from_state(navigation: Any | None) -> dict[str, Any]:
                 "use_line_ahead": False,
             },
         ]
-    use_lines = []
-    for line in getattr(navigation, "use_lines", []):
-        midpoint = getattr(line, "midpoint", None)
-        nearest = getattr(line, "nearest_point", None)
-        start = getattr(line, "start", None)
-        end = getattr(line, "end", None)
-        x_fp = int(getattr(midpoint, "x_fp", 0))
-        y_fp = int(getattr(midpoint, "y_fp", 0))
-        z_fp = int(getattr(midpoint, "z_fp", 0))
-        nearest_x_fp = int(getattr(nearest, "x_fp", x_fp))
-        nearest_y_fp = int(getattr(nearest, "y_fp", y_fp))
-        start_x_fp = int(getattr(start, "x_fp", x_fp))
-        start_y_fp = int(getattr(start, "y_fp", y_fp))
-        end_x_fp = int(getattr(end, "x_fp", x_fp))
-        end_y_fp = int(getattr(end, "y_fp", y_fp))
-        use_lines.append(
-            {
-                "line_id": int(getattr(line, "line_id", 0)),
-                "x_units": x_fp / FP,
-                "y_units": y_fp / FP,
-                "z_units": z_fp / FP,
-                "nearest_x_units": nearest_x_fp / FP,
-                "nearest_y_units": nearest_y_fp / FP,
-                "start_x_units": start_x_fp / FP,
-                "start_y_units": start_y_fp / FP,
-                "end_x_units": end_x_fp / FP,
-                "end_y_units": end_y_fp / FP,
-                "special": int(getattr(line, "special", 0)),
-                "tag": int(getattr(line, "tag", 0)),
-                "distance_fp": int(getattr(line, "distance_fp", 0)),
-                "nearest_distance_fp": int(
-                    getattr(line, "nearest_distance_fp", getattr(line, "distance_fp", 0))
-                ),
-            }
-        )
+    use_lines = [_use_line_from_state(line) for line in getattr(navigation, "use_lines", [])]
+    current_sector = getattr(navigation, "current_sector", None)
+    route = getattr(navigation, "route_waypoint", None)
+    route_line = getattr(route, "line", None)
+    route_waypoint = (
+        {
+            "line": _use_line_from_state(route_line),
+            "priority": int(getattr(route, "priority", 0)),
+            "exit": bool(getattr(route, "exit", False)),
+            "walk_trigger": bool(getattr(route, "walk_trigger", False)),
+        }
+        if route is not None and route_line is not None
+        else {}
+    )
 
     return {
         "forward_open": bool(getattr(navigation, "forward_open", True)),
@@ -2801,7 +2773,84 @@ def navigation_from_state(navigation: Any | None) -> dict[str, Any]:
         "probe_distance_fp": int(getattr(navigation, "probe_distance_fp", 0)),
         "direction_probes": direction_probes,
         "use_lines": use_lines,
+        "current_sector": {
+            "sector_id": int(getattr(current_sector, "sector_id", 0)),
+            "special": int(getattr(current_sector, "special", 0)),
+            "floor_height_fp": int(getattr(current_sector, "floor_height_fp", 0)),
+            "ceiling_height_fp": int(getattr(current_sector, "ceiling_height_fp", 0)),
+            "light_level": int(getattr(current_sector, "light_level", 0)),
+            "damaging": bool(getattr(current_sector, "damaging", False)),
+            "damage_per_32_tics": int(getattr(current_sector, "damage_per_32_tics", 0)),
+            "exit_damage": bool(getattr(current_sector, "exit_damage", False)),
+        },
+        "route_waypoint": route_waypoint,
     }
+
+
+def _use_line_from_state(line: Any | None) -> dict[str, Any]:
+    midpoint = getattr(line, "midpoint", None)
+    nearest = getattr(line, "nearest_point", None)
+    start = getattr(line, "start", None)
+    end = getattr(line, "end", None)
+    x_fp = int(getattr(midpoint, "x_fp", 0))
+    y_fp = int(getattr(midpoint, "y_fp", 0))
+    z_fp = int(getattr(midpoint, "z_fp", 0))
+    nearest_x_fp = int(getattr(nearest, "x_fp", x_fp))
+    nearest_y_fp = int(getattr(nearest, "y_fp", y_fp))
+    start_x_fp = int(getattr(start, "x_fp", x_fp))
+    start_y_fp = int(getattr(start, "y_fp", y_fp))
+    end_x_fp = int(getattr(end, "x_fp", x_fp))
+    end_y_fp = int(getattr(end, "y_fp", y_fp))
+    return {
+        "line_id": int(getattr(line, "line_id", 0)),
+        "x_units": x_fp / FP,
+        "y_units": y_fp / FP,
+        "z_units": z_fp / FP,
+        "nearest_x_units": nearest_x_fp / FP,
+        "nearest_y_units": nearest_y_fp / FP,
+        "start_x_units": start_x_fp / FP,
+        "start_y_units": start_y_fp / FP,
+        "end_x_units": end_x_fp / FP,
+        "end_y_units": end_y_fp / FP,
+        "special": int(getattr(line, "special", 0)),
+        "tag": int(getattr(line, "tag", 0)),
+        "distance_fp": int(getattr(line, "distance_fp", 0)),
+        "nearest_distance_fp": int(
+            getattr(line, "nearest_distance_fp", getattr(line, "distance_fp", 0))
+        ),
+    }
+
+
+def annotate_navigation_line(
+    line: dict[str, Any],
+    *,
+    x_units: float,
+    y_units: float,
+    angle: float,
+) -> None:
+    """Annotate line geometry used by controllers and feature extraction."""
+    line["distance"] = line["nearest_distance_fp"] / FP
+    line["angle_delta"] = angle_to_target_units(
+        x_units,
+        y_units,
+        angle,
+        float(line["nearest_x_units"]),
+        float(line["nearest_y_units"]),
+    )
+    line["side"] = doom_line_side(x_units, y_units, line)
+    front_point = line_front_point_units(line, offset_units=96.0)
+    if front_point is not None:
+        front_x, front_y = front_point
+        line["front_x_units"] = front_x
+        line["front_y_units"] = front_y
+        line["front_distance"] = math.dist((x_units, y_units), (front_x, front_y))
+        line["front_angle_delta"] = angle_to_target_units(
+            x_units,
+            y_units,
+            angle,
+            front_x,
+            front_y,
+        )
 
 
 def combat_from_state(combat: Any | None) -> dict[str, Any]:

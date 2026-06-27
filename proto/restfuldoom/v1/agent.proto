@@ -215,6 +215,8 @@ message NavigationProbe {
   sfixed32 probe_distance_fp = 8;
   repeated DirectionProbe direction_probes = 9;
   repeated UseLineInfo use_lines = 10;
+  SectorProbe current_sector = 11;
+  RouteWaypoint route_waypoint = 12;
 }
 
 // One local movement ray relative to the player's current angle.
@@ -237,6 +239,26 @@ message UseLineInfo {
   Vec3Fixed end = 7;
   Vec3Fixed nearest_point = 8;
   sfixed32 nearest_distance_fp = 9;
+}
+
+// Current sector affordances relevant to navigation and damage avoidance.
+message SectorProbe {
+  int32 sector_id = 1;
+  int32 special = 2;
+  sfixed32 floor_height_fp = 3;
+  sfixed32 ceiling_height_fp = 4;
+  int32 light_level = 5;
+  bool damaging = 6;
+  int32 damage_per_32_tics = 7;
+  bool exit_damage = 8;
+}
+
+// A cheap route target for progression-aware learning.
+message RouteWaypoint {
+  UseLineInfo line = 1;
+  int32 priority = 2;
+  bool exit = 3;
+  bool walk_trigger = 4;
 }
 
 // Cheap weapon-line target probe for agent combat decisions.

@@ -246,6 +246,7 @@ class PPOTrainer:
         self.update_index = 0
         self.obs_dim = obs_dim
         self.action_dim = action_dim
+        self.resume_migration: dict[str, Any] | None = None
 
     async def collect_rollout(
         self,
@@ -421,7 +422,15 @@ class PPOTrainer:
         return output
 
     @classmethod
-    def load_checkpoint(cls, path: str | Path, *, device: str = "cpu") -> "PPOTrainer":
+    def load_checkpoint(
+        cls,
+        path: str | Path,
+        *,
+        device: str = "cpu",
+        target_obs_dim: int | None = None,
+        target_action_dim: int | None = None,
+        allow_observation_expand: bool = True,
+    ) -> "PPOTrainer":
         """Loads a trainer from a PPO checkpoint."""
         require_torch()
         checkpoint = torch.load(Path(path), map_location=device)
@@ -430,14 +439,78 @@ class PPOTrainer:
                 f"expected {PPO_CHECKPOINT_SCHEMA}, got {checkpoint.get('schema')!r}"
             )
         config = PPOConfig(**checkpoint["config"])
-        obs_dim = int(checkpoint.get("obs_dim") or len(checkpoint["observation_schema"]["feature_names"]))
-        action_dim = int(checkpoint.get("action_dim") or len(checkpoint["action_schema"]["actions"]))
+        checkpoint_obs_dim = int(
+            checkpoint.get("obs_dim")
+            or len(checkpoint["observation_schema"]["feature_names"])
+        )
+        checkpoint_action_dim = int(
+            checkpoint.get("action_dim") or len(checkpoint["action_schema"]["actions"])
+        )
+        obs_dim = target_obs_dim or checkpoint_obs_dim
+        action_dim = target_action_dim or checkpoint_action_dim
+        if action_dim != checkpoint_action_dim:
+            raise ValueError(
+                "checkpoint action dimension cannot be migrated: "
+                f"{checkpoint_action_dim} != {action_dim}"
+            )
+        migrated = False
+        state_dict = checkpoint["model_state_dict"]
+        if obs_dim != checkpoint_obs_dim:
+            if obs_dim < checkpoint_obs_dim or not allow_observation_expand:
+                raise ValueError(
+                    "checkpoint observation dimension cannot be migrated: "
+                    f"{checkpoint_obs_dim} -> {obs_dim}"
+                )
+            state_dict = _expand_observation_state_dict(
+                state_dict,
+                checkpoint_obs_dim=checkpoint_obs_dim,
+                target_obs_dim=obs_dim,
+                device=device,
+            )
+            migrated = True
         trainer = cls(obs_dim=obs_dim, action_dim=action_dim, config=config, device=device)
-        trainer.model.load_state_dict(checkpoint["model_state_dict"])
-        trainer.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        trainer.model.load_state_dict(state_dict)
+        if migrated:
+            trainer.resume_migration = {
+                "schema": "restfuldoom.ppo_observation_migration.v1",
+                "from_obs_dim": checkpoint_obs_dim,
+                "to_obs_dim": obs_dim,
+                "optimizer_state_loaded": False,
+                "reason": "observation schema appended features; first-layer new columns initialized to zero",
+            }
+        else:
+            trainer.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         trainer.update_index = int(checkpoint.get("update_index", 0))
         trainer.eval_history = list(checkpoint.get("eval_history", []))
         return trainer
+
+
+def _expand_observation_state_dict(
+    state_dict: dict[str, Any],
+    *,
+    checkpoint_obs_dim: int,
+    target_obs_dim: int,
+    device: str,
+) -> dict[str, Any]:
+    require_torch()
+    migrated = dict(state_dict)
+    weight_key = "shared.0.weight"
+    if weight_key not in migrated:
+        raise ValueError("checkpoint missing actor-critic input layer")
+    old_weight = migrated[weight_key]
+    if old_weight.shape[1] != checkpoint_obs_dim:
+        raise ValueError(
+            "checkpoint input layer does not match observation dimension: "
+            f"{old_weight.shape[1]} != {checkpoint_obs_dim}"
+        )
+    expanded = torch.zeros(
+        (old_weight.shape[0], target_obs_dim),
+        dtype=old_weight.dtype,
+        device=device,
+    )
+    expanded[:, :checkpoint_obs_dim] = old_weight.to(device)
+    migrated[weight_key] = expanded
+    return migrated
 
 
 @dataclass(frozen=True)

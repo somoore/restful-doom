@@ -75,17 +75,12 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
     env = DoomAgentEnv(env_config)
     memory = AgentMemory.load(args.memory_path) if args.memory_path is not None else None
     if args.resume_checkpoint is not None:
-        trainer = PPOTrainer.load_checkpoint(args.resume_checkpoint, device=args.device)
-        if trainer.obs_dim != len(OBSERVATION_SCHEMA["feature_names"]):
-            raise ValueError(
-                "resume checkpoint observation dimension does not match current schema: "
-                f"{trainer.obs_dim} != {len(OBSERVATION_SCHEMA['feature_names'])}"
-            )
-        if trainer.action_dim != len(ACTION_SCHEMA["actions"]):
-            raise ValueError(
-                "resume checkpoint action dimension does not match current schema: "
-                f"{trainer.action_dim} != {len(ACTION_SCHEMA['actions'])}"
-            )
+        trainer = PPOTrainer.load_checkpoint(
+            args.resume_checkpoint,
+            device=args.device,
+            target_obs_dim=len(OBSERVATION_SCHEMA["feature_names"]),
+            target_action_dim=len(ACTION_SCHEMA["actions"]),
+        )
     else:
         trainer = PPOTrainer(
             obs_dim=len(OBSERVATION_SCHEMA["feature_names"]),
@@ -139,6 +134,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     "resume_checkpoint": str(args.resume_checkpoint)
                     if args.resume_checkpoint is not None
                     else None,
+                    "resume_migration": trainer.resume_migration,
                 },
             )
             if memory is not None:

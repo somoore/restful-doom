@@ -25,6 +25,7 @@ static agent_control_request_t agent_pending_start;
 #define AGENT_NAV_PROBE_DISTANCE (96 * FRACUNIT)
 
 static boolean IsLivingEnemy(const mobj_t *obj);
+static int ProgressionLinePriority(int special);
 static const int agent_nav_direction_offsets[AGENT_MAX_NAV_DIRECTIONS] = {
     -90,
     -60,
@@ -100,6 +101,59 @@ static uint32_t KeyCardMask(const player_t *player)
     }
 
     return mask;
+}
+
+static boolean IsDamagingSectorSpecial(int special)
+{
+    return special == 4 || special == 5 || special == 7 || special == 11 || special == 16;
+}
+
+static int SectorDamagePer32Tics(int special)
+{
+    switch (special)
+    {
+        case 5:
+            return 10;
+        case 7:
+            return 5;
+        case 4:
+        case 11:
+        case 16:
+            return 20;
+        default:
+            return 0;
+    }
+}
+
+static boolean IsExitDamageSectorSpecial(int special)
+{
+    return special == 11;
+}
+
+static boolean IsWalkTriggerLineSpecial(int special)
+{
+    return special == 36 || special == 88;
+}
+
+static boolean IsExitLineSpecial(int special)
+{
+    return special == 11 || special == 51;
+}
+
+static int ProgressionLinePriority(int special)
+{
+    switch (special)
+    {
+        case 88:
+            return 0;
+        case 36:
+            return 1;
+        case 11:
+        case 51:
+            return 2;
+        default:
+            return -1;
+    }
 }
 
 static boolean AgentBridge_ProbeLineTraverse(intercept_t *in)
@@ -182,17 +236,78 @@ static uint32_t AgentBridge_ProbeDirection(
     return clear ? 1u : 0u;
 }
 
+static void FillSectorProbe(agent_sector_probe_t *probe, const mobj_t *obj)
+{
+    const sector_t *sector;
+
+    if (probe == NULL || obj == NULL || obj->subsector == NULL)
+    {
+        return;
+    }
+
+    sector = obj->subsector->sector;
+    if (sector == NULL)
+    {
+        return;
+    }
+
+    probe->sector_id = sector->id;
+    probe->special = sector->special;
+    probe->floor_height_fp = sector->floorheight;
+    probe->ceiling_height_fp = sector->ceilingheight;
+    probe->light_level = sector->lightlevel;
+    probe->damaging = IsDamagingSectorSpecial(sector->special) ? 1u : 0u;
+    probe->damage_per_32_tics = SectorDamagePer32Tics(sector->special);
+    probe->exit_damage = IsExitDamageSectorSpecial(sector->special) ? 1u : 0u;
+}
+
+static void FillUseLine(
+    agent_use_line_t *target,
+    int line_id,
+    const line_t *line,
+    const mobj_t *obj,
+    fixed_t midpoint_x,
+    fixed_t midpoint_y,
+    fixed_t nearest_x,
+    fixed_t nearest_y,
+    fixed_t distance,
+    fixed_t nearest_distance)
+{
+    if (target == NULL || line == NULL || obj == NULL)
+    {
+        return;
+    }
+
+    target->line_id = line_id;
+    target->midpoint_x_fp = midpoint_x;
+    target->midpoint_y_fp = midpoint_y;
+    target->midpoint_z_fp = obj->z;
+    target->start_x_fp = line->v1->x;
+    target->start_y_fp = line->v1->y;
+    target->end_x_fp = line->v2->x;
+    target->end_y_fp = line->v2->y;
+    target->nearest_x_fp = nearest_x;
+    target->nearest_y_fp = nearest_y;
+    target->special = line->special;
+    target->tag = line->tag;
+    target->distance_fp = distance;
+    target->nearest_distance_fp = nearest_distance;
+}
+
 static void FillNavigationProbe(agent_game_state_snapshot_t *snapshot, const mobj_t *obj)
 {
     int front_special = 0;
     int front_distance = AGENT_NAV_PROBE_DISTANCE;
     boolean use_line_ahead = false;
+    int best_route_priority = INT32_MAX;
+    fixed_t best_route_distance = INT32_MAX;
 
     if (obj == NULL)
     {
         return;
     }
 
+    FillSectorProbe(&snapshot->navigation.current_sector, obj);
     snapshot->navigation.probe_distance_fp = AGENT_NAV_PROBE_DISTANCE;
     snapshot->navigation.forward_open = AgentBridge_ProbeDirection(
         obj,
@@ -261,6 +376,8 @@ static void FillNavigationProbe(agent_game_state_snapshot_t *snapshot, const mob
         double dy;
         double length_sq;
         double projection;
+        int route_priority;
+        agent_use_line_t candidate;
         uint32_t slot;
 
         if (line->special == 0)
@@ -295,6 +412,35 @@ static void FillNavigationProbe(agent_game_state_snapshot_t *snapshot, const mob
         nearest_x = line->v1->x + (fixed_t) (projection * dx);
         nearest_y = line->v1->y + (fixed_t) (projection * dy);
         nearest_distance = P_AproxDistance(obj->x - nearest_x, obj->y - nearest_y);
+        memset(&candidate, 0, sizeof(candidate));
+        FillUseLine(
+            &candidate,
+            i,
+            line,
+            obj,
+            midpoint_x,
+            midpoint_y,
+            nearest_x,
+            nearest_y,
+            distance,
+            nearest_distance);
+
+        route_priority = ProgressionLinePriority(line->special);
+        if (route_priority >= 0
+            && (snapshot->navigation.has_route_waypoint == 0
+                || route_priority < best_route_priority
+                || (route_priority == best_route_priority
+                    && nearest_distance < best_route_distance)))
+        {
+            snapshot->navigation.has_route_waypoint = 1u;
+            snapshot->navigation.route_waypoint = candidate;
+            snapshot->navigation.route_waypoint_priority = route_priority;
+            snapshot->navigation.route_waypoint_exit = IsExitLineSpecial(line->special) ? 1u : 0u;
+            snapshot->navigation.route_waypoint_walk_trigger =
+                IsWalkTriggerLineSpecial(line->special) ? 1u : 0u;
+            best_route_priority = route_priority;
+            best_route_distance = nearest_distance;
+        }
 
         if (snapshot->navigation.use_line_count < AGENT_MAX_USE_LINES)
         {
@@ -318,20 +464,7 @@ static void FillNavigationProbe(agent_game_state_snapshot_t *snapshot, const mob
             slot = (uint32_t) farthest;
         }
 
-        snapshot->navigation.use_lines[slot].line_id = i;
-        snapshot->navigation.use_lines[slot].midpoint_x_fp = midpoint_x;
-        snapshot->navigation.use_lines[slot].midpoint_y_fp = midpoint_y;
-        snapshot->navigation.use_lines[slot].midpoint_z_fp = obj->z;
-        snapshot->navigation.use_lines[slot].start_x_fp = line->v1->x;
-        snapshot->navigation.use_lines[slot].start_y_fp = line->v1->y;
-        snapshot->navigation.use_lines[slot].end_x_fp = line->v2->x;
-        snapshot->navigation.use_lines[slot].end_y_fp = line->v2->y;
-        snapshot->navigation.use_lines[slot].nearest_x_fp = nearest_x;
-        snapshot->navigation.use_lines[slot].nearest_y_fp = nearest_y;
-        snapshot->navigation.use_lines[slot].special = line->special;
-        snapshot->navigation.use_lines[slot].tag = line->tag;
-        snapshot->navigation.use_lines[slot].distance_fp = distance;
-        snapshot->navigation.use_lines[slot].nearest_distance_fp = nearest_distance;
+        snapshot->navigation.use_lines[slot] = candidate;
     }
 }
 

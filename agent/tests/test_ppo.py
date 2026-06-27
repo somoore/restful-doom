@@ -163,6 +163,8 @@ def test_training_schemas_describe_features_and_actions():
     assert MEMORY_CONTRACT["memory_schema"] == "restfuldoom.agent_memory.v1"
     assert any(path["method"].startswith("AgentMemory.remembered_enemies") for path in MEMORY_CONTRACT["query_paths"])
     assert any(group["name"] == "memory_queries" for group in OBSERVATION_SCHEMA["source_groups"])
+    assert "sector_damaging" in OBSERVATION_SCHEMA["feature_names"]
+    assert "route_waypoint_distance_norm" in OBSERVATION_SCHEMA["feature_names"]
     assert "no compact topological map graph" in OBSERVATION_SCHEMA["learning_readiness"]["known_gaps"]
 
 
@@ -300,6 +302,29 @@ def test_ppo_update_and_checkpoint_roundtrip(tmp_path):
     assert checkpoint.exists()
     assert metrics["value_loss"] >= 0
     assert loaded.update_index == trainer.update_index
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")
+def test_ppo_checkpoint_expands_appended_observation_features(tmp_path):
+    trainer = PPOTrainer(
+        obs_dim=2,
+        action_dim=2,
+        config=PPOConfig(update_epochs=1, minibatch_size=4, rollout_steps=8),
+    )
+    checkpoint = trainer.save_checkpoint(tmp_path / "old.pt")
+
+    loaded = PPOTrainer.load_checkpoint(
+        checkpoint,
+        target_obs_dim=4,
+        target_action_dim=2,
+    )
+
+    action, _logprob, _value = loaded.model.act([0.0, 1.0, 0.5, -0.5])
+    assert action in {0, 1}
+    assert loaded.obs_dim == 4
+    assert loaded.resume_migration is not None
+    assert loaded.resume_migration["from_obs_dim"] == 2
+    assert not loaded.resume_migration["optimizer_state_loaded"]
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")

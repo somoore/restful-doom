@@ -91,6 +91,21 @@ def test_skill_controller_action_mask_uses_affordances():
     assert quiet_mask["route_progression"]
 
 
+def test_skill_controller_observation_includes_sector_and_route_features():
+    controller = SkillController()
+    state = _state(hazard=True, route=True)
+
+    features = dict(zip(OBSERVATION_SCHEMA["feature_names"], controller.observation(state)))
+
+    assert features["sector_damaging"] == 1.0
+    assert features["sector_damage_norm"] == pytest.approx(0.5)
+    assert features["sector_exit_damage"] == 0.0
+    assert features["route_has_waypoint"] == 1.0
+    assert features["route_waypoint_distance_norm"] > 0.0
+    assert features["route_waypoint_angle_cos"] == pytest.approx(1.0)
+    assert features["route_waypoint_walk_trigger"] == 1.0
+
+
 def test_doom_agent_env_reset_sends_curriculum_start():
     first = _state(tick=1, enemy=False)
     client = _FakeClient([first])
@@ -307,7 +322,16 @@ class _FixedDurationController:
         )
 
 
-def _state(*, tick=1, kills=0, enemy=False, combat=False, enemy_distance=256):
+def _state(
+    *,
+    tick=1,
+    kills=0,
+    enemy=False,
+    combat=False,
+    enemy_distance=256,
+    hazard=False,
+    route=False,
+):
     position = SimpleNamespace(x_fp=0, y_fp=0, z_fp=0)
     obj = SimpleNamespace(
         id=1,
@@ -361,7 +385,36 @@ def _state(*, tick=1, kills=0, enemy=False, combat=False, enemy_distance=256):
         probe_distance_fp=96 * 65536,
         direction_probes=[],
         use_lines=[],
+        current_sector=SimpleNamespace(
+            sector_id=4 if hazard else 0,
+            special=5 if hazard else 0,
+            floor_height_fp=-24 * 65536 if hazard else 0,
+            ceiling_height_fp=128 * 65536 if hazard else 0,
+            light_level=160 if hazard else 0,
+            damaging=hazard,
+            damage_per_32_tics=10 if hazard else 0,
+            exit_damage=False,
+        ),
+        route_waypoint=None,
     )
+    if route:
+        route_line = SimpleNamespace(
+            line_id=88,
+            midpoint=SimpleNamespace(x_fp=512 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=512 * 65536, y_fp=-64 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=512 * 65536, y_fp=64 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=512 * 65536, y_fp=0, z_fp=0),
+            special=88,
+            tag=1,
+            distance_fp=512 * 65536,
+            nearest_distance_fp=512 * 65536,
+        )
+        navigation.route_waypoint = SimpleNamespace(
+            line=route_line,
+            priority=0,
+            exit=False,
+            walk_trigger=True,
+        )
     combat_probe = SimpleNamespace(
         has_shootable_target=combat,
         target_id=7 if combat else 0,

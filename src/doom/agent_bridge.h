@@ -110,6 +110,18 @@ typedef struct
 
 typedef struct
 {
+    int32_t sector_id;
+    int32_t special;
+    int32_t floor_height_fp;
+    int32_t ceiling_height_fp;
+    int32_t light_level;
+    uint32_t damaging;
+    int32_t damage_per_32_tics;
+    uint32_t exit_damage;
+} agent_sector_probe_t;
+
+typedef struct
+{
     uint32_t forward_open;
     uint32_t back_open;
     uint32_t left_open;
@@ -122,6 +134,12 @@ typedef struct
     agent_direction_probe_t directions[AGENT_MAX_NAV_DIRECTIONS];
     uint32_t use_line_count;
     agent_use_line_t use_lines[AGENT_MAX_USE_LINES];
+    agent_sector_probe_t current_sector;
+    uint32_t has_route_waypoint;
+    agent_use_line_t route_waypoint;
+    int32_t route_waypoint_priority;
+    uint32_t route_waypoint_exit;
+    uint32_t route_waypoint_walk_trigger;
 } agent_navigation_probe_t;
 
 typedef struct

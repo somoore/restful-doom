@@ -63,6 +63,18 @@ FEATURE_NAMES = [
     "use_line_front_distance_norm",
     "stuck",
     "blocked_targets_norm",
+    "sector_damaging",
+    "sector_damage_norm",
+    "sector_exit_damage",
+    "sector_floor_height_norm",
+    "sector_ceiling_height_norm",
+    "route_has_waypoint",
+    "route_waypoint_distance_norm",
+    "route_waypoint_angle_sin",
+    "route_waypoint_angle_cos",
+    "route_waypoint_priority_norm",
+    "route_waypoint_exit",
+    "route_waypoint_walk_trigger",
 ]
 
 MANUAL_USE_LINE_SPECIALS = frozenset(
@@ -309,6 +321,21 @@ def features_from_decision(
         combat = state.get("combat") if isinstance(state.get("combat"), dict) else {}
     enemy = decision.get("enemy") if isinstance(decision.get("enemy"), dict) else {}
     use_line = decision.get("use_line") if isinstance(decision.get("use_line"), dict) else {}
+    current_sector = (
+        navigation.get("current_sector")
+        if isinstance(navigation.get("current_sector"), dict)
+        else {}
+    )
+    route_waypoint = (
+        navigation.get("route_waypoint")
+        if isinstance(navigation.get("route_waypoint"), dict)
+        else {}
+    )
+    route_line = (
+        route_waypoint.get("line")
+        if isinstance(route_waypoint.get("line"), dict)
+        else {}
+    )
 
     direction_probes = navigation.get("direction_probes", [])
     if not isinstance(direction_probes, list):
@@ -326,6 +353,7 @@ def features_from_decision(
     enemy_angle = _to_float(enemy.get("angle_delta"))
     x_units, y_units = _position_units(decision, state)
     player_angle = _player_angle(decision, state)
+    route_angle = _line_angle_delta(route_line, x_units, y_units, player_angle)
     return [
         _norm(_first_number(decision, state, "health"), 100.0),
         _norm(_first_number(decision, state, "ammo_bullets"), 80.0),
@@ -369,6 +397,18 @@ def features_from_decision(
         _norm(_to_float(use_line.get("front_distance")), 1600.0),
         1.0 if decision.get("stuck") else 0.0,
         _norm(_first_number(decision, state, "blocked_targets"), 16.0),
+        1.0 if current_sector.get("damaging") else 0.0,
+        _norm(_to_float(current_sector.get("damage_per_32_tics")), 20.0),
+        1.0 if current_sector.get("exit_damage") else 0.0,
+        _norm(_to_float(current_sector.get("floor_height_fp")) / 65536.0, 1024.0),
+        _norm(_to_float(current_sector.get("ceiling_height_fp")) / 65536.0, 1024.0),
+        1.0 if route_waypoint else 0.0,
+        _norm(_line_distance_units(route_line, x_units, y_units), 2600.0),
+        math.sin(math.radians(route_angle)),
+        math.cos(math.radians(route_angle)),
+        _norm(_to_float(route_waypoint.get("priority")), 4.0),
+        1.0 if route_waypoint.get("exit") else 0.0,
+        1.0 if route_waypoint.get("walk_trigger") else 0.0,
     ]
 
 
@@ -426,6 +466,57 @@ def _player_angle(primary: dict[str, Any], fallback: dict[str, Any]) -> float:
         if key in fallback:
             return _to_float(fallback.get(key)) % 360.0
     return 0.0
+
+
+def _line_distance_units(line: dict[str, Any], x_units: float, y_units: float) -> float:
+    for key in ("distance", "nearest_distance", "front_distance"):
+        if key in line:
+            return _to_float(line.get(key))
+    if "nearest_distance_fp" in line:
+        return _to_float(line.get("nearest_distance_fp")) / 65536.0
+    point = line.get("nearest_point_fp")
+    if isinstance(point, list) and len(point) >= 2:
+        return math.dist((x_units, y_units), (_to_float(point[0]) / 65536.0, _to_float(point[1]) / 65536.0))
+    return 0.0
+
+
+def _line_angle_delta(
+    line: dict[str, Any],
+    x_units: float,
+    y_units: float,
+    player_angle: float,
+) -> float:
+    if "angle_delta" in line:
+        return _to_float(line.get("angle_delta"))
+    if "nearest_x_units" in line and "nearest_y_units" in line:
+        return _angle_to_target_units(
+            x_units,
+            y_units,
+            player_angle,
+            _to_float(line.get("nearest_x_units")),
+            _to_float(line.get("nearest_y_units")),
+        )
+    point = line.get("nearest_point_fp")
+    if isinstance(point, list) and len(point) >= 2:
+        return _angle_to_target_units(
+            x_units,
+            y_units,
+            player_angle,
+            _to_float(point[0]) / 65536.0,
+            _to_float(point[1]) / 65536.0,
+        )
+    return 0.0
+
+
+def _angle_to_target_units(
+    x_units: float,
+    y_units: float,
+    player_angle: float,
+    target_x_units: float,
+    target_y_units: float,
+) -> float:
+    target_angle = math.degrees(math.atan2(target_y_units - y_units, target_x_units - x_units))
+    return ((target_angle - player_angle + 540.0) % 360.0) - 180.0
 
 
 def _load_samples(

@@ -220,7 +220,7 @@ stuck state, and blocked targets.
 PPO receives the feature vector declared in
 `restfuldoom_agent.schemas.OBSERVATION_SCHEMA`. It is derived from protobuf
 state, memory, and macro-action history, not screenshots. The current schema has
-52 features: 42 base tactical features plus 10 action-history features.
+64 features: 54 base tactical features plus 10 action-history features.
 
 The base feature groups are:
 
@@ -232,6 +232,8 @@ The base feature groups are:
 - local navigation probes for front/back/side openness
 - usable-line and exit-line affordances
 - stuck and blocked-target indicators
+- current sector damage/hazard affordances
+- route waypoint distance, angle, priority, and type
 
 The action-history group is:
 
@@ -242,7 +244,8 @@ The action-history group is:
 The schema now also declares source groups:
 
 - `protobuf_state`: live player, enemy, combat, navigation, use-line, and level
-  fields from `GameState`.
+  fields from `GameState`, including current-sector hazard and route-waypoint
+  probes.
 - `memory_queries`: remembered enemies and blocked-target state.
 - `controller_state`: stuck detection and macro-action history.
 
@@ -250,11 +253,10 @@ This is good enough for early skill learning, but it is not yet a complete
 learning observation. Known gaps:
 
 - No compact topological map graph, only local probes plus coarse cell memory.
-- No explicit sector type, floor damage, or hazard affordance in the PPO vector.
 - Only one macro-step of action history; there is no recurrent state or longer
   temporal context yet.
-- No normalized objective/route waypoint beyond optional target coordinates in
-  reward config.
+- Route waypoints are a single local progression target, not a full route plan
+  or proof that the waypoint was recently reached.
 - No enemy projectile or incoming-damage prediction.
 - No deterministic RNG seed application yet; reset seed is currently a label,
   not replay proof.
@@ -264,16 +266,14 @@ damage or kills. The model can learn "approach enemy" from the current vector,
 but it needs stronger combat-opportunity features and action-aware rewards to
 learn "fire now" reliably.
 
-The observation upgrade path should be staged rather than speculative:
+The next observation upgrades should be staged rather than speculative:
 
-1. Add sector/hazard features first because deterministic runs already show
-   damaging-floor behavior can break otherwise good routes.
-2. Add route waypoint features next so spawn-to-first-contact PPO can learn a
-   navigation objective instead of only nearest-enemy distance.
-3. Add a short temporal window or recurrent policy after those two are stable;
+1. Add route-success history so PPO can tell whether a waypoint was just reached
+   or repeatedly failed.
+2. Add a short temporal window or recurrent policy after that is stable;
    one previous macro action is not enough to represent "I just tried this
    door" or "this corridor approach failed twice."
-4. Add a compact topology graph once true save-state or Hellbox/Shrink snapshot
+3. Add a compact topology graph once true save-state or Hellbox/Shrink snapshot
    restore is available, because map graph learning is much more useful when
    we can repeatedly resume from progressed map states.
 
@@ -389,7 +389,7 @@ Recent PPO evidence:
 
 The next useful changes are:
 
-- Add hazard/sector features to the PPO observation vector.
+- Add route-success/failure history to the PPO observation vector.
 - Extend action history beyond one macro-step or add a recurrent policy.
 - Add true save-state or Hellbox/Shrink snapshot restore so PPO can train from
   progressed map states, not only fresh-reset teleport starts.

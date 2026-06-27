@@ -32,7 +32,8 @@ use proto::doom_agent_server::{DoomAgent, DoomAgentServer};
 use proto::{
     Ammo, CombatProbe, DirectionProbe, DoomKey, EnemyInfo, GameState, LevelInfo, MapObjectState,
     MouseInput, NavigationProbe, ObserveRequest, PlayerAction, PlayerActionType, PlayerState,
-    RawTiccmd, ResetEpisodeRequest, ResetEpisodeResponse, StateDelta, UseLineInfo, Vec3Fixed,
+    RawTiccmd, ResetEpisodeRequest, ResetEpisodeResponse, RouteWaypoint, SectorProbe, StateDelta,
+    UseLineInfo, Vec3Fixed,
 };
 
 const DEFAULT_GRPC_PORT: u16 = 50_051;
@@ -491,6 +492,13 @@ fn navigation_from_snapshot(snapshot: &AgentNavigationProbe) -> NavigationProbe 
             .iter()
             .map(use_line_from_snapshot)
             .collect(),
+        current_sector: Some(sector_probe_from_snapshot(&snapshot.current_sector)),
+        route_waypoint: (snapshot.has_route_waypoint != 0).then(|| RouteWaypoint {
+            line: Some(use_line_from_snapshot(&snapshot.route_waypoint)),
+            priority: snapshot.route_waypoint_priority,
+            exit: snapshot.route_waypoint_exit != 0,
+            walk_trigger: snapshot.route_waypoint_walk_trigger != 0,
+        }),
     }
 }
 
@@ -531,6 +539,19 @@ fn use_line_from_snapshot(snapshot: &AgentUseLine) -> UseLineInfo {
             z_fp: snapshot.midpoint_z_fp,
         }),
         nearest_distance_fp: snapshot.nearest_distance_fp,
+    }
+}
+
+fn sector_probe_from_snapshot(snapshot: &AgentSectorProbe) -> SectorProbe {
+    SectorProbe {
+        sector_id: snapshot.sector_id,
+        special: snapshot.special,
+        floor_height_fp: snapshot.floor_height_fp,
+        ceiling_height_fp: snapshot.ceiling_height_fp,
+        light_level: snapshot.light_level,
+        damaging: snapshot.damaging != 0,
+        damage_per_32_tics: snapshot.damage_per_32_tics,
+        exit_damage: snapshot.exit_damage != 0,
     }
 }
 
@@ -824,6 +845,20 @@ pub struct AgentUseLine {
     pub nearest_distance_fp: i32,
 }
 
+/// Current sector affordances copied from Doom.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AgentSectorProbe {
+    pub sector_id: i32,
+    pub special: i32,
+    pub floor_height_fp: i32,
+    pub ceiling_height_fp: i32,
+    pub light_level: i32,
+    pub damaging: u32,
+    pub damage_per_32_tics: i32,
+    pub exit_damage: u32,
+}
+
 /// Local movement affordances copied from Doom.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -840,6 +875,12 @@ pub struct AgentNavigationProbe {
     pub directions: [AgentDirectionProbe; AGENT_MAX_NAV_DIRECTIONS],
     pub use_line_count: u32,
     pub use_lines: [AgentUseLine; AGENT_MAX_USE_LINES],
+    pub current_sector: AgentSectorProbe,
+    pub has_route_waypoint: u32,
+    pub route_waypoint: AgentUseLine,
+    pub route_waypoint_priority: i32,
+    pub route_waypoint_exit: u32,
+    pub route_waypoint_walk_trigger: u32,
 }
 
 impl Default for AgentNavigationProbe {
@@ -857,6 +898,12 @@ impl Default for AgentNavigationProbe {
             directions: [AgentDirectionProbe::default(); AGENT_MAX_NAV_DIRECTIONS],
             use_line_count: 0,
             use_lines: [AgentUseLine::default(); AGENT_MAX_USE_LINES],
+            current_sector: AgentSectorProbe::default(),
+            has_route_waypoint: 0,
+            route_waypoint: AgentUseLine::default(),
+            route_waypoint_priority: 0,
+            route_waypoint_exit: 0,
+            route_waypoint_walk_trigger: 0,
         }
     }
 }
@@ -1065,6 +1112,35 @@ mod tests {
             distance_fp: 96 * 65_536,
             nearest_distance_fp: 32 * 65_536,
         };
+        snapshot.navigation.current_sector = AgentSectorProbe {
+            sector_id: 4,
+            special: 5,
+            floor_height_fp: -24 * 65_536,
+            ceiling_height_fp: 128 * 65_536,
+            light_level: 160,
+            damaging: 1,
+            damage_per_32_tics: 10,
+            exit_damage: 0,
+        };
+        snapshot.navigation.has_route_waypoint = 1;
+        snapshot.navigation.route_waypoint = AgentUseLine {
+            line_id: 88,
+            midpoint_x_fp: 512 * 65_536,
+            midpoint_y_fp: 64 * 65_536,
+            midpoint_z_fp: 0,
+            start_x_fp: 512 * 65_536,
+            start_y_fp: 0,
+            end_x_fp: 512 * 65_536,
+            end_y_fp: 128 * 65_536,
+            nearest_x_fp: 512 * 65_536,
+            nearest_y_fp: 32 * 65_536,
+            special: 88,
+            tag: 1,
+            distance_fp: 512 * 65_536,
+            nearest_distance_fp: 384 * 65_536,
+        };
+        snapshot.navigation.route_waypoint_priority = 0;
+        snapshot.navigation.route_waypoint_walk_trigger = 1;
 
         let state = state_from_snapshot(&snapshot);
 
@@ -1103,6 +1179,27 @@ mod tests {
                     )
                 }),
             Some((12, 1, 7, 32))
+        );
+        assert_eq!(
+            state.navigation.as_ref().and_then(|navigation| {
+                navigation
+                    .current_sector
+                    .as_ref()
+                    .map(|sector| (sector.sector_id, sector.special, sector.damaging))
+            }),
+            Some((4, 5, true))
+        );
+        assert_eq!(
+            state.navigation.as_ref().and_then(|navigation| {
+                navigation.route_waypoint.as_ref().map(|waypoint| {
+                    (
+                        waypoint.line.as_ref().map(|line| line.line_id),
+                        waypoint.priority,
+                        waypoint.walk_trigger,
+                    )
+                })
+            }),
+            Some((Some(88), 0, true))
         );
     }
 
