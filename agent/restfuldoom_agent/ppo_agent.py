@@ -740,7 +740,12 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
     contact_contexts = [
         context
         for record in records
-        if (context := _learning_trace_contact_context(record))
+        if (context := _learning_trace_group(record, "contact"))
+    ]
+    topology_contexts = [
+        context
+        for record in records
+        if (context := _learning_trace_group(record, "topology"))
     ]
     states = [
         record.info.get("state", {})
@@ -869,6 +874,21 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
             "contact_use_line_age_norm",
             active_key="contact_use_line_active",
         ),
+        "topology_frontier_active_steps": sum(
+            1 for context in topology_contexts if context.get("topology_frontier_active")
+        ),
+        "mean_topology_current_cell_visits_norm": _mean_context_value(
+            topology_contexts,
+            "topology_current_cell_visits_norm",
+        ),
+        "mean_topology_open_cell_min_visit_norm": _mean_context_value(
+            topology_contexts,
+            "topology_open_cell_min_visit_norm",
+        ),
+        "mean_topology_exhausted_open_ratio": _mean_context_value(
+            topology_contexts,
+            "topology_exhausted_open_ratio",
+        ),
         "mean_action_mask_size": round(
             sum(action_mask_sizes) / max(1, len(action_mask_sizes)),
             4,
@@ -894,8 +914,8 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
     return summary
 
 
-def _learning_trace_contact_context(record: object) -> dict[str, object]:
-    """Returns the compact contact feature group from a rollout record."""
+def _learning_trace_group(record: object, group_name: str) -> dict[str, object]:
+    """Returns a compact observation feature group from a rollout record."""
     info = getattr(record, "info", {})
     if not isinstance(info, dict):
         return {}
@@ -908,8 +928,8 @@ def _learning_trace_contact_context(record: object) -> dict[str, object]:
     groups = observation.get("groups", {})
     if not isinstance(groups, dict):
         return {}
-    contact = groups.get("contact", {})
-    return contact if isinstance(contact, dict) else {}
+    group = groups.get(group_name, {})
+    return group if isinstance(group, dict) else {}
 
 
 def _mean_contact_context_value(
@@ -923,6 +943,14 @@ def _mean_contact_context_value(
         for context in contexts
         if context.get(active_key)
     ]
+    return round(sum(values) / max(1, len(values)), 4)
+
+
+def _mean_context_value(
+    contexts: list[dict[str, object]],
+    key: str,
+) -> float:
+    values = [float(context.get(key, 0.0)) for context in contexts]
     return round(sum(values) / max(1, len(values)), 4)
 
 

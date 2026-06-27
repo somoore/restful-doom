@@ -581,7 +581,38 @@ def test_skill_controller_observation_includes_topology_frontier_count(tmp_path)
     exhausted = dict(zip(OBSERVATION_SCHEMA["feature_names"], controller.observation(state)))
 
     assert open_frontier["topology_frontier_count_norm"] == pytest.approx(1.0)
+    assert open_frontier["topology_frontier_active"] == 1.0
+    assert open_frontier["topology_frontier_angle_sin"] == pytest.approx(0.0)
+    assert open_frontier["topology_frontier_angle_cos"] == pytest.approx(1.0)
+    assert open_frontier["topology_exhausted_open_ratio"] == pytest.approx(0.0)
     assert exhausted["topology_frontier_count_norm"] == pytest.approx(0.0)
+    assert exhausted["topology_frontier_active"] == 0.0
+    assert exhausted["topology_exhausted_open_ratio"] == pytest.approx(1.0)
+
+
+def test_skill_controller_observation_points_to_least_visited_open_cell(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    memory.data["cells"] = {
+        "1:0": {"visits": 4},
+        "0:-1": {"visits": 3},
+    }
+    controller = SkillController(memory=memory)
+    state = _state(
+        direction_probes=[
+            {"angle_offset_degrees": 0, "open": True},
+            {"angle_offset_degrees": 90, "open": True},
+            {"angle_offset_degrees": -90, "open": True},
+        ],
+    )
+
+    features = dict(zip(OBSERVATION_SCHEMA["feature_names"], controller.observation(state)))
+
+    assert features["topology_frontier_active"] == 1.0
+    assert features["topology_frontier_angle_sin"] == pytest.approx(1.0)
+    assert features["topology_frontier_angle_cos"] == pytest.approx(0.0, abs=1e-6)
+    assert features["topology_open_cell_min_visit_norm"] == pytest.approx(0.0)
+    assert features["topology_open_cell_mean_visit_norm"] == pytest.approx(7 / 24)
+    assert features["topology_exhausted_open_ratio"] == pytest.approx(2 / 3)
 
 
 def test_doom_agent_env_reset_sends_curriculum_start():

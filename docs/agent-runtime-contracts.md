@@ -170,8 +170,8 @@ Observation gap register:
 
 | Gap | Current Signal | Missing Signal | Next Implementation |
 | --- | --- | --- | --- |
-| Spawn to first combat | route waypoint, temporal route progress, remembered enemies | compact route/topology state or progressed-map snapshot | add topology graph features or Hellbox/Shrink snapshot curriculum |
-| Contact to shootable | visible enemy distance, contact use-line memory, first-shootable reward, explicit contact-line observation | doorway/contact local geometry over time | validate shootable reset stage or add contact-ray/topology features |
+| Spawn to first combat | route waypoint, temporal route progress, remembered enemies, local projected-cell topology context | compact route graph or progressed-map snapshot | add topology graph features or Hellbox/Shrink snapshot curriculum |
+| Contact to shootable | visible enemy distance, contact use-line memory, first-shootable reward, explicit contact-line observation, local topology context | doorway/contact local geometry over time | validate shootable reset stage or add contact-ray/topology features |
 | Combat target quality | shootable yes/no, target distance, enemy health | aim error, weapon range quality, cooldown window | extend protobuf combat probe |
 | Survival threat | sector hazard, health deltas | projectile and incoming-damage prediction | add projectile/threat affordances |
 | Replayability | reset label and fresh starts | deterministic RNG and progressed map state | wire `seed_applied=true` and snapshot restore |

@@ -307,8 +307,9 @@ The memory lifecycle is:
 PPO receives the feature vector declared in
 `restfuldoom_agent.schemas.OBSERVATION_SCHEMA`. It is derived from protobuf
 state, memory, and macro-action history, not screenshots. The current schema has
-89 features: 55 base tactical features, 15 action-history features,
-11 bounded temporal-context features, and 8 contact-context features.
+96 features: 55 base tactical features, 15 action-history features,
+11 bounded temporal-context features, 8 contact-context features, and 7
+local topology-context features.
 
 The base feature groups are:
 
@@ -351,6 +352,14 @@ The contact-context group is:
 - whether bounded `open_use_line` follow-through is currently active
 - age of the remembered contact use-line within its expiry window
 
+The topology-context group is:
+
+- persistent plus episode-local visits to the current coarse cell
+- minimum and mean visits among open projected neighbor cells
+- whether a low-visit open frontier is active
+- relative angle toward the least-visited open frontier
+- ratio of open projected neighbor cells that are already exhausted
+
 The schema now also declares source groups:
 
 - `protobuf_state`: live player, enemy, combat, navigation, use-line, and level
@@ -362,12 +371,14 @@ The schema now also declares source groups:
   by `SkillController`.
 - `contact_context`: recent visible-contact and contact use-line state
   maintained by `SkillController`.
+- `topology_context`: projected direction probes plus persistent/episode-local
+  cell visits maintained by `SkillController`.
 
 This is good enough for early skill learning, but it is not yet a complete
 learning observation. Known gaps:
 
-- No compact topological map graph, only local probes, frontier count, and
-  coarse cell memory.
+- No compact topological map graph, only local probes, frontier count, local
+  projected-cell context, and coarse cell memory.
 - The temporal window is hand-built and bounded; there is no recurrent neural
   state yet.
 - Route waypoints are a single local progression target, not a full route plan

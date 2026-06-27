@@ -63,11 +63,22 @@ CONTACT_CONTEXT_FEATURE_NAMES = [
     "contact_use_line_age_norm",
 ]
 
+TOPOLOGY_CONTEXT_FEATURE_NAMES = [
+    "topology_current_cell_visits_norm",
+    "topology_open_cell_min_visit_norm",
+    "topology_open_cell_mean_visit_norm",
+    "topology_frontier_active",
+    "topology_frontier_angle_sin",
+    "topology_frontier_angle_cos",
+    "topology_exhausted_open_ratio",
+]
+
 PPO_FEATURE_NAMES = [
     *TACTICAL_FEATURE_NAMES,
     *ACTION_HISTORY_FEATURE_NAMES,
     *TEMPORAL_CONTEXT_FEATURE_NAMES,
     *CONTACT_CONTEXT_FEATURE_NAMES,
+    *TOPOLOGY_CONTEXT_FEATURE_NAMES,
 ]
 
 EXPERT_TO_PPO_SKILL_ACTION = {
@@ -292,6 +303,28 @@ def encode_contact_context_features(
     ]
 
 
+def encode_topology_context_features(
+    *,
+    current_cell_visits: int = 0,
+    open_cell_min_visits: int = 0,
+    open_cell_mean_visits: float = 0.0,
+    frontier_active: bool = False,
+    frontier_angle_degrees: float = 0.0,
+    exhausted_open_ratio: float = 0.0,
+) -> list[float]:
+    """Encode local topology/memory context for PPO observations."""
+    angle_radians = math.radians(float(frontier_angle_degrees))
+    return [
+        _clip(float(current_cell_visits) / 16.0, minimum=0.0),
+        _clip(float(open_cell_min_visits) / 8.0, minimum=0.0),
+        _clip(float(open_cell_mean_visits) / 8.0, minimum=0.0),
+        1.0 if frontier_active else 0.0,
+        math.sin(angle_radians) if frontier_active else 0.0,
+        math.cos(angle_radians) if frontier_active else 0.0,
+        _clip(float(exhausted_open_ratio), minimum=0.0),
+    ]
+
+
 def _clip(value: float, *, minimum: float = -1.0, maximum: float = 1.0) -> float:
     return max(minimum, min(maximum, value))
 
@@ -315,6 +348,7 @@ def pad_observation_features(features: list[float]) -> list[float]:
             ),
             *encode_temporal_context_features(),
             *encode_contact_context_features(),
+            *encode_topology_context_features(),
         ]
     if len(features) == len(TACTICAL_FEATURE_NAMES):
         return [
@@ -331,6 +365,7 @@ def pad_observation_features(features: list[float]) -> list[float]:
             ),
             *encode_temporal_context_features(),
             *encode_contact_context_features(),
+            *encode_topology_context_features(),
         ]
     legacy_action_history_len = len(TACTICAL_FEATURE_NAMES) + len(ACTION_HISTORY_FEATURE_NAMES)
     pre_frontier_action_history_len = (
@@ -342,12 +377,14 @@ def pad_observation_features(features: list[float]) -> list[float]:
             *features[len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES) :],
             *encode_temporal_context_features(),
             *encode_contact_context_features(),
+            *encode_topology_context_features(),
         ]
     if len(features) == legacy_action_history_len:
         return [
             *features,
             *encode_temporal_context_features(),
             *encode_contact_context_features(),
+            *encode_topology_context_features(),
         ]
     legacy_ppo_len = (
         len(TACTICAL_FEATURE_NAMES)
@@ -358,6 +395,7 @@ def pad_observation_features(features: list[float]) -> list[float]:
         return [
             *features,
             *encode_contact_context_features(),
+            *encode_topology_context_features(),
         ]
     pre_frontier_ppo_len = (
         len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)
@@ -369,13 +407,38 @@ def pad_observation_features(features: list[float]) -> list[float]:
             *_insert_neutral_tactical_features(features[: len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)]),
             *features[len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES) :],
             *encode_contact_context_features(),
+            *encode_topology_context_features(),
+        ]
+    legacy_contact_ppo_len = (
+        len(TACTICAL_FEATURE_NAMES)
+        + len(ACTION_HISTORY_FEATURE_NAMES)
+        + len(TEMPORAL_CONTEXT_FEATURE_NAMES)
+        + len(CONTACT_CONTEXT_FEATURE_NAMES)
+    )
+    pre_frontier_contact_ppo_len = (
+        len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)
+        + len(ACTION_HISTORY_FEATURE_NAMES)
+        + len(TEMPORAL_CONTEXT_FEATURE_NAMES)
+        + len(CONTACT_CONTEXT_FEATURE_NAMES)
+    )
+    if len(features) == legacy_contact_ppo_len:
+        return [
+            *features,
+            *encode_topology_context_features(),
+        ]
+    if len(features) == pre_frontier_contact_ppo_len:
+        return [
+            *_insert_neutral_tactical_features(features[: len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)]),
+            *features[len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES) :],
+            *encode_topology_context_features(),
         ]
     raise ValueError(
         "feature vector length does not match tactical or PPO observation schema: "
         f"got {len(features)}, expected {len(TACTICAL_FEATURE_NAMES)}, "
         f"{len(PRE_FRONTIER_TACTICAL_FEATURE_NAMES)}, "
         f"{legacy_action_history_len}, {pre_frontier_action_history_len}, "
-        f"{legacy_ppo_len}, {pre_frontier_ppo_len}, or "
+        f"{legacy_ppo_len}, {pre_frontier_ppo_len}, "
+        f"{legacy_contact_ppo_len}, {pre_frontier_contact_ppo_len}, or "
         f"{len(PPO_FEATURE_NAMES)}"
     )
 
@@ -485,6 +548,13 @@ def _feature_meaning(name: str) -> str:
         "contact_use_line_close": "Contact use-line is close and aligned enough for a use press.",
         "contact_use_line_followthrough_active": "Controller is currently forcing bounded open_use_line follow-through.",
         "contact_use_line_age_norm": "Age of the remembered contact use-line normalized by its 420-tic expiry window.",
+        "topology_current_cell_visits_norm": "Persistent plus episode-local visits to the current coarse map cell, normalized by 16.",
+        "topology_open_cell_min_visit_norm": "Lowest visit count among open projected neighbor cells, normalized by 8.",
+        "topology_open_cell_mean_visit_norm": "Mean visit count among open projected neighbor cells, normalized by 8.",
+        "topology_frontier_active": "At least one open projected neighbor cell is still low-visit enough to count as a frontier.",
+        "topology_frontier_angle_sin": "Sine of the relative angle toward the least-visited open frontier cell.",
+        "topology_frontier_angle_cos": "Cosine of the relative angle toward the least-visited open frontier cell.",
+        "topology_exhausted_open_ratio": "Fraction of open projected neighbor cells that have already been visited more than once.",
     }
     return meanings.get(name, "PPO observation feature.")
 
@@ -497,6 +567,7 @@ OBSERVATION_SCHEMA = {
     "action_history_feature_names": ACTION_HISTORY_FEATURE_NAMES,
     "temporal_context_feature_names": TEMPORAL_CONTEXT_FEATURE_NAMES,
     "contact_context_feature_names": CONTACT_CONTEXT_FEATURE_NAMES,
+    "topology_context_feature_names": TOPOLOGY_CONTEXT_FEATURE_NAMES,
     "source_groups": [
         {
             "name": "protobuf_state",
@@ -562,6 +633,11 @@ OBSERVATION_SCHEMA = {
             "producer": "SkillController recent visible-contact and contact use-line state",
             "features": CONTACT_CONTEXT_FEATURE_NAMES,
         },
+        {
+            "name": "topology_context",
+            "producer": "SkillController projected direction probes plus AgentMemory cell visits",
+            "features": TOPOLOGY_CONTEXT_FEATURE_NAMES,
+        },
     ],
     "protobuf_to_observation_pipeline": [
         {
@@ -600,6 +676,11 @@ OBSERVATION_SCHEMA = {
             "code": "encode_contact_context_features(...)",
             "payload": "recent contact and contact use-line follow-through state",
         },
+        {
+            "phase": "topology_context",
+            "code": "encode_topology_context_features(...)",
+            "payload": "coarse cell visit counts and least-visited open frontier direction",
+        },
     ],
     "learning_readiness": {
         "rich_observation_definition": [
@@ -620,6 +701,7 @@ OBSERVATION_SCHEMA = {
             "route-outcome history tells PPO whether the last progression decision reached, stalled, or moved toward its waypoint",
             "bounded temporal features expose recent movement, enemy-distance, route-distance, and shootable-contact trends",
             "contact-context features expose whether PPO is acting on a remembered visible-contact use line",
+            "topology-context features expose current-cell revisit pressure and the least-visited open direction",
         ],
         "known_gaps": [
             "no compact topological map graph",
@@ -635,7 +717,7 @@ OBSERVATION_SCHEMA = {
         "upgrade_queue": [
             {
                 "name": "topology_graph_features",
-                "reason": "spawn-to-contact PPO needs map structure beyond a single local waypoint",
+                "reason": "spawn-to-contact PPO still needs graph-level structure beyond local projected frontier cells",
             },
             {
                 "name": "snapshot_restore_context",
@@ -679,6 +761,7 @@ OBSERVATION_SCHEMA = {
         *_feature_descriptors(ACTION_HISTORY_FEATURE_NAMES, source="macro_step_history"),
         *_feature_descriptors(TEMPORAL_CONTEXT_FEATURE_NAMES, source="temporal_context"),
         *_feature_descriptors(CONTACT_CONTEXT_FEATURE_NAMES, source="contact_context"),
+        *_feature_descriptors(TOPOLOGY_CONTEXT_FEATURE_NAMES, source="topology_context"),
     ],
 }
 

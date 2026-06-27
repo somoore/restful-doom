@@ -108,6 +108,15 @@ _FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
         "contact_use_line_followthrough_active",
         "contact_use_line_age_norm",
     ),
+    "topology": (
+        "topology_current_cell_visits_norm",
+        "topology_open_cell_min_visit_norm",
+        "topology_open_cell_mean_visit_norm",
+        "topology_frontier_active",
+        "topology_frontier_angle_sin",
+        "topology_frontier_angle_cos",
+        "topology_exhausted_open_ratio",
+    ),
     "survival": (
         "stuck",
         "sector_damaging",

@@ -13,10 +13,13 @@ from typing import Any
 from .brain import (
     BT_ATTACK,
     BT_USE,
+    CELL_UNITS,
+    FP,
     AgentMemory,
     BrainPolicy,
     BrainPolicyParams,
     MANUAL_USE_LINE_SPECIALS,
+    cell_key,
     extract_features,
     raw_ticcmd_action,
     raw_turn_for_delta,
@@ -33,6 +36,7 @@ from .schemas import (
     encode_action_history_features,
     encode_contact_context_features,
     encode_temporal_context_features,
+    encode_topology_context_features,
 )
 from .skill_policy import features_from_tactical
 
@@ -160,6 +164,7 @@ class SkillController:
             ),
             *self._temporal_context_features(features),
             *self._contact_context_features(features),
+            *self._topology_context_features(features),
         ]
 
     def reset_episode_context(self) -> None:
@@ -343,6 +348,91 @@ class SkillController:
             contact_use_line_followthrough_active=self._contact_use_line_followthrough_active(features),
             contact_use_line_age_tics=age_tics,
         )
+
+    def _topology_context_features(self, features: Any) -> list[float]:
+        """Returns compact local topology and cell-visit context."""
+        persistent_cells = self.memory.data.get("cells", {})
+        if not isinstance(persistent_cells, dict):
+            persistent_cells = {}
+        current_visits = self._cell_visit_count(
+            features.cell,
+            persistent_cells=persistent_cells,
+        )
+        open_cells = self._projected_open_probe_cells(
+            features,
+            persistent_cells=persistent_cells,
+        )
+        if not open_cells:
+            return encode_topology_context_features(
+                current_cell_visits=current_visits,
+            )
+        visits = [int(cell["visits"]) for cell in open_cells]
+        best = min(
+            open_cells,
+            key=lambda cell: (
+                int(cell["visits"]),
+                abs(float(cell["angle_offset_degrees"])),
+            ),
+        )
+        exhausted = sum(1 for visit_count in visits if visit_count > 1)
+        return encode_topology_context_features(
+            current_cell_visits=current_visits,
+            open_cell_min_visits=min(visits),
+            open_cell_mean_visits=sum(visits) / max(1, len(visits)),
+            frontier_active=int(best["visits"]) <= 1,
+            frontier_angle_degrees=float(best["angle_offset_degrees"]),
+            exhausted_open_ratio=exhausted / max(1, len(open_cells)),
+        )
+
+    def _projected_open_probe_cells(
+        self,
+        features: Any,
+        *,
+        persistent_cells: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Projects open direction probes into coarse map cells with visit counts."""
+        navigation = getattr(features, "navigation", {})
+        probes = navigation.get("direction_probes", [])
+        if not isinstance(probes, list):
+            return []
+        probe_distance = float(navigation.get("probe_distance_fp", 0) or 0) / FP
+        cells: dict[str, dict[str, Any]] = {}
+        for probe in probes:
+            if not isinstance(probe, dict) or not probe.get("open"):
+                continue
+            offset = float(probe.get("angle_offset_degrees", 0.0))
+            distance = float(probe.get("block_distance_fp", 0) or 0) / FP
+            step = max(
+                CELL_UNITS,
+                min(1.5 * CELL_UNITS, distance or probe_distance or CELL_UNITS),
+            )
+            heading = math.radians((float(features.angle) + offset) % 360.0)
+            projected_x = float(features.x_units) + math.cos(heading) * step
+            projected_y = float(features.y_units) + math.sin(heading) * step
+            key = cell_key(
+                0.0 if abs(projected_x) < 1e-6 else projected_x,
+                0.0 if abs(projected_y) < 1e-6 else projected_y,
+            )
+            visits = self._cell_visit_count(key, persistent_cells=persistent_cells)
+            previous = cells.get(key)
+            if previous is None or abs(offset) < abs(float(previous["angle_offset_degrees"])):
+                cells[key] = {
+                    "cell": key,
+                    "visits": visits,
+                    "angle_offset_degrees": offset,
+                }
+        return list(cells.values())
+
+    def _cell_visit_count(
+        self,
+        key: str,
+        *,
+        persistent_cells: dict[str, Any],
+    ) -> int:
+        cell = persistent_cells.get(key, {})
+        persistent_visits = int(cell.get("visits", 0)) if isinstance(cell, dict) else 0
+        episode_visits = int(self.policy._episode_cell_visits.get(key, 0))
+        return max(0, persistent_visits + episode_visits)
 
     def action_for(self, action_index: int, state: Any) -> tuple[Any, dict[str, Any]]:
         """Returns the PlayerAction for a PPO skill index."""

@@ -307,6 +307,10 @@ The training API is:
 - PPO observations append explicit contact-context fields for the current or
   remembered visible-contact use line: active flag, distance, angle, close-use
   readiness, bounded follow-through state, and age.
+- PPO observations also append local topology context from projected direction
+  probes and AgentMemory cell visits: current-cell revisit pressure, least-
+  visited open-neighbor direction, and open-cell exhaustion ratio. This is a
+  compact spawn-to-contact signal, not a full map graph.
 - `--first-visible-bonus`, `--first-shootable-bonus`,
   `--visible-contact-progress-reward`, `--terminate-on-first-visible`, and
   `--terminate-on-first-shootable` enable first-contact and
@@ -479,6 +483,10 @@ PPO rollout summaries include route diagnostics for spawn-to-contact work:
 to inspect when a run moves through E1M1 but still never reaches a shootable
 target. First-contact curriculum runs also report `visible_enemy_steps`,
 `first_visible_contacts`, `first_shootable_contacts`, and `contact_reward`.
+Topology-context runs report `topology_frontier_active_steps`,
+`mean_topology_current_cell_visits_norm`,
+`mean_topology_open_cell_min_visit_norm`, and
+`mean_topology_exhausted_open_ratio`.
 
 The checkpoint schema is `restfuldoom.ppo_checkpoint.v1`. Each checkpoint
 stores model weights, optimizer state, PPO config, observation/action schemas,
