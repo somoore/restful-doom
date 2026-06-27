@@ -32,11 +32,12 @@ use proto::doom_agent_server::{DoomAgent, DoomAgentServer};
 use proto::{
     Ammo, CombatProbe, DirectionProbe, DoomKey, EnemyInfo, GameState, LevelInfo, MapObjectState,
     MouseInput, NavigationProbe, ObserveRequest, PlayerAction, PlayerActionType, PlayerState,
-    RawTiccmd, StateDelta, UseLineInfo, Vec3Fixed,
+    RawTiccmd, ResetEpisodeRequest, ResetEpisodeResponse, StateDelta, UseLineInfo, Vec3Fixed,
 };
 
 const DEFAULT_GRPC_PORT: u16 = 50_051;
 const ACTION_QUEUE_CAPACITY: usize = 256;
+const CONTROL_QUEUE_CAPACITY: usize = 16;
 const STATE_STREAM_CAPACITY: usize = 8;
 const MAX_ACTION_DURATION_TICS: u32 = 35;
 const DEFAULT_ACTION_AMOUNT: u32 = 10;
@@ -54,12 +55,14 @@ static BRIDGE: OnceLock<Bridge> = OnceLock::new();
 struct Bridge {
     latest_state: watch::Sender<GameState>,
     action_rx: Mutex<mpsc::Receiver<AgentPlayerAction>>,
+    control_rx: Mutex<mpsc::Receiver<AgentControlRequest>>,
 }
 
 #[derive(Clone, Debug)]
 struct AgentRuntime {
     latest_state: watch::Sender<GameState>,
     action_tx: mpsc::Sender<AgentPlayerAction>,
+    control_tx: mpsc::Sender<AgentControlRequest>,
 }
 
 #[tonic::async_trait]
@@ -101,6 +104,35 @@ impl DoomAgent for AgentRuntime {
             self.latest_state.subscribe(),
             include_delta_state,
         )))
+    }
+
+    /// Queues a Doom episode reset for the simulation thread.
+    async fn reset_episode(
+        &self,
+        request: Request<ResetEpisodeRequest>,
+    ) -> Result<Response<ResetEpisodeResponse>, Status> {
+        let request = request.into_inner();
+        let control = control_request_from_proto(&request);
+        self.control_tx
+            .try_send(control)
+            .map_err(|error| match error {
+                mpsc::error::TrySendError::Full(_) => {
+                    Status::resource_exhausted("episode reset queue is full")
+                }
+                mpsc::error::TrySendError::Closed(_) => {
+                    Status::unavailable("episode reset queue is closed")
+                }
+            })?;
+
+        Ok(Response::new(ResetEpisodeResponse {
+            accepted: true,
+            message: "reset queued on Doom simulation thread".to_string(),
+            skill: control.skill,
+            episode: control.episode,
+            map: control.map,
+            seed: control.seed,
+            seed_applied: false,
+        }))
     }
 }
 
@@ -308,6 +340,26 @@ fn clamp_i32(value: i32, min: i32, max: i32) -> i32 {
     value.max(min).min(max)
 }
 
+fn control_request_from_proto(request: &ResetEpisodeRequest) -> AgentControlRequest {
+    let skill = clamp_i32(request.skill, 0, 4);
+    let episode = if request.episode <= 0 {
+        1
+    } else {
+        request.episode
+    };
+    let map = if request.map <= 0 { 1 } else { request.map };
+
+    AgentControlRequest {
+        command: AGENT_CONTROL_RESET_EPISODE,
+        skill,
+        episode,
+        map,
+        seed: request.seed,
+        flags: 0,
+        _reserved: [0; 4],
+    }
+}
+
 fn state_from_snapshot(snapshot: &AgentGameStateSnapshot) -> GameState {
     let enemy_count = (snapshot.enemy_count as usize).min(AGENT_MAX_ENEMIES);
     let object_count = (snapshot.object_count as usize).min(AGENT_MAX_OBJECTS);
@@ -482,9 +534,11 @@ pub extern "C" fn restfuldoom_agent_init(port: u16) -> i32 {
 
     let (state_tx, _state_rx) = watch::channel(GameState::default());
     let (action_tx, action_rx) = mpsc::channel(ACTION_QUEUE_CAPACITY);
+    let (control_tx, control_rx) = mpsc::channel(CONTROL_QUEUE_CAPACITY);
     let bridge = Bridge {
         latest_state: state_tx.clone(),
         action_rx: Mutex::new(action_rx),
+        control_rx: Mutex::new(control_rx),
     };
 
     if BRIDGE.set(bridge).is_err() {
@@ -495,6 +549,7 @@ pub extern "C" fn restfuldoom_agent_init(port: u16) -> i32 {
     let runtime = AgentRuntime {
         latest_state: state_tx,
         action_tx,
+        control_tx,
     };
 
     thread::Builder::new()
@@ -599,6 +654,40 @@ pub unsafe extern "C" fn restfuldoom_agent_take_action(out_action: *mut AgentPla
     }
 }
 
+/// Takes one queued control request for Doom's game thread.
+///
+/// Returns `1` when a request was written and `0` otherwise.
+///
+/// # Safety
+///
+/// `out_request` must be either null or a valid writable pointer to an
+/// `AgentControlRequest`.
+#[no_mangle]
+pub unsafe extern "C" fn restfuldoom_agent_take_control_request(
+    out_request: *mut AgentControlRequest,
+) -> i32 {
+    let Some(bridge) = BRIDGE.get() else {
+        return 0;
+    };
+    if out_request.is_null() {
+        return 0;
+    }
+
+    let Ok(mut rx) = bridge.control_rx.lock() else {
+        return 0;
+    };
+    match rx.try_recv() {
+        Ok(request) => {
+            // SAFETY: The C caller provides a valid writable `out_request`.
+            unsafe {
+                *out_request = request;
+            }
+            1
+        }
+        Err(_) => 0,
+    }
+}
+
 /// Fixed-size action returned to Doom's game thread.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -609,6 +698,21 @@ pub struct AgentPlayerAction {
     pub angle_turn: i16,
     pub buttons: u8,
     pub _reserved: [u8; 3],
+}
+
+const AGENT_CONTROL_RESET_EPISODE: u32 = 1;
+
+/// Fixed-size control request returned to Doom's game thread.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AgentControlRequest {
+    pub command: u32,
+    pub skill: i32,
+    pub episode: i32,
+    pub map: i32,
+    pub seed: u64,
+    pub flags: u32,
+    pub _reserved: [u8; 4],
 }
 
 /// Fixed-point map object copied from Doom.
@@ -824,6 +928,25 @@ mod tests {
     }
 
     #[test]
+    fn reset_request_normalizes_training_defaults() {
+        let request = ResetEpisodeRequest {
+            skill: 99,
+            episode: 0,
+            map: 0,
+            seed: 123,
+            run_id: "ppo-smoke".to_string(),
+        };
+
+        let control = control_request_from_proto(&request);
+
+        assert_eq!(control.command, AGENT_CONTROL_RESET_EPISODE);
+        assert_eq!(control.skill, 4);
+        assert_eq!(control.episode, 1);
+        assert_eq!(control.map, 1);
+        assert_eq!(control.seed, 123);
+    }
+
+    #[test]
     fn snapshot_conversion_bounds_enemies() {
         let mut snapshot = AgentGameStateSnapshot {
             tick: 42,
@@ -871,7 +994,10 @@ mod tests {
             Some(7)
         );
         assert_eq!(
-            state.navigation.as_ref().map(|navigation| navigation.forward_open),
+            state
+                .navigation
+                .as_ref()
+                .map(|navigation| navigation.forward_open),
             Some(true)
         );
         assert_eq!(
@@ -963,6 +1089,38 @@ mod tests {
             .expect("stream is healthy")
             .expect("state exists");
         assert_eq!(observed.tick, 99);
+
+        let reset = client
+            .reset_episode(ResetEpisodeRequest {
+                skill: 9,
+                episode: 0,
+                map: 0,
+                seed: 321,
+                run_id: "roundtrip".to_string(),
+            })
+            .await
+            .expect("reset queues")
+            .into_inner();
+        assert!(reset.accepted);
+        assert!(!reset.seed_applied);
+        assert_eq!(
+            (reset.skill, reset.episode, reset.map, reset.seed),
+            (4, 1, 1, 321)
+        );
+
+        let mut request = AgentControlRequest::default();
+        for _ in 0..20 {
+            // SAFETY: The output pointer references a valid stack variable.
+            if unsafe { restfuldoom_agent_take_control_request(&mut request) } == 1 {
+                break;
+            }
+            sleep(Duration::from_millis(25)).await;
+        }
+        assert_eq!(request.command, AGENT_CONTROL_RESET_EPISODE);
+        assert_eq!(
+            (request.skill, request.episode, request.map, request.seed),
+            (4, 1, 1, 321)
+        );
 
         tx.send(PlayerAction {
             tick: 100,

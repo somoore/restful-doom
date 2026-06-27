@@ -20,6 +20,19 @@ typedef struct
     uint8_t reserved[3];
 } agent_player_action_t;
 
+#define AGENT_CONTROL_RESET_EPISODE 1u
+
+typedef struct
+{
+    uint32_t command;
+    int32_t skill;
+    int32_t episode;
+    int32_t map;
+    uint64_t seed;
+    uint32_t flags;
+    uint8_t reserved[4];
+} agent_control_request_t;
+
 typedef struct
 {
     int32_t id;
@@ -134,8 +147,10 @@ typedef struct
 int restfuldoom_agent_init(uint16_t port);
 void restfuldoom_agent_publish_state(const agent_game_state_snapshot_t *snapshot);
 int restfuldoom_agent_take_action(agent_player_action_t *out_action);
+int restfuldoom_agent_take_control_request(agent_control_request_t *out_request);
 
 void AgentBridge_Init(int port);
+void AgentBridge_BeforeTic(void);
 void AgentBridge_AfterTic(int completed_tic);
 void AgentBridge_ApplyTiccmd(ticcmd_t *cmd);
 

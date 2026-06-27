@@ -5,7 +5,16 @@ import pytest
 from restfuldoom_agent.reward import GOAL_PRESETS, Goal, RewardEngine, goal_preset
 
 
-def state(x_fp, y_fp, health=100, kills=0, items=0, secrets=0):
+def state(
+    x_fp,
+    y_fp,
+    health=100,
+    kills=0,
+    items=0,
+    secrets=0,
+    enemy_health=None,
+    enemy_distance=0,
+):
     position = SimpleNamespace(x_fp=x_fp, y_fp=y_fp)
     obj = SimpleNamespace(position=position)
     player = SimpleNamespace(
@@ -15,7 +24,18 @@ def state(x_fp, y_fp, health=100, kills=0, items=0, secrets=0):
         items=items,
         secrets=secrets,
     )
-    return SimpleNamespace(player=player)
+    enemies = []
+    if enemy_health is not None:
+        enemies.append(
+            SimpleNamespace(
+                object=SimpleNamespace(
+                    id=7,
+                    health=enemy_health,
+                    distance_fp=int(enemy_distance * 65536),
+                )
+            )
+        )
+    return SimpleNamespace(player=player, enemies=enemies)
 
 
 def test_reward_counts_progress_and_combat():
@@ -30,6 +50,31 @@ def test_reward_counts_progress_and_combat():
     assert reward.health_delta == -5
     assert reward.progress_delta == 50
     assert reward.reward > 0
+
+
+def test_reward_counts_enemy_damage_before_kill():
+    engine = RewardEngine(goal_preset("combat"))
+
+    reward = engine.score(
+        state(0, 0, enemy_health=20),
+        state(0, 0, enemy_health=5),
+    )
+
+    assert reward.kill_delta == 0
+    assert reward.damage_delta == 15
+    assert reward.reward == 3.0
+
+
+def test_reward_counts_nearest_enemy_distance_progress():
+    engine = RewardEngine(goal_preset("combat"))
+
+    reward = engine.score(
+        state(0, 0, enemy_health=20, enemy_distance=500),
+        state(0, 0, enemy_health=20, enemy_distance=450),
+    )
+
+    assert reward.enemy_distance_delta == 50
+    assert reward.reward == 0.5
 
 
 def test_goal_presets_include_demo_modes():

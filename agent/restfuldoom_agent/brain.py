@@ -22,6 +22,7 @@ from typing import Any
 from .client import BackoffConfig, DoomAgentClient, agent_pb2, semantic_action
 from .reward import RewardEngine, goal_preset
 from .rollout_config import safe_endpoint_host
+from .schemas import ACTION_SCHEMA, OBSERVATION_SCHEMA
 from .skill_policy import SkillPolicyModel, SkillPolicyTrainConfig, train_skill_policy
 
 FP = 65536.0
@@ -2871,6 +2872,7 @@ def export_training_job(
     model_checkpoints = []
     if skill_model_path is not None and skill_model_path.exists():
         model_checkpoints.append(skill_model_path)
+    ppo_checkpoints = _memory_ppo_checkpoint_paths(memory)
     manifest = {
         "schema": "restfuldoom.training_job.v1",
         "created_at": _iso_now(),
@@ -2884,6 +2886,18 @@ def export_training_job(
         "model_checkpoints": [
             f"agent_models/{path.name}" for path in model_checkpoints
         ],
+        "ppo_policy": memory.data.get("ppo_policy"),
+        "ppo_checkpoints": [
+            f"agent_models/ppo/{path.name}" for path in ppo_checkpoints
+        ],
+        "observation_schema": OBSERVATION_SCHEMA,
+        "action_schema": ACTION_SCHEMA,
+        "reward_config": memory.data.get("ppo_policy", {}).get("reward_config")
+        if isinstance(memory.data.get("ppo_policy"), dict)
+        else None,
+        "eval_history": memory.data.get("ppo_policy", {}).get("eval_history", [])
+        if isinstance(memory.data.get("ppo_policy"), dict)
+        else [],
         "successes": memory.data.get("successes", []),
         "trajectories": [f"trajectories/{path.name}" for path in trajectory_paths],
     }
@@ -2896,6 +2910,8 @@ def export_training_job(
             _tar_add_path(archive, Path(notes_path), "agent-notes.md")
         for checkpoint in model_checkpoints:
             archive.add(checkpoint, arcname=f"agent_models/{checkpoint.name}")
+        for checkpoint in ppo_checkpoints:
+            archive.add(checkpoint, arcname=f"agent_models/ppo/{checkpoint.name}")
         for trajectory in trajectory_paths:
             archive.add(trajectory, arcname=f"trajectories/{trajectory.name}")
 
@@ -2905,6 +2921,7 @@ def export_training_job(
         "memory_summary": manifest["memory_summary"],
         "trajectory_count": len(manifest["trajectories"]),
         "model_checkpoint_count": len(manifest["model_checkpoints"]),
+        "ppo_checkpoint_count": len(manifest["ppo_checkpoints"]),
         "success_count": len(manifest["successes"]),
         "best_score": manifest["best_score"],
         "best_run_id": manifest["best_run_id"],
@@ -2968,6 +2985,7 @@ def import_training_job(
         "memory_path": str(dest / manifest["memory_path"]),
         "trajectory_count": len(manifest.get("trajectories", [])),
         "model_checkpoint_count": len(manifest.get("model_checkpoints", [])),
+        "ppo_checkpoint_count": len(manifest.get("ppo_checkpoints", [])),
         "best_score": manifest.get("best_score"),
         "best_run_id": manifest.get("best_run_id"),
         "success_count": len(manifest.get("successes", [])),
@@ -2993,6 +3011,27 @@ def _memory_skill_model_path(memory: AgentMemory) -> Path | None:
         return None
     path = Path(checkpoint)
     return path if path.exists() else None
+
+
+def _memory_ppo_checkpoint_paths(memory: AgentMemory) -> list[Path]:
+    paths: list[Path] = []
+    policy = memory.data.get("ppo_policy")
+    if isinstance(policy, dict):
+        checkpoint = policy.get("checkpoint_path")
+        if isinstance(checkpoint, str) and checkpoint:
+            path = Path(checkpoint)
+            if path.exists():
+                paths.append(path)
+    for entry in memory.data.get("ppo_checkpoints", []):
+        if isinstance(entry, str):
+            path = Path(entry)
+        elif isinstance(entry, dict) and isinstance(entry.get("checkpoint_path"), str):
+            path = Path(entry["checkpoint_path"])
+        else:
+            continue
+        if path.exists() and path not in paths:
+            paths.append(path)
+    return paths
 
 
 def cell_key(x_units: float, y_units: float) -> str:

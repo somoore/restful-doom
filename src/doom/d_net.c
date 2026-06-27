@@ -92,6 +92,7 @@ static void RunTic(ticcmd_t *cmds, boolean *ingame)
     if (advancedemo)
         D_DoAdvanceDemo ();
 
+    AgentBridge_BeforeTic();
     G_Ticker ();
     AgentBridge_AfterTic(gametic);
 }

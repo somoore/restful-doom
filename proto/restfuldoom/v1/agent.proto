@@ -9,12 +9,53 @@ service DoomAgent {
 
   // Streams observations without sending actions.
   rpc Observe(ObserveRequest) returns (stream GameState);
+
+  // Requests a fresh episode reset on Doom's simulation thread.
+  rpc ResetEpisode(ResetEpisodeRequest) returns (ResetEpisodeResponse);
 }
 
 // Configures an observation-only stream.
 message ObserveRequest {
   // When true, each state includes a prost-encoded StateDelta payload.
   bool include_delta_state = 1;
+}
+
+// Episode reset request for training loops.
+message ResetEpisodeRequest {
+  // Doom skill level. Values are clamped by the engine.
+  int32 skill = 1;
+
+  // Doom episode number. Defaults to E1 when zero.
+  int32 episode = 2;
+
+  // Doom map number. Defaults to M1 when zero.
+  int32 map = 3;
+
+  // Optional training seed. Current engine bridge reports whether it applied it.
+  uint64 seed = 4;
+
+  // Optional caller run identifier for logs and trajectory correlation.
+  string run_id = 5;
+}
+
+// Reset acceptance details from the gRPC bridge.
+message ResetEpisodeResponse {
+  // True when the request was queued for Doom's simulation thread.
+  bool accepted = 1;
+
+  // Human-readable status for demos and training logs.
+  string message = 2;
+
+  // Values that were queued after bridge-side normalization.
+  int32 skill = 3;
+  int32 episode = 4;
+  int32 map = 5;
+
+  // Echoes the requested seed.
+  uint64 seed = 6;
+
+  // True only when the engine bridge applies the requested seed.
+  bool seed_applied = 7;
 }
 
 // A full game-state observation optimized for AI agents.

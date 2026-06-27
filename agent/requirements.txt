@@ -1,4 +1,6 @@
 boto3>=1.34
 grpcio>=1.60
 grpcio-tools>=1.60
+numpy>=2.0
 protobuf>=4.25
+torch>=2.3

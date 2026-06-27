@@ -91,6 +91,42 @@ def test_train_skill_policy_from_memory_updates_export_manifest(tmp_path):
     assert manifest["model_checkpoints"] == ["agent_models/skill-policy.json"]
 
 
+def test_export_training_job_includes_ppo_checkpoint(tmp_path):
+    memory_path = tmp_path / "agent_memory" / "e1m1.json"
+    memory = AgentMemory.load(memory_path)
+    checkpoint = tmp_path / "agent_models" / "ppo" / "ppo.pt"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"fake torch checkpoint")
+    memory.data["ppo_policy"] = {
+        "schema": "restfuldoom.ppo_policy.v1",
+        "checkpoint_path": str(checkpoint),
+        "reward_config": {"goal_preset": "combat"},
+        "eval_history": [{"policy_id": "ppo", "mean_kills": 1.0}],
+    }
+    memory.save()
+
+    bundle = tmp_path / "training.tar.gz"
+    export_training_job(
+        bundle,
+        memory_path=memory_path,
+        notes_path=tmp_path / "missing-notes.md",
+    )
+
+    import tarfile
+
+    with tarfile.open(bundle, "r:gz") as archive:
+        names = {member.name for member in archive.getmembers()}
+        manifest = json.loads(archive.extractfile("manifest.json").read().decode())
+
+    assert "agent_models/ppo/ppo.pt" in names
+    assert manifest["ppo_checkpoints"] == ["agent_models/ppo/ppo.pt"]
+    assert manifest["ppo_policy"]["checkpoint_path"] == str(checkpoint)
+    assert manifest["observation_schema"]["schema"] == "restfuldoom.observation.v1"
+    assert manifest["action_schema"]["schema"] == "restfuldoom.skill_action.v1"
+    assert manifest["reward_config"] == {"goal_preset": "combat"}
+    assert manifest["eval_history"] == [{"policy_id": "ppo", "mean_kills": 1.0}]
+
+
 def test_brain_policy_records_learned_skill_prediction(tmp_path):
     trajectory = tmp_path / "skill.jsonl"
     _write_skill_rows(trajectory)

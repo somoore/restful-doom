@@ -6685,6 +6685,144 @@
     "promoted_at": "2026-06-27T08:41:09Z",
     "updated_at": "2026-06-27T11:17:36Z"
   },
+  "ppo_checkpoints": [
+    {
+      "buffer_path": "trajectories/ppo/ppo-smoke-local-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-smoke-local-ppo-0000.pt",
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-damage-smoke-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-damage-smoke-ppo-0000.pt",
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-distance-smoke-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-distance-smoke-ppo-0000.pt",
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-learning-smoke-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-learning-smoke-ppo-0000.pt",
+      "rollout_summary": {
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 189.9155,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 109,
+        "positive_reward_steps": 146,
+        "records": 256,
+        "skill_counts": {
+          "engage": 41,
+          "fire": 30,
+          "open_use_line": 34,
+          "press_exit": 33,
+          "recover_stuck": 24,
+          "retreat": 35,
+          "route_progression": 29,
+          "seek_enemy": 30
+        },
+        "total_reward": 2.4292
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-learning-smoke-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-learning-smoke-ppo-0001.pt",
+      "rollout_summary": {
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 425.9011,
+        "max_kills": 0,
+        "min_health": -8,
+        "negative_reward_steps": 106,
+        "positive_reward_steps": 147,
+        "records": 256,
+        "skill_counts": {
+          "engage": 38,
+          "fire": 31,
+          "open_use_line": 36,
+          "press_exit": 28,
+          "recover_stuck": 24,
+          "retreat": 31,
+          "route_progression": 31,
+          "seek_enemy": 37
+        },
+        "total_reward": -28.981
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-learning-smoke-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-learning-smoke-ppo-0002.pt",
+      "rollout_summary": {
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 338.0478,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 84,
+        "positive_reward_steps": 157,
+        "records": 256,
+        "skill_counts": {
+          "engage": 39,
+          "fire": 30,
+          "open_use_line": 24,
+          "press_exit": 29,
+          "recover_stuck": 37,
+          "retreat": 35,
+          "route_progression": 32,
+          "seek_enemy": 30
+        },
+        "total_reward": 3.3805
+      },
+      "update_index": 2
+    }
+  ],
+  "ppo_policy": {
+    "buffer_path": "trajectories/ppo/ppo-learning-smoke-buffer-0002.jsonl",
+    "checkpoint_path": "agent_models/ppo/ppo-learning-smoke-ppo-0002.pt",
+    "eval_history": [],
+    "goal_preset": "combat",
+    "metrics": {
+      "approx_kl": 0.0016795408446341753,
+      "entropy": 2.061277598142624,
+      "policy_loss": -0.0017217762069776654,
+      "value_loss": 0.06366535741835833
+    },
+    "reward_config": {
+      "goal_preset": "combat",
+      "kill_goal_bonus": 10.0,
+      "level_complete_bonus": 100.0,
+      "required_kills": 1,
+      "target_x_fp": null,
+      "target_y_fp": null
+    },
+    "rollout_summary": {
+      "damage_delta": 0,
+      "done_count": 1,
+      "enemy_distance_delta": 338.0478,
+      "max_kills": 0,
+      "min_health": 100,
+      "negative_reward_steps": 84,
+      "positive_reward_steps": 157,
+      "records": 256,
+      "skill_counts": {
+        "engage": 39,
+        "fire": 30,
+        "open_use_line": 24,
+        "press_exit": 29,
+        "recover_stuck": 37,
+        "retreat": 35,
+        "route_progression": 32,
+        "seek_enemy": 30
+      },
+      "total_reward": 3.3805
+    },
+    "schema": "restfuldoom.ppo_policy.v1",
+    "update_index": 2
+  },
   "schema": "restfuldoom.agent_memory.v1",
   "successes": [
     {
@@ -6914,5 +7052,5 @@
       "visited_cells": 62
     }
   ],
-  "updated_at": "2026-06-27T11:24:42Z"
+  "updated_at": "2026-06-27T13:00:24Z"
 }

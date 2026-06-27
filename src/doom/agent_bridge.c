@@ -522,6 +522,40 @@ void AgentBridge_AfterTic(int completed_tic)
     restfuldoom_agent_publish_state(&snapshot);
 }
 
+void AgentBridge_BeforeTic(void)
+{
+    agent_control_request_t request;
+    agent_player_action_t discarded_action;
+    int requests_applied = 0;
+    int actions_discarded;
+
+    if (!agent_bridge_initialized)
+    {
+        return;
+    }
+
+    while (requests_applied < 4 && restfuldoom_agent_take_control_request(&request) == 1)
+    {
+        switch (request.command)
+        {
+            case AGENT_CONTROL_RESET_EPISODE:
+                actions_discarded = 0;
+                while (actions_discarded < 256
+                    && restfuldoom_agent_take_action(&discarded_action) == 1)
+                {
+                    ++actions_discarded;
+                }
+                G_DeferedInitNew((skill_t) ClampInt(request.skill, sk_baby, sk_nightmare),
+                                 request.episode,
+                                 request.map);
+                break;
+            default:
+                break;
+        }
+        ++requests_applied;
+    }
+}
+
 void AgentBridge_ApplyTiccmd(ticcmd_t *cmd)
 {
     agent_player_action_t action;

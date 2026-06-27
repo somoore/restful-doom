@@ -86,6 +86,19 @@ class RolloutStep:
     metadata: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class EpisodeReset:
+    """Accepted episode reset details from the Doom bridge."""
+
+    accepted: bool
+    message: str
+    skill: int
+    episode: int
+    map: int
+    seed: int
+    seed_applied: bool
+
+
 class DoomAgentStreamError(RuntimeError):
     """Raised when a stream ends after reconnect attempts are exhausted."""
 
@@ -146,6 +159,36 @@ class DoomAgentClient:
         async for state in self.stub.Observe(request, metadata=self.metadata):
             self.last_seen_tick = state.tick
             yield state
+
+    async def reset_episode(
+        self,
+        *,
+        skill: int = 2,
+        episode: int = 1,
+        map: int = 1,
+        seed: int = 0,
+        run_id: str = "",
+    ) -> EpisodeReset:
+        """Queues a fast episode reset on Doom's simulation thread."""
+        response = await self.stub.ResetEpisode(
+            agent_pb2.ResetEpisodeRequest(
+                skill=int(skill),
+                episode=int(episode),
+                map=int(map),
+                seed=int(seed),
+                run_id=run_id,
+            ),
+            metadata=self.metadata,
+        )
+        return EpisodeReset(
+            accepted=bool(response.accepted),
+            message=str(response.message),
+            skill=int(response.skill),
+            episode=int(response.episode),
+            map=int(response.map),
+            seed=int(response.seed),
+            seed_applied=bool(response.seed_applied),
+        )
 
     async def observe_reconnecting(
         self,
@@ -513,6 +556,8 @@ def summarize_reward(transition: Any) -> dict[str, Any]:
     return {
         "reward": transition.reward,
         "kill_delta": transition.kill_delta,
+        "damage_delta": getattr(transition, "damage_delta", 0),
+        "enemy_distance_delta": getattr(transition, "enemy_distance_delta", 0.0),
         "item_delta": transition.item_delta,
         "secret_delta": transition.secret_delta,
         "health_delta": transition.health_delta,

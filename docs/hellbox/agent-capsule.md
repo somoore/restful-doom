@@ -97,6 +97,38 @@ fresh demo can point at a newly minted endpoint without editing the file.
 The punchline is that Hellbox can pause and resume an isolated agent environment,
 not only a human-playable game stream.
 
+## PPO Training Loop
+
+For independent learning, use the PPO skill learner rather than the smoke agent:
+
+```bash
+python -m restfuldoom_agent.ppo_agent \
+    --endpoint <host>:443 \
+    --token <token> \
+    --agent-port 50051 \
+    --tls \
+    --goal-preset combat \
+    --updates 1 \
+    --rollout-steps 512 \
+    --checkpoint-dir agent_models/ppo \
+    --buffer-dir trajectories/ppo \
+    --memory-path agent_memory/e1m1.json
+```
+
+The PPO learner uses the same structured protobuf state stream and calls
+`ResetEpisode` between episodes. It chooses one of eight high-level skills
+(`engage`, `fire`, `seek_enemy`, `open_use_line`, `route_progression`,
+`retreat`, `recover_stuck`, `press_exit`) while the deterministic controller
+executes the low-level Doom commands. Each batch writes rollout buffers and a
+`restfuldoom.ppo_checkpoint.v1` checkpoint with model weights, optimizer state,
+schemas, reward config, and eval metadata.
+
+Before promoting PPO over the deterministic brain, evaluate it on fixed run
+labels and require it to beat the baseline on level completion, kills, survival,
+time/states to exit, and stuck events. Current reset responses include the
+requested seed but report `seed_applied=false`; do not claim deterministic
+seeded replay until that field is true in a verified build.
+
 ## Production Demo Checklist
 
 - Build the capsule from a clean checkout and confirm `/usr/local/bin/restful-doom` links the Rust gRPC static library.
@@ -117,6 +149,8 @@ not only a human-playable game stream.
 
 - Watch stderr for reconnect notices. Each notice includes the gRPC status, delay, and last observed Doom tick.
 - Confirm the trajectory file grows with `state`, `reward`, `next_action`, `last_seen_tick`, `reconnect_attempts`, and `metadata` fields.
+- For PPO demos, confirm `trajectories/ppo/*.jsonl` contains rollout records with `obs`, `action`, `reward`, `done`, `value`, and `logprob`, and confirm `agent_models/ppo/*.pt` checkpoints are written.
+- Export a resume bundle after PPO training and confirm the manifest includes `ppo_checkpoints`, `observation_schema`, `action_schema`, `reward_config`, and `eval_history`.
 - Check `metadata.reconnect_count`, `metadata.policy_errors`, `metadata.bedrock_fallback_count`, and `metadata.llm_latency_ms` when debugging a run.
 - Confirm `metadata.rollout.token_present` is true and that no raw token appears in the JSONL.
 - Confirm docs and screenshots use redacted token JSON; reserve `--raw` for local scripts.

@@ -231,14 +231,59 @@ PYTHONPATH=agent python -m restfuldoom_agent.brain_agent \
 
 The bundle uses schema `restfuldoom.training_job.v1` and includes a manifest,
 memory, promoted parameters, `agent-notes.md`, learned model checkpoints, and
-referenced JSONL trajectories. A cloud worker can import it and continue
-training against a new gRPC endpoint:
+referenced JSONL trajectories. When PPO checkpoints exist in memory, the same
+bundle also includes `agent_models/ppo/*.pt`, optimizer state, observation
+schema, action schema, reward config, and eval history. A cloud worker can
+import it and continue training against a new gRPC endpoint:
 
 ```
 PYTHONPATH=agent python -m restfuldoom_agent.brain_agent \
     --import-job training-jobs/restfuldoom-agent-training.tar.gz \
     --import-destination .
 ```
+
+### PPO Skill Learning
+
+Full RL uses the protobuf state stream directly. The agent first learns to
+choose high-level skills while the deterministic controller still handles
+tic-level movement, aiming, firing, and door use. This keeps the first PPO
+target tractable and avoids screenshot latency.
+
+The training API is:
+
+- `ResetEpisode` queues a fast in-process reset on Doom's simulation thread.
+- `DoomAgentEnv.reset()` calls that reset and returns a compact feature vector.
+- `DoomAgentEnv.step(action)` sends one PPO-selected skill action and returns
+  `(observation, reward, done, info)`.
+- `restfuldoom_agent.ppo` provides actor-critic PPO, GAE, clipped objective,
+  entropy bonus, rollout JSONL buffers, checkpoint save/load, and a promotion
+  gate.
+- Combat rewards include enemy damage deltas from protobuf enemy health, so PPO
+  can receive feedback before a full kill lands. They also include nearest-enemy
+  distance progress from protobuf enemy distances, so early policies get
+  navigation signal before line of sight.
+
+Run a small PPO batch against a live gRPC Doom endpoint:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
+    --endpoint 127.0.0.1:50051 \
+    --goal-preset combat \
+    --updates 1 \
+    --rollout-steps 512 \
+    --checkpoint-dir agent_models/ppo \
+    --buffer-dir trajectories/ppo \
+    --memory-path agent_memory/e1m1.json
+```
+
+The checkpoint schema is `restfuldoom.ppo_checkpoint.v1`. Each checkpoint
+stores model weights, optimizer state, PPO config, observation/action schemas,
+reward config, and eval history. The promotion gate should compare PPO against
+the deterministic baseline before replacing the current brain.
+
+Current reset caveat: `ResetEpisode` accepts a seed and echoes it in the
+response, but reports `seed_applied=false` until Doom RNG seeding is wired and
+verified. Treat seeds as run labels for now, not deterministic replay proof.
 
 ### Local Docker + Codex MCP
 
