@@ -384,8 +384,6 @@ class SkillController:
             mask["engage"] = True
             if shootable is None and self.policy._select_known_enemy(features) is not None:
                 mask["seek_enemy"] = True
-            if shootable is None and self._contact_route_waypoint(features) is not None:
-                mask["route_progression"] = True
             if shootable is None and self._contact_use_line(features) is not None:
                 mask["open_use_line"] = True
             nearest_visible = min(
@@ -431,6 +429,9 @@ class SkillController:
             enemy = features.visible_enemies[0] if features.visible_enemies else None
             if enemy is not None:
                 return self.policy._engage(features, enemy, stuck)
+            contact = self.policy._continue_last_contact_corridor(features, stuck)
+            if contact is not None:
+                return contact
             return self.policy._explore(features, stuck)
 
         if skill == "fire":
@@ -456,6 +457,14 @@ class SkillController:
         if skill == "seek_enemy":
             enemy = features.visible_enemies[0] if features.visible_enemies else None
             if enemy is not None:
+                contact = self.policy._close_visible_contact(
+                    features,
+                    enemy,
+                    stuck,
+                    "ppo_seek_visible_contact",
+                )
+                if contact is not None:
+                    return contact
                 return self.policy._turn_toward_or_move(
                     features,
                     enemy["angle_delta"],
@@ -464,6 +473,9 @@ class SkillController:
                     enemy=enemy,
                 )
             enemy = self.policy._select_known_enemy(features)
+            contact = self.policy._continue_last_contact_corridor(features, stuck)
+            if contact is not None:
+                return contact
             if enemy is not None:
                 return self.policy._turn_toward_or_move(
                     features,

@@ -953,6 +953,16 @@ class BrainPolicy:
         stuck: bool,
     ) -> tuple[Any, dict[str, Any]]:
         angle_delta = enemy["angle_delta"]
+        if enemy.get("line_of_sight") and self._shootable_enemy(features) is None:
+            contact = self._close_visible_contact(
+                features,
+                enemy,
+                stuck,
+                "close_visible_contact",
+            )
+            if contact is not None:
+                return contact
+
         if enemy["distance"] > 1800:
             ray = self._best_navigation_ray(features, angle_delta)
             if ray is not None and abs(angle_delta) <= 90:
@@ -1033,7 +1043,91 @@ class BrainPolicy:
                 tick=features.tick,
             ),
             self._decision("hold_attack", features, enemy=enemy, stuck=stuck),
+        )
+
+    def _close_visible_contact(
+        self,
+        features: TacticalFeatures,
+        enemy: dict[str, Any],
+        stuck: bool,
+        skill: str,
+    ) -> tuple[Any, dict[str, Any]] | None:
+        """Close visible-but-not-shootable contact using local movement rays."""
+        angle_delta = float(enemy["angle_delta"])
+        if float(enemy.get("distance", 0.0)) <= 700.0:
+            return None
+        ray = self._contact_closing_ray(features, enemy)
+        if ray is not None and abs(angle_delta) <= 100:
+            return self._move_on_ray(
+                features,
+                angle_delta,
+                ray,
+                skill,
+                stuck,
+                enemy=enemy,
+                duration_tics=1,
             )
+
+        if abs(angle_delta) > 18:
+            amount = (
+                self.params.fine_turn_amount
+                if abs(angle_delta) < 25
+                else self.params.turn_amount
+            )
+            return (
+                semantic_action(
+                    turn_action_for_delta(angle_delta),
+                    amount=amount,
+                    duration_tics=1,
+                    tick=features.tick,
+                ),
+                self._decision(skill, features, enemy=enemy, stuck=stuck),
+            )
+
+        if features.navigation["forward_open"]:
+            self._remember_contact_ray(features, enemy, 0.0)
+            return (
+                raw_ticcmd_action(
+                    forward_move=self.params.move_amount,
+                    angle_turn=raw_turn_for_delta(angle_delta),
+                    duration_tics=1,
+                    tick=features.tick,
+                ),
+                self._decision(skill, features, enemy=enemy, stuck=stuck),
+            )
+
+        return self._skirt_visible_enemy(features, enemy, stuck)
+
+    def _contact_closing_ray(
+        self,
+        features: TacticalFeatures,
+        enemy: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        probes = [
+            probe
+            for probe in features.navigation.get("direction_probes") or []
+            if probe.get("open")
+            or float(probe.get("block_distance_fp", 0) or 0) / FP >= 48.0
+        ]
+        if not probes:
+            return None
+
+        preferred = max(-75.0, min(75.0, float(enemy["angle_delta"])))
+        return min(
+            probes,
+            key=lambda probe: self._contact_ray_score(probe, preferred),
+        )
+
+    @staticmethod
+    def _contact_ray_score(probe: dict[str, Any], preferred: float) -> tuple[float, float, float]:
+        offset = float(probe.get("angle_offset_degrees", 0.0))
+        clearance = float(probe.get("block_distance_fp", 0) or 0) / FP
+        clearance_penalty = max(0.0, 384.0 - clearance) / 384.0
+        return (
+            abs(offset - preferred) / 45.0 + clearance_penalty,
+            -clearance,
+            abs(offset) / 90.0,
+        )
 
     def _best_navigation_ray(
         self,
@@ -1061,6 +1155,7 @@ class BrainPolicy:
         stuck: bool,
         *,
         enemy: dict[str, Any] | None = None,
+        duration_tics: int = 3,
     ) -> tuple[Any, dict[str, Any]]:
         offset = float(ray["angle_offset_degrees"])
         radians = math.radians(offset)
@@ -1081,7 +1176,7 @@ class BrainPolicy:
                 forward_move=forward,
                 side_move=side,
                 angle_turn=raw_turn_for_delta(aim_angle_delta),
-                duration_tics=3,
+                duration_tics=duration_tics,
                 tick=features.tick,
             ),
             self._decision(

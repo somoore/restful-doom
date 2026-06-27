@@ -17,7 +17,7 @@ from restfuldoom_agent.brain import (
 )
 
 
-def state(*, tick=1, x=0, y=0, angle=0, enemy=None, combat=None):
+def state(*, tick=1, x=0, y=0, angle=0, enemy=None, combat=None, direction_probes=None):
     position = SimpleNamespace(x_fp=int(x * 65536), y_fp=int(y * 65536), z_fp=0)
     obj = SimpleNamespace(position=position, angle_degrees=angle)
     ammo = SimpleNamespace(bullets=50)
@@ -59,6 +59,17 @@ def state(*, tick=1, x=0, y=0, angle=0, enemy=None, combat=None):
         front_block_distance_fp=96 * 65536,
         probe_distance_fp=96 * 65536,
     )
+    if direction_probes is not None:
+        navigation.direction_probes = [
+            SimpleNamespace(
+                angle_offset_degrees=probe["angle_offset_degrees"],
+                open=probe.get("open", True),
+                block_distance_fp=int(probe.get("block_distance", 96) * 65536),
+                blocking_line_special=probe.get("blocking_line_special", 0),
+                use_line_ahead=probe.get("use_line_ahead", False),
+            )
+            for probe in direction_probes
+        ]
     if combat is None:
         combat = SimpleNamespace(
             has_shootable_target=False,
@@ -375,7 +386,7 @@ def test_policy_closes_far_visible_enemy_before_firing(tmp_path):
         )
     )
 
-    assert policy.last_decision["skill"] == "close_visible_enemy"
+    assert policy.last_decision["skill"] == "close_visible_contact"
     assert action.raw.forward_move > 0
     assert action.raw.buttons == 0
 
@@ -402,9 +413,42 @@ def test_policy_closes_far_angled_visible_enemy_when_front_is_open(tmp_path):
         )
     )
 
-    assert policy.last_decision["skill"] == "close_visible_enemy"
+    assert policy.last_decision["skill"] == "close_visible_contact"
     assert action.raw.forward_move > 0
     assert action.raw.angle_turn > 0
+
+
+def test_policy_closes_visible_contact_on_best_local_ray(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+
+    action = asyncio.run(
+        policy.next_action(
+            state(
+                tick=5,
+                enemy={
+                    "x": 1600,
+                    "y": -1500,
+                    "distance": 2193,
+                    "line_of_sight": True,
+                },
+                direction_probes=[
+                    {"angle_offset_degrees": 0, "open": True, "block_distance": 96},
+                    {"angle_offset_degrees": -45, "open": False, "block_distance": 96},
+                    {"angle_offset_degrees": 45, "open": True, "block_distance": 768},
+                ],
+            )
+        )
+    )
+
+    assert policy.last_decision["skill"] == "close_visible_contact"
+    assert policy.last_decision["direction_probe"]["angle_offset_degrees"] == -45
+    assert action.raw.forward_move > 0
+    assert action.raw.side_move > 0
 
 
 def test_policy_does_not_hunt_stale_nonvisible_enemy_after_contact(tmp_path):

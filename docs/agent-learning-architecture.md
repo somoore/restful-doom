@@ -131,6 +131,14 @@ and memory:
 - `seek_enemy` is also available during visible-but-not-shootable contact, so
   PPO can choose a different close/turn primitive instead of being forced into
   `engage` when line-of-sight exists but the combat probe cannot fire.
+- During visible-but-not-shootable contact, `engage` and `seek_enemy` use a
+  contact-specific controller primitive: graded direction probes can use
+  short-clearance rays, execution is limited to 1 tic, and the controller
+  continues the remembered contact corridor if line of sight drops.
+- `route_progression` is not advertised merely because a contact route waypoint
+  exists. Live probes showed that made PPO over-sample route movement during
+  contact without reaching first-shootable combat. It remains callable for
+  explicit experiments, but it is not part of the visible-contact mask.
 - `retreat` is available only for low health or close threats.
 - `seek_enemy` is available when no enemy is visible but memory/protobuf has a
   target to hunt.
@@ -544,6 +552,13 @@ Recent PPO evidence:
   `6.6995`), but still produced zero first-shootable contacts, zero damage, and
   zero kills. This narrows the next gap to topology/progressed-state context or
   a stronger contact primitive rather than missing scalar feedback.
+- `ppo-contact-mask-long`: after adding the graded 1-tic contact primitive and
+  tightening the visible-contact mask, four live updates showed stronger contact
+  persistence but still no first-shootable contact on visible-contact stages.
+  The first two contact stages reached `visible_contact_distance_delta=97.3943`
+  and `112.9188`; the combat bridge stage still produced real combat
+  (`damage_delta=95`, `max_kills=1`). This is useful control-surface progress,
+  not a solved contact-to-shootable policy.
 
 ## Next Architecture Work
 

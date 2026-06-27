@@ -56,8 +56,11 @@ PPO_FEATURE_NAMES = [
 EXPERT_TO_PPO_SKILL_ACTION = {
     "aim_at_enemy": "engage",
     "close_visible_enemy": "engage",
+    "close_visible_contact": "engage",
     "pursue_last_contact_corridor": "engage",
     "skirt_visible_enemy": "engage",
+    "ppo_close_visible_contact": "engage",
+    "ppo_seek_visible_contact": "seek_enemy",
     "fire_on_enemy": "fire",
     "fire_on_shootable_target": "fire",
     "hold_attack": "fire",

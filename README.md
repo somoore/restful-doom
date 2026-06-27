@@ -387,7 +387,10 @@ start with a visible enemy but no shootable target, then bridges back to the
 known shootable `combat_start`. Use it with `--first-shootable-bonus` and
 `--terminate-on-first-shootable` to train the contact boundary directly. Add
 `--visible-contact-progress-reward` when the learner needs dense feedback for
-closing distance to a visible but not yet shootable enemy.
+closing distance to a visible but not yet shootable enemy. The visible-contact
+controller uses short graded movement rays and a remembered contact corridor;
+the PPO mask keeps this boundary focused on `engage`, `seek_enemy`, and usable
+line affordances instead of generic route progression.
 
 ```
 PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \

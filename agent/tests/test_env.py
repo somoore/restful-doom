@@ -162,14 +162,14 @@ def test_skill_controller_action_mask_uses_affordances():
     assert not visible_mask["fire"]
     assert visible_mask["engage"]
     assert visible_mask["seek_enemy"]
-    assert visible_route_mask["route_progression"]
+    assert not visible_route_mask["route_progression"]
     assert visible_use_mask["open_use_line"]
     assert quiet_mask["route_progression"]
 
 
 def test_skill_controller_contact_actions_use_visible_enemy_and_route_waypoint():
     controller = SkillController()
-    state = _state(enemy=True, combat=False, route=True, contact_use=True)
+    state = _state(enemy=True, combat=False, enemy_distance=1400, route=True, contact_use=True)
 
     _seek_action, seek_decision = controller.action_for(SKILL_ACTIONS.index("seek_enemy"), state)
     _route_action, route_decision = controller.action_for(
@@ -181,7 +181,7 @@ def test_skill_controller_contact_actions_use_visible_enemy_and_route_waypoint()
         state,
     )
 
-    assert seek_decision["skill"] == "ppo_seek_visible_enemy"
+    assert seek_decision["skill"] == "ppo_seek_visible_contact"
     assert seek_decision["enemy"]["id"] == 7
     assert route_decision["ppo_skill"] == "route_progression"
     assert route_decision["skill"] in {
@@ -193,6 +193,31 @@ def test_skill_controller_contact_actions_use_visible_enemy_and_route_waypoint()
     }
     assert use_decision["ppo_skill"] == "open_use_line"
     assert use_decision["use_line"]["line_id"] == 151
+
+
+def test_skill_controller_engage_continues_recent_contact_corridor():
+    controller = SkillController()
+    first = _state(tick=5, enemy=True, combat=False, enemy_distance=2200)
+    second = _state(
+        tick=20,
+        enemy=True,
+        combat=False,
+        enemy_distance=2200,
+        enemy_line_of_sight=False,
+    )
+
+    _first_action, first_decision = controller.action_for(
+        SKILL_ACTIONS.index("engage"),
+        first,
+    )
+    _second_action, second_decision = controller.action_for(
+        SKILL_ACTIONS.index("engage"),
+        second,
+    )
+
+    assert first_decision["skill"] == "close_visible_contact"
+    assert second_decision["skill"] == "pursue_last_contact_corridor"
+    assert second_decision["ppo_skill"] == "engage"
 
 
 def test_skill_controller_observation_includes_sector_and_route_features():
@@ -553,6 +578,7 @@ def _state(
     tick=1,
     kills=0,
     enemy=False,
+    enemy_line_of_sight=True,
     combat=False,
     enemy_distance=256,
     hazard=False,
@@ -602,7 +628,9 @@ def _state(
             attacking_id=0,
             distance_fp=enemy_distance * 65536,
         )
-        enemies.append(SimpleNamespace(object=enemy_obj, line_of_sight=True, target_id=0))
+        enemies.append(
+            SimpleNamespace(object=enemy_obj, line_of_sight=enemy_line_of_sight, target_id=0)
+        )
     navigation = SimpleNamespace(
         forward_open=True,
         back_open=True,
