@@ -515,6 +515,36 @@ for the PPO inner loop. Fresh-reset `EpisodeStart` is useful for combat
 curriculum, while true save-state or Hellbox/Shrink snapshot restore is still
 needed for progressed-map curriculum.
 
+Snapshot-backed curriculum is now a versioned contract. A manifest such as
+`agent/examples/snapshot-curriculum.example.json` declares progressed-map
+stages, their snapshot IDs or local snapshot artifact paths, expected first
+state evidence, and source trajectory notes. PPO can consume that manifest and
+run a restore command before each snapshot episode:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
+    --endpoint 127.0.0.1:50051 \
+    --goal-preset navigation \
+    --updates 4 \
+    --rollout-steps 256 \
+    --checkpoint-dir agent_models/ppo \
+    --buffer-dir trajectories/ppo \
+    --memory-path agent_memory/e1m1.json \
+    --resume-best-checkpoint \
+    --snapshot-curriculum agent/examples/snapshot-curriculum.example.json \
+    --curriculum-mode round_robin \
+    --snapshot-restore-command "shrink restore --snapshot {snapshot_id_sh}" \
+    --snapshot-restore-timeout-seconds 60
+```
+
+Snapshot stages use `reset_mode: snapshot`, so `DoomAgentEnv.reset()` reconnects
+and observes the restored state instead of calling `ResetEpisode` and erasing
+progressed doors, enemy movement, and map mutations. Rollout rows include
+`reset_context` with schema `restfuldoom.reset_context.v1`; summaries expose
+`snapshot_restore_count`, `snapshot_stage_counts`, and restore timing fields.
+Training-job exports include snapshot curriculum metadata and local snapshot
+artifacts when the manifest references files.
+
 PPO rollout summaries include route diagnostics for spawn-to-contact work:
 `route_attempt_steps`, `route_reached_steps`, `route_failed_steps`,
 `route_progress_units`, and `route_action_reward`. These are the first numbers

@@ -99,11 +99,31 @@ def test_export_training_job_includes_ppo_checkpoint(tmp_path):
     checkpoint = tmp_path / "agent_models" / "ppo" / "ppo.pt"
     checkpoint.parent.mkdir(parents=True)
     checkpoint.write_bytes(b"fake torch checkpoint")
+    snapshot = tmp_path / "snapshots" / "first-contact.snap"
+    snapshot.parent.mkdir()
+    snapshot.write_bytes(b"fake snapshot")
     memory.data["ppo_policy"] = {
         "schema": "restfuldoom.ppo_policy.v1",
         "checkpoint_path": str(checkpoint),
         "reward_config": {"goal_preset": "combat"},
         "eval_history": [{"policy_id": "ppo", "mean_kills": 1.0}],
+        "rollout_summary": {"snapshot_restore_count": 1},
+        "curriculum": {
+            "schema": "restfuldoom.ppo_curriculum.v1",
+            "snapshot_curriculum": {
+                "schema": "restfuldoom.snapshot_curriculum.v1",
+                "name": "progressed-e1m1",
+            },
+            "stages": [
+                {
+                    "name": "first_contact_snapshot",
+                    "snapshot": {
+                        "id": "snap-1",
+                        "path": str(snapshot),
+                    },
+                }
+            ],
+        },
     }
     memory.save()
 
@@ -121,12 +141,21 @@ def test_export_training_job_includes_ppo_checkpoint(tmp_path):
         manifest = json.loads(archive.extractfile("manifest.json").read().decode())
 
     assert "agent_models/ppo/ppo.pt" in names
+    assert "snapshots/first-contact.snap" in names
     assert manifest["ppo_checkpoints"] == ["agent_models/ppo/ppo.pt"]
     assert manifest["ppo_policy"]["checkpoint_path"] == str(checkpoint)
     assert manifest["observation_schema"]["schema"] == "restfuldoom.observation.v1"
     assert manifest["action_schema"]["schema"] == "restfuldoom.skill_action.v1"
     assert manifest["reward_config"] == {"goal_preset": "combat"}
     assert manifest["eval_history"] == [{"policy_id": "ppo", "mean_kills": 1.0}]
+    assert manifest["snapshot_curriculum"]["name"] == "progressed-e1m1"
+    assert manifest["snapshot_restore_context"]["rollout_summary"]["snapshot_restore_count"] == 1
+    assert manifest["snapshot_artifacts"] == [
+        {
+            "source_path": str(snapshot),
+            "bundle_path": "snapshots/first-contact.snap",
+        }
+    ]
 
 
 def test_features_include_position_and_facing_from_record():

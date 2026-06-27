@@ -151,7 +151,10 @@ seeded replay until that field is true in a verified build.
 - Confirm the trajectory file grows with `state`, `reward`, `next_action`, `last_seen_tick`, `reconnect_attempts`, and `metadata` fields.
 - For PPO demos, confirm `trajectories/ppo/*.jsonl` contains rollout records with `obs`, `action`, `reward`, `done`, `value`, and `logprob`, and confirm `agent_models/ppo/*.pt` checkpoints are written.
 - For mixed-stage PPO demos, confirm rollout summaries include `curriculum_stage_counts` with more than one stage and JSONL rows preserve per-record `info.curriculum_stage.name`.
+- For snapshot-backed PPO demos, validate the `restfuldoom.snapshot_curriculum.v1` manifest, run with `--snapshot-curriculum` plus a local restore command, and confirm no snapshot row calls `ResetEpisode` after restore.
+- Confirm snapshot rollout rows include `info.reset_context.source == "snapshot_restore"` and summaries include `snapshot_restore_count`, `snapshot_stage_counts`, and restore timing fields.
 - Export a resume bundle after PPO training and confirm the manifest includes `ppo_checkpoints`, `observation_schema`, `action_schema`, `reward_config`, and `eval_history`.
+- For snapshot-backed training, also confirm the export manifest includes `snapshot_curriculum`, `snapshot_restore_context`, and any local `snapshot_artifacts`.
 - Check `metadata.reconnect_count`, `metadata.policy_errors`, `metadata.bedrock_fallback_count`, and `metadata.llm_latency_ms` when debugging a run.
 - Confirm `metadata.rollout.token_present` is true and that no raw token appears in the JSONL.
 - Confirm docs and screenshots use redacted token JSON; reserve `--raw` for local scripts.

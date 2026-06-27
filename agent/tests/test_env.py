@@ -646,6 +646,49 @@ def test_doom_agent_env_reset_sends_curriculum_start():
     assert start.ammo_bullets == 37
 
 
+def test_doom_agent_env_snapshot_reset_observes_without_episode_reset():
+    first = _state(tick=700, enemy=True)
+    client = _FakeClient([first])
+    env = DoomAgentEnv(
+        DoomEnvConfig(
+            reset_mode="snapshot",
+            snapshot={
+                "id": "snap-1",
+                "path": "/tmp/snap-1",
+                "digest": "sha256:test",
+            },
+            curriculum_stage={
+                "name": "first_contact_snapshot",
+                "reset_mode": "snapshot",
+                "expected_state": {"tick": 700},
+                "snapshot_restore": {
+                    "schema": "restfuldoom.snapshot_restore.v1",
+                    "returncode": 0,
+                    "elapsed_seconds": 0.1,
+                    "restore_command_configured": True,
+                },
+            },
+        ),
+        client=client,
+        controller=SkillController(),
+    )
+
+    async def run():
+        obs = await env.reset(seed=99)
+        await env.close()
+        return obs, env._last_reset_context
+
+    obs, reset_context = asyncio.run(run())
+
+    assert len(obs) == len(OBSERVATION_SCHEMA["feature_names"])
+    assert client.reset_requests == []
+    assert reset_context["source"] == "snapshot_restore"
+    assert reset_context["skipped_reset_episode"] is True
+    assert reset_context["snapshot_id"] == "snap-1"
+    assert reset_context["restore"]["returncode"] == 0
+    assert reset_context["actual_first_state"]["tick"] == 700
+
+
 def test_doom_agent_env_aggregates_macro_action_tics():
     first = _state(tick=1, kills=0)
     second = _state(tick=2, kills=0, enemy=True, enemy_distance=500)

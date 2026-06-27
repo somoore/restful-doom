@@ -3078,6 +3078,20 @@ def export_training_job(
     if skill_model_path is not None and skill_model_path.exists():
         model_checkpoints.append(skill_model_path)
     ppo_checkpoints = _memory_ppo_checkpoint_paths(memory)
+    snapshot_artifacts = _memory_snapshot_artifacts(memory)
+    ppo_policy = memory.data.get("ppo_policy")
+    snapshot_curriculum = (
+        ppo_policy.get("curriculum", {}).get("snapshot_curriculum", {})
+        if isinstance(ppo_policy, dict) and isinstance(ppo_policy.get("curriculum"), dict)
+        else {}
+    )
+    snapshot_restore_context = {
+        "schema": "restfuldoom.snapshot_restore_context.v1",
+        "snapshot_curriculum": snapshot_curriculum,
+        "rollout_summary": ppo_policy.get("rollout_summary", {})
+        if isinstance(ppo_policy, dict)
+        else {},
+    }
     manifest = {
         "schema": "restfuldoom.training_job.v1",
         "created_at": _iso_now(),
@@ -3100,6 +3114,15 @@ def export_training_job(
         "reward_config": memory.data.get("ppo_policy", {}).get("reward_config")
         if isinstance(memory.data.get("ppo_policy"), dict)
         else None,
+        "snapshot_curriculum": snapshot_curriculum,
+        "snapshot_restore_context": snapshot_restore_context,
+        "snapshot_artifacts": [
+            {
+                "source_path": str(path),
+                "bundle_path": f"snapshots/{path.name}",
+            }
+            for path in snapshot_artifacts
+        ],
         "eval_history": memory.data.get("ppo_policy", {}).get("eval_history", [])
         if isinstance(memory.data.get("ppo_policy"), dict)
         else [],
@@ -3117,6 +3140,8 @@ def export_training_job(
             archive.add(checkpoint, arcname=f"agent_models/{checkpoint.name}")
         for checkpoint in ppo_checkpoints:
             archive.add(checkpoint, arcname=f"agent_models/ppo/{checkpoint.name}")
+        for snapshot in snapshot_artifacts:
+            archive.add(snapshot, arcname=f"snapshots/{snapshot.name}")
         for trajectory in trajectory_paths:
             archive.add(trajectory, arcname=f"trajectories/{trajectory.name}")
 
@@ -3127,6 +3152,7 @@ def export_training_job(
         "trajectory_count": len(manifest["trajectories"]),
         "model_checkpoint_count": len(manifest["model_checkpoints"]),
         "ppo_checkpoint_count": len(manifest["ppo_checkpoints"]),
+        "snapshot_artifact_count": len(manifest["snapshot_artifacts"]),
         "success_count": len(manifest["successes"]),
         "best_score": manifest["best_score"],
         "best_run_id": manifest["best_run_id"],
@@ -3191,6 +3217,7 @@ def import_training_job(
         "trajectory_count": len(manifest.get("trajectories", [])),
         "model_checkpoint_count": len(manifest.get("model_checkpoints", [])),
         "ppo_checkpoint_count": len(manifest.get("ppo_checkpoints", [])),
+        "snapshot_artifact_count": len(manifest.get("snapshot_artifacts", [])),
         "best_score": manifest.get("best_score"),
         "best_run_id": manifest.get("best_run_id"),
         "success_count": len(manifest.get("successes", [])),
@@ -3244,6 +3271,44 @@ def _memory_ppo_checkpoint_paths(memory: AgentMemory) -> list[Path]:
         if path.exists() and path not in paths:
             paths.append(path)
     return paths
+
+
+def _memory_snapshot_artifacts(memory: AgentMemory) -> list[Path]:
+    """Returns local snapshot artifact files referenced by PPO curriculum metadata."""
+    paths: list[Path] = []
+    seen: set[Path] = set()
+    policy = memory.data.get("ppo_policy")
+    if isinstance(policy, dict):
+        _collect_snapshot_paths(policy.get("curriculum"), paths, seen)
+        _collect_snapshot_paths(policy.get("curriculum_stage"), paths, seen)
+    best = memory.data.get("ppo_best_checkpoint")
+    if isinstance(best, dict):
+        _collect_snapshot_paths(best.get("curriculum"), paths, seen)
+        _collect_snapshot_paths(best.get("curriculum_stage"), paths, seen)
+    for entry in memory.data.get("ppo_checkpoints", []):
+        if isinstance(entry, dict):
+            _collect_snapshot_paths(entry.get("curriculum"), paths, seen)
+            _collect_snapshot_paths(entry.get("curriculum_stage"), paths, seen)
+    return paths
+
+
+def _collect_snapshot_paths(
+    value: object,
+    paths: list[Path],
+    seen: set[Path],
+) -> None:
+    if isinstance(value, dict):
+        snapshot = value.get("snapshot")
+        if isinstance(snapshot, dict) and isinstance(snapshot.get("path"), str):
+            path = Path(snapshot["path"])
+            if path.exists() and path not in seen:
+                paths.append(path)
+                seen.add(path)
+        for key in ("stages",):
+            children = value.get(key)
+            if isinstance(children, list):
+                for child in children:
+                    _collect_snapshot_paths(child, paths, seen)
 
 
 def cell_key(x_units: float, y_units: float) -> str:

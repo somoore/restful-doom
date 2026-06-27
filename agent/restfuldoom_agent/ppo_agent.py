@@ -6,6 +6,8 @@ import argparse
 import asyncio
 import json
 import random
+import shlex
+import subprocess
 import time
 from collections import Counter
 from dataclasses import replace
@@ -22,6 +24,7 @@ from .ppo_eval import (
     evaluate_random_policy,
 )
 from .schemas import map_expert_skill_to_ppo_action, pad_observation_features
+from .snapshot_curriculum import load_snapshot_curriculum
 from .skill_policy import features_from_record
 
 
@@ -29,13 +32,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
     """Runs PPO collection and update batches."""
     require_torch()
     reset_start = _resolve_reset_start(args)
-    curriculum = build_curriculum(
-        name=args.curriculum,
-        manual_reset_start=reset_start,
-        mode=args.curriculum_mode,
-        start_index=args.curriculum_start_index,
-        seed=args.seed,
-    )
+    curriculum = _build_training_curriculum(args, reset_start)
     env_config = _env_config_for_start(
         args,
         stage_for_update(curriculum, 0).get("reset_start", {}),
@@ -96,18 +93,14 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                 )
             else:
                 curriculum_stage = stage_for_update(curriculum, update_index)
-                env.config = _env_config_for_stage(
-                    args,
-                    curriculum,
-                    curriculum_stage,
-                    run_id=f"{args.run_id}-{curriculum_stage['name']}",
-                )
-                buffer = await trainer.collect_rollout(
+                buffer = await _collect_curriculum_stage_rollout(
+                    trainer,
                     env,
-                    steps=args.rollout_steps,
-                    seed=args.seed + update_index,
+                    args,
+                    curriculum=curriculum,
+                    curriculum_stage=curriculum_stage,
+                    update_index=update_index,
                 )
-                _annotate_buffer_curriculum(buffer, curriculum, curriculum_stage)
             buffer_path = args.buffer_dir / f"{args.run_id}-buffer-{update_index:04d}.jsonl"
             buffer.save_jsonl(buffer_path)
             rollout_summary = _summarize_buffer(buffer)
@@ -374,6 +367,30 @@ def _env_config_for_start(
     )
 
 
+def _build_training_curriculum(
+    args: argparse.Namespace,
+    reset_start: dict[str, object],
+) -> dict[str, object]:
+    if args.snapshot_curriculum is not None:
+        if args.curriculum != "none":
+            raise ValueError("--snapshot-curriculum cannot be combined with --curriculum")
+        if reset_start:
+            raise ValueError("--snapshot-curriculum cannot be combined with --reset-start-*")
+        return load_snapshot_curriculum(
+            args.snapshot_curriculum,
+            mode=args.curriculum_mode,
+            start_index=args.curriculum_start_index,
+            seed=args.seed,
+        )
+    return build_curriculum(
+        name=args.curriculum,
+        manual_reset_start=reset_start,
+        mode=args.curriculum_mode,
+        start_index=args.curriculum_start_index,
+        seed=args.seed,
+    )
+
+
 def _env_config_for_stage(
     args: argparse.Namespace,
     curriculum: dict[str, object],
@@ -389,7 +406,61 @@ def _env_config_for_stage(
         max_steps=args.max_steps if max_steps is None else int(max_steps),
         curriculum=_curriculum_metadata(curriculum),
         curriculum_stage=dict(curriculum_stage),
+        reset_mode="snapshot" if _stage_uses_snapshot(curriculum_stage) else "episode",
+        snapshot=dict(curriculum_stage.get("snapshot", {}))
+        if isinstance(curriculum_stage.get("snapshot"), dict)
+        else None,
     )
+
+
+async def _collect_curriculum_stage_rollout(
+    trainer: PPOTrainer,
+    env: DoomAgentEnv,
+    args: argparse.Namespace,
+    *,
+    curriculum: dict[str, object],
+    curriculum_stage: dict[str, object],
+    update_index: int,
+) -> object:
+    """Collects a rollout for one curriculum stage, restoring snapshots per reset."""
+    if _stage_uses_snapshot(curriculum_stage):
+        active_stage: dict[str, object] = dict(curriculum_stage)
+
+        def before_reset(reset_index: int) -> None:
+            nonlocal active_stage
+            active_stage = _prepare_stage_for_reset(
+                curriculum_stage,
+                args,
+                update_index=update_index,
+                reset_index=reset_index,
+            )
+            env.config = _env_config_for_stage(
+                args,
+                curriculum,
+                active_stage,
+                run_id=f"{args.run_id}-{active_stage['name']}-snapshot{reset_index:03d}",
+            )
+
+        return await trainer.collect_rollout(
+            env,
+            steps=args.rollout_steps,
+            seed=args.seed + update_index,
+            before_reset=before_reset,
+        )
+
+    env.config = _env_config_for_stage(
+        args,
+        curriculum,
+        curriculum_stage,
+        run_id=f"{args.run_id}-{curriculum_stage['name']}",
+    )
+    buffer = await trainer.collect_rollout(
+        env,
+        steps=args.rollout_steps,
+        seed=args.seed + update_index,
+    )
+    _annotate_buffer_curriculum(buffer, curriculum, curriculum_stage)
+    return buffer
 
 
 async def _collect_mixed_curriculum_rollout(
@@ -409,6 +480,12 @@ async def _collect_mixed_curriculum_rollout(
             update_index=update_index,
             reset_index=reset_index,
             mode=args.rollout_stage_mix,
+        )
+        stage = _prepare_stage_for_reset(
+            stage,
+            args,
+            update_index=update_index,
+            reset_index=reset_index,
         )
         env.config = _env_config_for_stage(
             args,
@@ -461,6 +538,153 @@ def _mixed_curriculum_stage_for_reset(
     stage["selected_index"] = index
     stage["mixed_rollout_reset_index"] = int(reset_index)
     return stage
+
+
+def _prepare_stage_for_reset(
+    curriculum_stage: dict[str, object],
+    args: argparse.Namespace,
+    *,
+    update_index: int,
+    reset_index: int,
+) -> dict[str, object]:
+    stage = dict(curriculum_stage)
+    if _stage_uses_snapshot(stage):
+        stage["snapshot_restore"] = _restore_snapshot_for_stage(
+            stage,
+            args,
+            update_index=update_index,
+            reset_index=reset_index,
+        )
+    return stage
+
+
+def _stage_uses_snapshot(curriculum_stage: dict[str, object]) -> bool:
+    return (
+        curriculum_stage.get("reset_mode") == "snapshot"
+        or bool(curriculum_stage.get("requires_progressed_state"))
+        or isinstance(curriculum_stage.get("snapshot"), dict)
+    )
+
+
+def _restore_snapshot_for_stage(
+    curriculum_stage: dict[str, object],
+    args: argparse.Namespace,
+    *,
+    update_index: int,
+    reset_index: int,
+) -> dict[str, object]:
+    command_template = getattr(args, "snapshot_restore_command", None)
+    if not command_template:
+        raise ValueError(
+            "snapshot curriculum stage "
+            f"{curriculum_stage.get('name')!r} requires --snapshot-restore-command"
+        )
+    command = _render_snapshot_restore_command(
+        str(command_template),
+        curriculum_stage,
+        update_index=update_index,
+        reset_index=reset_index,
+    )
+    argv = shlex.split(command)
+    if not argv:
+        raise ValueError("--snapshot-restore-command rendered an empty command")
+    start = time.monotonic()
+    completed = subprocess.run(
+        argv,
+        cwd=args.snapshot_restore_cwd,
+        timeout=args.snapshot_restore_timeout_seconds,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    elapsed = round(time.monotonic() - start, 4)
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "snapshot restore command failed "
+            f"for stage {curriculum_stage.get('name')!r} "
+            f"with exit {completed.returncode}: {_restore_output_tail(completed.stderr)}"
+        )
+    snapshot = curriculum_stage.get("snapshot", {})
+    snapshot_dict = snapshot if isinstance(snapshot, dict) else {}
+    return {
+        "schema": "restfuldoom.snapshot_restore.v1",
+        "stage_name": curriculum_stage.get("name"),
+        "stage_index": curriculum_stage.get("selected_index", curriculum_stage.get("index")),
+        "snapshot_id": snapshot_dict.get("id"),
+        "snapshot_path": snapshot_dict.get("path"),
+        "snapshot_ref": snapshot_dict.get("ref"),
+        "restore_command_configured": True,
+        "restore_command_argv": _redacted_restore_argv(argv),
+        "returncode": completed.returncode,
+        "elapsed_seconds": elapsed,
+        "update_index": int(update_index),
+        "reset_index": int(reset_index),
+    }
+
+
+def _render_snapshot_restore_command(
+    command_template: str,
+    curriculum_stage: dict[str, object],
+    *,
+    update_index: int,
+    reset_index: int,
+) -> str:
+    snapshot = curriculum_stage.get("snapshot", {})
+    snapshot_dict = snapshot if isinstance(snapshot, dict) else {}
+    expected = curriculum_stage.get("expected_state", {})
+    expected_dict = expected if isinstance(expected, dict) else {}
+    values = {
+        "stage_name": curriculum_stage.get("name", ""),
+        "stage_index": curriculum_stage.get("selected_index", curriculum_stage.get("index", "")),
+        "update_index": int(update_index),
+        "reset_index": int(reset_index),
+        "snapshot_id": snapshot_dict.get("id", ""),
+        "snapshot_path": snapshot_dict.get("path", ""),
+        "snapshot_ref": snapshot_dict.get("ref", ""),
+        "microvm_id": snapshot_dict.get("microvm_id", ""),
+        "capsule": snapshot_dict.get("capsule", ""),
+        "expected_tick": expected_dict.get("tick", ""),
+        "expected_level_time": expected_dict.get("level_time", ""),
+        "expected_x_fp": expected_dict.get("x_fp", ""),
+        "expected_y_fp": expected_dict.get("y_fp", ""),
+    }
+    values.update({f"{key}_sh": shlex.quote(str(value)) for key, value in values.items()})
+    return command_template.format_map(_DefaultFormatMap(values))
+
+
+class _DefaultFormatMap(dict):
+    """String formatter that leaves unknown restore placeholders empty."""
+
+    def __missing__(self, key: str) -> str:
+        return ""
+
+
+def _restore_output_tail(output: str, *, limit: int = 400) -> str:
+    text = (output or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[-limit:]
+
+
+def _redacted_restore_argv(argv: list[str]) -> list[str]:
+    redacted: list[str] = []
+    redact_next = False
+    secret_flags = {"--token", "--auth", "--password", "--secret", "--api-key"}
+    for arg in argv:
+        lower = arg.lower()
+        if redact_next:
+            redacted.append("<redacted>")
+            redact_next = False
+            continue
+        if lower in secret_flags:
+            redacted.append(arg)
+            redact_next = True
+        elif any(marker in lower for marker in ("token=", "secret=", "password=", "api_key=")):
+            key = arg.split("=", 1)[0]
+            redacted.append(f"{key}=<redacted>")
+        else:
+            redacted.append(arg)
+    return redacted
 
 
 def _mixed_curriculum_stage_descriptor(
@@ -556,6 +780,7 @@ def _record_ppo_checkpoint(
             "update_index": update_index,
             "buffer_path": str(buffer_path),
             "rollout_summary": rollout_summary,
+            "curriculum": curriculum or {},
             "curriculum_stage": curriculum_stage or {},
             "checkpoint_eval": checkpoint_eval or {},
             "updated_at": _iso_now(),
@@ -567,6 +792,7 @@ def _record_ppo_checkpoint(
             "update_index": update_index,
             "buffer_path": str(buffer_path),
             "rollout_summary": rollout_summary,
+            "curriculum": curriculum or {},
             "curriculum_stage": curriculum_stage or {},
             "checkpoint_eval": checkpoint_eval or {},
         }
@@ -917,6 +1143,33 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         for warmup in warmups
         if warmup.get("enabled")
     )
+    reset_contexts = [
+        record.info.get("reset_context", {})
+        for record in records
+        if isinstance(record.info, dict) and record.info.get("reset_context")
+    ]
+    unique_reset_contexts: dict[object, dict[str, object]] = {}
+    for index, context in enumerate(reset_contexts):
+        key = context.get("episode_index", index)
+        unique_reset_contexts.setdefault(key, context)
+    reset_contexts = list(unique_reset_contexts.values())
+    reset_sources = Counter(str(context.get("source", "unknown")) for context in reset_contexts)
+    snapshot_contexts = [
+        context for context in reset_contexts if context.get("source") == "snapshot_restore"
+    ]
+    snapshot_stage_counts = Counter(
+        str(record.info.get("curriculum_stage", {}).get("name", "unknown"))
+        for record in records
+        if isinstance(record.info, dict)
+        and isinstance(record.info.get("reset_context", {}), dict)
+        and record.info.get("reset_context", {}).get("source") == "snapshot_restore"
+        and record.info.get("curriculum_stage")
+    )
+    snapshot_restore_durations = [
+        float(context.get("restore", {}).get("elapsed_seconds", 0.0))
+        for context in snapshot_contexts
+        if isinstance(context.get("restore", {}), dict)
+    ]
     summary = {
         "records": len(records),
         "total_reward": round(sum(float(record.reward) for record in records), 4),
@@ -1034,6 +1287,23 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         "reset_warmup_tics": sum(int(warmup.get("tics", 0)) for warmup in warmups),
         "reset_warmup_steps": sum(int(warmup.get("steps", 0)) for warmup in warmups),
         "reset_warmup_stop_reasons": dict(sorted(warmup_reasons.items())),
+        "reset_context_sources": dict(sorted(reset_sources.items())),
+        "snapshot_restore_count": len(snapshot_contexts),
+        "snapshot_restore_failures": sum(
+            1
+            for context in snapshot_contexts
+            if isinstance(context.get("restore", {}), dict)
+            and int(context.get("restore", {}).get("returncode", 0)) != 0
+        ),
+        "snapshot_stage_counts": dict(sorted(snapshot_stage_counts.items())),
+        "mean_snapshot_restore_seconds": round(
+            sum(snapshot_restore_durations) / max(1, len(snapshot_restore_durations)),
+            4,
+        ),
+        "max_snapshot_restore_seconds": round(
+            max(snapshot_restore_durations, default=0.0),
+            4,
+        ),
         "positive_reward_steps": sum(1 for record in records if record.reward > 0),
         "negative_reward_steps": sum(1 for record in records if record.reward < 0),
         "done_count": sum(1 for record in records if record.done),
@@ -1154,6 +1424,23 @@ def main() -> None:
         default="none",
         help="Named reset-start curriculum for PPO training.",
     )
+    parser.add_argument(
+        "--snapshot-curriculum",
+        type=Path,
+        help=(
+            "JSON manifest with snapshot-backed progressed-state curriculum stages. "
+            "Cannot be combined with --curriculum or --reset-start-*."
+        ),
+    )
+    parser.add_argument(
+        "--snapshot-restore-command",
+        help=(
+            "Command template run before each snapshot reset. Supports placeholders "
+            "such as {snapshot_id}, {snapshot_path_sh}, {stage_name}, and {reset_index}."
+        ),
+    )
+    parser.add_argument("--snapshot-restore-cwd", type=Path)
+    parser.add_argument("--snapshot-restore-timeout-seconds", type=float, default=60.0)
     parser.add_argument(
         "--curriculum-mode",
         choices=["fixed", "round_robin", "progressive", "random"],

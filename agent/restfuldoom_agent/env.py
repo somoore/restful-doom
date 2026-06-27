@@ -92,6 +92,8 @@ class DoomEnvConfig:
     terminate_on_first_shootable: bool = False
     curriculum: dict[str, Any] | None = None
     curriculum_stage: dict[str, Any] | None = None
+    reset_mode: str = "episode"
+    snapshot: dict[str, Any] | None = None
 
     def reward_goal(self) -> Goal:
         """Returns the reward goal for the configured preset."""
@@ -927,6 +929,7 @@ class DoomAgentEnv:
         self._steps = 0
         self._episode_index = 0
         self._last_reset_warmup: dict[str, Any] = {}
+        self._last_reset_context: dict[str, Any] = {}
         self._episode_seen_visible_enemy = False
         self._episode_seen_shootable_enemy = False
 
@@ -945,13 +948,18 @@ class DoomAgentEnv:
 
     async def reset(self, *, seed: int | None = None) -> list[float]:
         """Resets Doom and returns the first compact observation."""
-        await self._ensure_stream()
         self._steps = 0
         self._episode_index += 1
         if hasattr(self.controller, "reset_episode_context"):
             self.controller.reset_episode_context()
         reset_seed = self.config.seed if seed is None else seed
-        state = await self._reset_with_retries(reset_seed)
+        if self.config.reset_mode == "snapshot":
+            state = await self._reset_from_snapshot()
+        elif self.config.reset_mode == "episode":
+            await self._ensure_stream()
+            state = await self._reset_with_retries(reset_seed)
+        else:
+            raise ValueError(f"unsupported reset_mode {self.config.reset_mode!r}")
         self._last_reset_warmup = {
             "enabled": False,
             "steps": 0,
@@ -962,6 +970,13 @@ class DoomAgentEnv:
             state = await self._run_reset_warmup(state)
             if hasattr(self.controller, "reset_episode_context"):
                 self.controller.reset_episode_context()
+        self._last_reset_context = self._build_reset_context(
+            seed=reset_seed,
+            state=state,
+            source="warmup"
+            if self.config.reset_mode == "episode" and self.config.reset_warmup_steps > 0
+            else self.config.reset_mode,
+        )
         self._reward_engine = RewardEngine(self.config.reward_goal())
         self._current_state = state
         self._start_level = (state.level.episode, state.level.map)
@@ -969,6 +984,63 @@ class DoomAgentEnv:
         self._episode_seen_visible_enemy = _has_visible_enemy(state)
         self._episode_seen_shootable_enemy = _has_shootable_enemy(state)
         return self.controller.observation(state)
+
+    def _build_reset_context(
+        self,
+        *,
+        seed: int,
+        state: Any,
+        source: str,
+    ) -> dict[str, Any]:
+        stage = self.config.curriculum_stage or {}
+        snapshot = self.config.snapshot or {}
+        restore = stage.get("snapshot_restore", {}) if isinstance(stage, dict) else {}
+        if not isinstance(restore, dict):
+            restore = {}
+        expected = stage.get("expected_state", {}) if isinstance(stage, dict) else {}
+        if not isinstance(expected, dict):
+            expected = {}
+        reset_source = "snapshot_restore" if source == "snapshot" else source
+        return {
+            "schema": "restfuldoom.reset_context.v1",
+            "source": reset_source,
+            "episode_index": self._episode_index,
+            "seed_label": int(seed),
+            "skipped_reset_episode": self.config.reset_mode == "snapshot",
+            "snapshot_id": snapshot.get("id"),
+            "snapshot_path": snapshot.get("path"),
+            "snapshot_ref": snapshot.get("ref"),
+            "snapshot_digest": snapshot.get("digest"),
+            "restore": {
+                key: restore.get(key)
+                for key in (
+                    "schema",
+                    "returncode",
+                    "elapsed_seconds",
+                    "restore_command_configured",
+                    "update_index",
+                    "reset_index",
+                )
+                if key in restore
+            },
+            "expected_state": dict(expected),
+            "actual_first_state": summarize_state(state),
+        }
+
+    async def _reset_from_snapshot(self) -> Any:
+        """Reconnects and observes the current restored state without fresh-resetting Doom."""
+        if self._owns_client:
+            await self.close()
+        else:
+            if self._action_queue is not None:
+                try:
+                    self._action_queue.put_nowait(None)
+                except asyncio.QueueFull:
+                    pass
+            self._state_stream = None
+            self._action_queue = None
+        await self._ensure_stream()
+        return await self._next_live_state(self.config.episode, self.config.map)
 
     async def _reset_with_retries(self, reset_seed: int) -> Any:
         attempts = max(1, int(self.config.reset_attempts))
@@ -1109,6 +1181,7 @@ class DoomAgentEnv:
             "first_visible_contact": first_visible_contact,
             "first_shootable_contact": first_shootable_contact,
             "reset_warmup": dict(self._last_reset_warmup),
+            "reset_context": dict(self._last_reset_context),
             "state": summarize_state(current),
             "done_reason": reason,
         }
@@ -1226,6 +1299,27 @@ class DoomAgentEnv:
                 return state
         raise TimeoutError(
             "timed out waiting for reset state"
+            + (f"; last_state={summarize_state(last_state)}" if last_state else "")
+        )
+
+    async def _next_live_state(self, episode: int, map_number: int) -> Any:
+        assert self._state_stream is not None
+        deadline = time.monotonic() + self.config.reset_timeout_seconds
+        last_state = None
+        while time.monotonic() < deadline:
+            state = await asyncio.wait_for(
+                self._state_stream.__anext__(),
+                timeout=max(0.1, deadline - time.monotonic()),
+            )
+            last_state = state
+            if (
+                state.level.episode == episode
+                and state.level.map == map_number
+                and state.player.health > 0
+            ):
+                return state
+        raise TimeoutError(
+            "timed out waiting for snapshot-restored state"
             + (f"; last_state={summarize_state(last_state)}" if last_state else "")
         )
 

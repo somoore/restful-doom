@@ -262,3 +262,17 @@ metadata, and summaries report `curriculum_stage_counts`. This helps a single
 PPO update see several fresh-reset stages, but it does not solve the
 progressed-map gap; snapshot restore is still required for true mid-trajectory
 curriculum.
+
+Snapshot-backed curriculum is represented by
+`restfuldoom.snapshot_curriculum.v1` manifests. `ppo_agent
+--snapshot-curriculum <path> --snapshot-restore-command <argv-template>` loads
+those stages into the regular `restfuldoom.ppo_curriculum.v1` schedule. Snapshot
+stages set `reset_mode: snapshot`; `DoomAgentEnv.reset()` skips
+`ResetEpisode`, reconnects the gRPC stream, and waits for the first live state
+after the external restore command completes. Each transition carries
+`reset_context` with schema `restfuldoom.reset_context.v1`, including
+`source=snapshot_restore`, the episode index, snapshot ID/path/digest,
+restore timing/exit metadata, expected state, and the actual first observed
+state. Training exports include `snapshot_curriculum`,
+`snapshot_restore_context`, and any local snapshot artifact files referenced by
+the manifest.

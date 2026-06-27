@@ -12,6 +12,8 @@ from restfuldoom_agent.ppo_agent import (
     _checkpoint_selection_score,
     _checkpoint_resume_score,
     _checkpoint_resume_score_source,
+    _redacted_restore_argv,
+    _render_snapshot_restore_command,
     _policy_eval_selection_score,
     _record_ppo_checkpoint,
     _reset_start_from_trajectory,
@@ -29,6 +31,7 @@ from restfuldoom_agent.ppo import (
     TORCH_AVAILABLE,
 )
 from restfuldoom_agent.ppo_eval import EpisodeEval, PolicyEval, decide_promotion
+from restfuldoom_agent.snapshot_curriculum import load_snapshot_curriculum
 from restfuldoom_agent.schemas import (
     ACTION_SCHEMA,
     DECISION_CYCLE_SCHEMA,
@@ -564,6 +567,83 @@ def test_curriculum_rejects_manual_start_mix():
         )
 
 
+def test_snapshot_curriculum_manifest_loads_progressed_stages(tmp_path):
+    manifest = tmp_path / "snapshots.json"
+    snapshot = tmp_path / "first-contact.snap"
+    snapshot.write_bytes(b"snapshot")
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": "restfuldoom.snapshot_curriculum.v1",
+                "name": "e1m1-progressed",
+                "source": {"run_id": "brain-success"},
+                "stages": [
+                    {
+                        "name": "first_contact_snapshot",
+                        "snapshot": {
+                            "id": "snap-1",
+                            "path": str(snapshot),
+                            "digest": "sha256:test",
+                        },
+                        "expected_state": {"episode": 1, "map": 1, "tick": 1200},
+                        "evidence": {"source_record_index": 47},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    curriculum = load_snapshot_curriculum(
+        manifest,
+        mode="fixed",
+        start_index=0,
+        seed=11,
+    )
+    stage = stage_for_update(curriculum, 0)
+
+    assert curriculum["schema"] == "restfuldoom.ppo_curriculum.v1"
+    assert curriculum["source_schema"] == "restfuldoom.snapshot_curriculum.v1"
+    assert curriculum["snapshot_curriculum"]["manifest_path"] == str(manifest)
+    assert stage["name"] == "first_contact_snapshot"
+    assert stage["reset_mode"] == "snapshot"
+    assert stage["requires_progressed_state"] is True
+    assert stage["snapshot"]["id"] == "snap-1"
+    assert stage["evidence"]["snapshot_backed"] is True
+
+
+def test_snapshot_curriculum_manifest_rejects_bad_schema(tmp_path):
+    manifest = tmp_path / "bad.json"
+    manifest.write_text(json.dumps({"schema": "old", "stages": []}), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="expected restfuldoom.snapshot_curriculum.v1"):
+        load_snapshot_curriculum(manifest)
+
+
+def test_snapshot_restore_command_rendering_redacts_secrets():
+    stage = {
+        "name": "first_contact",
+        "selected_index": 2,
+        "snapshot": {
+            "id": "snap one",
+            "path": "/tmp/snap one.bin",
+            "microvm_id": "vm-1",
+        },
+        "expected_state": {"tick": 123},
+    }
+
+    command = _render_snapshot_restore_command(
+        "shrink restore --name {microvm_id} --snapshot {snapshot_path_sh} --token abc",
+        stage,
+        update_index=4,
+        reset_index=5,
+    )
+    argv = command.split()
+
+    assert "/tmp/snap one.bin" in command
+    assert _redacted_restore_argv(argv)[-1] == "<redacted>"
+
+
 def test_rollout_summary_counts_curriculum_stages():
     buffer = RolloutBuffer()
     buffer.add(
@@ -632,6 +712,50 @@ def test_rollout_summary_preserves_mixed_curriculum_stages_in_jsonl(tmp_path):
         row["info"]["curriculum_stage"]["name"]
         for row in rows[1:]
     ] == ["combat_start", "fresh_spawn", "combat_start"]
+
+
+def test_rollout_summary_counts_snapshot_restore_contexts():
+    buffer = RolloutBuffer()
+    for episode_index, stage_name in [(1, "first_contact_snapshot"), (1, "first_contact_snapshot"), (2, "exit_room_snapshot")]:
+        buffer.add(
+            obs=[0.0, 1.0],
+            action_mask=[True, False],
+            action=0,
+            reward=1.0,
+            done=False,
+            value=0.0,
+            logprob=0.0,
+            info={
+                "skill": "engage",
+                "transition": {},
+                "state": {"health": 100, "kills": 0},
+                "curriculum_stage": {
+                    "name": stage_name,
+                    "reset_mode": "snapshot",
+                },
+                "reset_context": {
+                    "schema": "restfuldoom.reset_context.v1",
+                    "source": "snapshot_restore",
+                    "episode_index": episode_index,
+                    "restore": {
+                        "returncode": 0,
+                        "elapsed_seconds": 0.25 * episode_index,
+                    },
+                },
+            },
+        )
+
+    summary = _summarize_buffer(buffer)
+
+    assert summary["reset_context_sources"] == {"snapshot_restore": 2}
+    assert summary["snapshot_restore_count"] == 2
+    assert summary["snapshot_restore_failures"] == 0
+    assert summary["snapshot_stage_counts"] == {
+        "exit_room_snapshot": 1,
+        "first_contact_snapshot": 2,
+    }
+    assert summary["mean_snapshot_restore_seconds"] == pytest.approx(0.375)
+    assert summary["max_snapshot_restore_seconds"] == pytest.approx(0.5)
 
 
 def test_rollout_summary_counts_route_outcomes():

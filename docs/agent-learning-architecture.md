@@ -540,7 +540,20 @@ descriptor and the active stage. This makes spawn-to-contact transfer auditable:
 we can see whether an update trained combat, first contact, route approach, or
 fresh spawn.
 
-Second, the environment can optionally run heuristic-only warmup after reset and
+Second, the PPO CLI can load snapshot-backed progressed-state schedules through
+`--snapshot-curriculum`. These manifests use
+`restfuldoom.snapshot_curriculum.v1` and are converted into the regular
+`restfuldoom.ppo_curriculum.v1` stage schedule with `reset_mode: snapshot`.
+Before each snapshot episode, `--snapshot-restore-command` restores the
+Hellbox/Shrink or local snapshot, then `DoomAgentEnv.reset()` reconnects and
+observes the live restored state without calling `ResetEpisode`. This is the
+first concrete contract for honest mid-trajectory curriculum: opened doors,
+enemy positions, and map mutations come from the restored environment instead
+of a teleport into a fresh map. Rollout rows carry
+`restfuldoom.reset_context.v1`, and summaries report snapshot restore counts,
+stage counts, and timing.
+
+Third, the environment can optionally run heuristic-only warmup after reset and
 before PPO starts collecting transitions. Warmup can stop on:
 
 - first visible enemy

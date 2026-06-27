@@ -1,0 +1,51 @@
+{
+  "schema": "restfuldoom.snapshot_curriculum.v1",
+  "name": "e1m1-progressed-bottlenecks",
+  "source": {
+    "description": "Example progressed-map curriculum captured from a successful E1M1 trajectory.",
+    "trajectory_jsonl": "trajectories/brain-train-68-current-success.jsonl"
+  },
+  "stages": [
+    {
+      "name": "first_contact_snapshot",
+      "note": "Restore an exact progressed state near first enemy contact instead of teleporting into a fresh map.",
+      "validated": false,
+      "snapshot": {
+        "id": "e1m1-first-contact",
+        "path": "snapshots/e1m1-first-contact.snap",
+        "digest": "sha256:<fill-after-capture>",
+        "capsule": "agent-doom"
+      },
+      "expected_state": {
+        "episode": 1,
+        "map": 1,
+        "tick_min": 1,
+        "visible_enemy": true
+      },
+      "evidence": {
+        "source_record_index": 0,
+        "goal": "first visible enemy contact"
+      }
+    },
+    {
+      "name": "exit_room_snapshot",
+      "note": "Restore an exact progressed state near the exit-room route bottleneck.",
+      "validated": false,
+      "snapshot": {
+        "id": "e1m1-exit-room",
+        "path": "snapshots/e1m1-exit-room.snap",
+        "digest": "sha256:<fill-after-capture>",
+        "capsule": "agent-doom"
+      },
+      "expected_state": {
+        "episode": 1,
+        "map": 1,
+        "tick_min": 1
+      },
+      "evidence": {
+        "source_record_index": 0,
+        "goal": "exit-room progression"
+      }
+    }
+  ]
+}
