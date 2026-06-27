@@ -118,13 +118,17 @@ PYTHONPATH=. python -m restfuldoom_agent.smoke_agent --endpoint 127.0.0.1:50051
 
 Add `--trajectory-jsonl trajectories/run.jsonl` to the smoke agent to persist
 state/action/reward records for replay or training analysis.
+Use `--goal-preset survival|navigation|combat|item_collection|exit_seeking` to
+switch reward shaping, and leave reconnect enabled for Hellbox demos so stderr
+reports the gRPC status, backoff delay, and last observed Doom tick.
 
 The Python package includes:
 
 - async gRPC client helpers
+- streaming rollout API with reconnect/backoff and last-seen-tick reporting
 - a deterministic smoke policy
-- goal/reward scoring
-- optional AWS Bedrock text-reasoning policy
+- named goal/reward presets
+- optional nonblocking AWS Bedrock text-reasoning policy
 - JSONL trajectory logging
 
 ### Hellbox Capsule

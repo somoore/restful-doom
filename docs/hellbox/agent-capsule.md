@@ -31,7 +31,7 @@ still be exposed on `6666` for debugging.
 
 1. Launch the headless RESTful-DOOM capsule in a Hellbox MicroVM.
 2. Mint short-lived access for gRPC port `50051`.
-3. Run `python -m restfuldoom_agent.smoke_agent --endpoint <host>:50051 --trajectory-jsonl trajectories/run.jsonl`.
+3. Run `python -m restfuldoom_agent.smoke_agent --endpoint <host>:50051 --goal-preset survival --trajectory-jsonl trajectories/run.jsonl`.
 4. Confirm the trajectory log is receiving state/action/reward records.
 5. Freeze the MicroVM mid-run.
 6. Thaw the MicroVM.
@@ -39,3 +39,24 @@ still be exposed on `6666` for debugging.
 
 The punchline is that Hellbox can pause and resume an isolated agent environment,
 not only a human-playable game stream.
+
+## Production Demo Checklist
+
+- Build the capsule from a clean checkout and confirm `/usr/local/bin/restful-doom` links the Rust gRPC static library.
+- Start the MicroVM with only the ready hook (`9000`) and gRPC (`50051`) exposed.
+- Mint short-lived auth for `50051`; do not expose the legacy REST port unless debugging requires it.
+- Wait for the capsule ready hook, then verify the gRPC port accepts connections before launching the agent.
+- Run the smoke agent with reconnect enabled and JSONL logging:
+
+  ```bash
+  python -m restfuldoom_agent.smoke_agent \
+      --endpoint <host>:50051 \
+      --goal-preset survival \
+      --trajectory-jsonl trajectories/hellbox-run.jsonl
+  ```
+
+- Watch stderr for reconnect notices. Each notice includes the gRPC status, delay, and last observed Doom tick.
+- Confirm the trajectory file grows with `state`, `reward`, `next_action`, `last_seen_tick`, and `reconnect_attempts` fields.
+- Freeze the MicroVM while the trajectory file is still receiving ticks.
+- Thaw the MicroVM and confirm the next reconnect continues from a later tick instead of starting a fresh process.
+- Save the trajectory, Hellbox VM id, auth lease id, freeze timestamp, and thaw timestamp with the demo notes.

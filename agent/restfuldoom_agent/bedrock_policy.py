@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import Any
@@ -12,7 +13,15 @@ from .client import agent_pb2, semantic_action, summarize_state
 class BedrockPolicy:
     """Uses Bedrock text reasoning to choose Doom actions."""
 
-    def __init__(self, model_id: str | None = None) -> None:
+    def __init__(
+        self,
+        model_id: str | None = None,
+        *,
+        timeout_seconds: float = 3.0,
+        fallback_action: int | None = None,
+        fallback_amount: int = 10,
+        raise_on_error: bool = False,
+    ) -> None:
         import boto3
 
         self.model_id = model_id or os.environ.get(
@@ -20,13 +29,36 @@ class BedrockPolicy:
             "anthropic.claude-3-5-haiku-20241022-v1:0",
         )
         self.client = boto3.client("bedrock-runtime")
+        self.timeout_seconds = timeout_seconds
+        self.fallback_action = fallback_action or agent_pb2.ACTION_FORWARD
+        self.fallback_amount = fallback_amount
+        self.raise_on_error = raise_on_error
+        self.last_error: str | None = None
 
     async def next_action(self, state: Any) -> Any:
         """Returns the next high-level Doom action."""
+        try:
+            action = await asyncio.wait_for(
+                asyncio.to_thread(self._invoke_action, state),
+                timeout=self.timeout_seconds,
+            )
+            self.last_error = None
+            return action
+        except Exception as error:
+            self.last_error = str(error)
+            if self.raise_on_error:
+                raise
+            return semantic_action(
+                self.fallback_action,
+                amount=self.fallback_amount,
+                duration_tics=1,
+            )
+
+    def _invoke_action(self, state: Any) -> Any:
         prompt = (
             "You control Doom through one JSON action. "
             "Choose one of forward, backward, turn-left, turn-right, "
-            "strafe-left, strafe-right, shoot, use. "
+            "strafe-left, strafe-right, shoot, use, switch-weapon. "
             "Return only JSON like {\"action\":\"forward\",\"amount\":25}.\n"
             f"STATE={json.dumps(summarize_state(state), separators=(',', ':'))}"
         )
@@ -55,5 +87,6 @@ def action_from_json(data: dict[str, Any]) -> Any:
         "strafe-right": agent_pb2.ACTION_STRAFE_RIGHT,
         "shoot": agent_pb2.ACTION_SHOOT,
         "use": agent_pb2.ACTION_USE,
+        "switch-weapon": agent_pb2.ACTION_SWITCH_WEAPON,
     }
     return semantic_action(mapping.get(name, agent_pb2.ACTION_FORWARD), amount=amount, duration_tics=1)

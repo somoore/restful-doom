@@ -19,6 +19,83 @@ class Goal:
     health_weight: float = 0.05
     progress_weight: float = 0.001
     death_penalty: float = 25.0
+    name: str = "custom"
+
+
+GOAL_PRESETS: dict[str, Goal] = {
+    "survival": Goal(
+        kill_weight=1.0,
+        item_weight=0.5,
+        secret_weight=0.5,
+        health_weight=0.25,
+        progress_weight=0.0,
+        death_penalty=75.0,
+        name="survival",
+    ),
+    "navigation": Goal(
+        kill_weight=0.5,
+        item_weight=0.25,
+        secret_weight=0.25,
+        health_weight=0.05,
+        progress_weight=0.002,
+        death_penalty=35.0,
+        name="navigation",
+    ),
+    "combat": Goal(
+        kill_weight=10.0,
+        item_weight=0.5,
+        secret_weight=0.5,
+        health_weight=0.03,
+        progress_weight=0.0,
+        death_penalty=30.0,
+        name="combat",
+    ),
+    "item_collection": Goal(
+        kill_weight=0.5,
+        item_weight=6.0,
+        secret_weight=4.0,
+        health_weight=0.05,
+        progress_weight=0.0005,
+        death_penalty=25.0,
+        name="item_collection",
+    ),
+    "exit_seeking": Goal(
+        kill_weight=0.25,
+        item_weight=0.5,
+        secret_weight=1.0,
+        health_weight=0.05,
+        progress_weight=0.004,
+        death_penalty=40.0,
+        name="exit_seeking",
+    ),
+}
+
+
+def goal_preset(
+    name: str,
+    *,
+    target_x_fp: int | None = None,
+    target_y_fp: int | None = None,
+) -> Goal:
+    """Returns a named reward preset, optionally bound to a map target."""
+    key = name.replace("-", "_").lower()
+    try:
+        preset = GOAL_PRESETS[key]
+    except KeyError as error:
+        available = ", ".join(sorted(GOAL_PRESETS))
+        raise ValueError(f"unknown goal preset {name!r}; choose one of: {available}") from error
+
+    return Goal(
+        target_x_fp=target_x_fp,
+        target_y_fp=target_y_fp,
+        kill_weight=preset.kill_weight,
+        item_weight=preset.item_weight,
+        secret_weight=preset.secret_weight,
+        health_weight=preset.health_weight,
+        progress_weight=preset.progress_weight,
+        death_penalty=preset.death_penalty,
+        name=preset.name,
+    )
 
 
 @dataclass(frozen=True)
