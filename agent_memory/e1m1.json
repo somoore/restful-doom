@@ -6685,6 +6685,85 @@
     "promoted_at": "2026-06-27T08:41:09Z",
     "updated_at": "2026-06-27T11:17:36Z"
   },
+  "ppo_best_checkpoint": {
+    "buffer_path": "trajectories/ppo/ppo-contact-recovery-round-robin-buffer-0007.jsonl",
+    "checkpoint_path": "agent_models/ppo/ppo-contact-recovery-round-robin-ppo-0007.pt",
+    "checkpoint_selection_score": 890.931,
+    "curriculum_stage": {
+      "evidence": {
+        "bridge_target": "shootable combat",
+        "damage_observed_with_heuristic": true,
+        "doom_units": {
+          "x": 3248,
+          "y": -3280
+        },
+        "fresh_reset_validated": true,
+        "shootable_target_on_reset": true
+      },
+      "index": 3,
+      "name": "combat_start",
+      "note": "Known shootable combat start used as the bridge target after visible-contact starts.",
+      "requires_progressed_state": false,
+      "reset_start": {
+        "ammo_bullets": 50,
+        "armor": 0,
+        "face_nearest_enemy": true,
+        "health": 100,
+        "x_fp": 212860928,
+        "y_fp": -214958080
+      },
+      "selected_index": 3,
+      "validated": true
+    },
+    "goal_preset": "combat",
+    "rollout_summary": {
+      "action_reward": 151.7511,
+      "checkpoint_selection_score": 890.931,
+      "contact_reward": 0.0,
+      "curriculum_stage_counts": {
+        "combat_start": 512
+      },
+      "damage_delta": 150,
+      "done_count": 1,
+      "enemy_distance_delta": 176.9977,
+      "fire_on_shootable_steps": 305,
+      "first_shootable_contacts": 0,
+      "first_visible_contacts": 0,
+      "invalid_action_steps": 0,
+      "max_kills": 3,
+      "mean_action_mask_size": 2.502,
+      "min_health": 64,
+      "missed_shootable_fire_steps": 8,
+      "negative_reward_steps": 59,
+      "positive_reward_steps": 443,
+      "records": 512,
+      "reset_warmup_steps": 0,
+      "reset_warmup_stop_reasons": {},
+      "reset_warmup_tics": 0,
+      "route_action_reward": -0.3489,
+      "route_attempt_steps": 10,
+      "route_failed_steps": 10,
+      "route_progress_units": -4.8881,
+      "route_reached_steps": 0,
+      "shootable_target_steps": 313,
+      "skill_counts": {
+        "engage": 37,
+        "fire": 305,
+        "open_use_line": 44,
+        "press_exit": 18,
+        "retreat": 8,
+        "route_progression": 10,
+        "seek_enemy": 90
+      },
+      "total_reward": 222.431,
+      "visible_contact_distance_delta": 52.9864,
+      "visible_contact_progress_reward": 0.5301,
+      "visible_enemy_steps": 382
+    },
+    "schema": "restfuldoom.ppo_best_checkpoint.v1",
+    "update_index": 7,
+    "updated_at": "2026-06-27T16:43:36Z"
+  },
   "ppo_checkpoints": [
     {
       "buffer_path": "trajectories/ppo/ppo-smoke-local-buffer-0000.jsonl",
@@ -6778,50 +6857,5376 @@
         "total_reward": 3.3805
       },
       "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-macro-smoke-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-macro-smoke-ppo-0000.pt",
+      "rollout_summary": {
+        "damage_delta": 0,
+        "done_count": 2,
+        "enemy_distance_delta": 618.1024,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 69,
+        "positive_reward_steps": 186,
+        "records": 256,
+        "skill_counts": {
+          "engage": 40,
+          "fire": 30,
+          "open_use_line": 37,
+          "press_exit": 32,
+          "recover_stuck": 28,
+          "retreat": 34,
+          "route_progression": 26,
+          "seek_enemy": 29
+        },
+        "total_reward": 6.181
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-macro-smoke-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-macro-smoke-ppo-0001.pt",
+      "rollout_summary": {
+        "damage_delta": 0,
+        "done_count": 2,
+        "enemy_distance_delta": 908.7782,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 59,
+        "positive_reward_steps": 192,
+        "records": 256,
+        "skill_counts": {
+          "engage": 40,
+          "fire": 29,
+          "open_use_line": 36,
+          "press_exit": 27,
+          "recover_stuck": 27,
+          "retreat": 29,
+          "route_progression": 35,
+          "seek_enemy": 33
+        },
+        "total_reward": 9.0878
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-macro-smoke-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-macro-smoke-ppo-0002.pt",
+      "rollout_summary": {
+        "damage_delta": 0,
+        "done_count": 2,
+        "enemy_distance_delta": 901.6292,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 61,
+        "positive_reward_steps": 193,
+        "records": 256,
+        "skill_counts": {
+          "engage": 39,
+          "fire": 30,
+          "open_use_line": 21,
+          "press_exit": 24,
+          "recover_stuck": 48,
+          "retreat": 28,
+          "route_progression": 39,
+          "seek_enemy": 27
+        },
+        "total_reward": 9.5463
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-combat-shaping-smoke-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-combat-shaping-smoke-ppo-0000.pt",
+      "rollout_summary": {
+        "action_reward": -0.6,
+        "damage_delta": 0,
+        "done_count": 2,
+        "enemy_distance_delta": 629.4899,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 86,
+        "positive_reward_steps": 167,
+        "records": 256,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 39,
+          "fire": 30,
+          "open_use_line": 37,
+          "press_exit": 32,
+          "recover_stuck": 28,
+          "retreat": 35,
+          "route_progression": 26,
+          "seek_enemy": 29
+        },
+        "total_reward": 5.6949
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-combat-shaping-smoke-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-combat-shaping-smoke-ppo-0001.pt",
+      "rollout_summary": {
+        "action_reward": -0.62,
+        "damage_delta": 0,
+        "done_count": 2,
+        "enemy_distance_delta": 790.1765,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 91,
+        "positive_reward_steps": 163,
+        "records": 256,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 38,
+          "fire": 31,
+          "open_use_line": 38,
+          "press_exit": 29,
+          "recover_stuck": 28,
+          "retreat": 27,
+          "route_progression": 34,
+          "seek_enemy": 31
+        },
+        "total_reward": 7.2818
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-combat-shaping-smoke-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-combat-shaping-smoke-ppo-0002.pt",
+      "rollout_summary": {
+        "action_reward": -0.58,
+        "damage_delta": 0,
+        "done_count": 2,
+        "enemy_distance_delta": 837.846,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 76,
+        "positive_reward_steps": 178,
+        "records": 256,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 40,
+          "fire": 29,
+          "open_use_line": 21,
+          "press_exit": 28,
+          "recover_stuck": 45,
+          "retreat": 27,
+          "route_progression": 41,
+          "seek_enemy": 25
+        },
+        "total_reward": 8.3285
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-combat-shaping-smoke-buffer-0003.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-combat-shaping-smoke-ppo-0003.pt",
+      "rollout_summary": {
+        "action_reward": -0.52,
+        "damage_delta": 0,
+        "done_count": 2,
+        "enemy_distance_delta": 796.8976,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 89,
+        "positive_reward_steps": 162,
+        "records": 256,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 49,
+          "fire": 26,
+          "open_use_line": 30,
+          "press_exit": 32,
+          "recover_stuck": 41,
+          "retreat": 15,
+          "route_progression": 33,
+          "seek_enemy": 30
+        },
+        "total_reward": 7.979
+      },
+      "update_index": 3
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-combat-shaping-smoke-buffer-0004.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-combat-shaping-smoke-ppo-0004.pt",
+      "rollout_summary": {
+        "action_reward": -0.52,
+        "damage_delta": 0,
+        "done_count": 3,
+        "enemy_distance_delta": 1160.8584,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 66,
+        "positive_reward_steps": 185,
+        "records": 256,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 45,
+          "fire": 26,
+          "open_use_line": 23,
+          "press_exit": 27,
+          "recover_stuck": 60,
+          "retreat": 12,
+          "route_progression": 41,
+          "seek_enemy": 22
+        },
+        "total_reward": 11.0886
+      },
+      "update_index": 4
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-bc-live-smoke-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-bc-live-smoke-ppo-0000.pt",
+      "rollout_summary": {
+        "action_reward": 0.0,
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 600.2803,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 101,
+        "positive_reward_steps": 149,
+        "records": 256,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 99,
+          "open_use_line": 39,
+          "press_exit": 1,
+          "retreat": 2,
+          "route_progression": 1,
+          "seek_enemy": 114
+        },
+        "total_reward": 6.5328
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-bc-live-smoke-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-bc-live-smoke-ppo-0001.pt",
+      "rollout_summary": {
+        "action_reward": -0.08,
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 781.3461,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 51,
+        "positive_reward_steps": 160,
+        "records": 256,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 23,
+          "fire": 4,
+          "open_use_line": 168,
+          "press_exit": 3,
+          "retreat": 3,
+          "seek_enemy": 55
+        },
+        "total_reward": 7.7335
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-bc-live-smoke-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-bc-live-smoke-ppo-0002.pt",
+      "rollout_summary": {
+        "action_reward": -0.06,
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 651.8338,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 94,
+        "positive_reward_steps": 152,
+        "records": 256,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 51,
+          "fire": 3,
+          "open_use_line": 96,
+          "press_exit": 2,
+          "retreat": 2,
+          "seek_enemy": 102
+        },
+        "total_reward": 6.4583
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-bc-live-smoke-buffer-0003.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-bc-live-smoke-ppo-0003.pt",
+      "rollout_summary": {
+        "action_reward": -0.02,
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 585.1697,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 114,
+        "positive_reward_steps": 134,
+        "records": 256,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 105,
+          "fire": 1,
+          "open_use_line": 13,
+          "press_exit": 1,
+          "retreat": 2,
+          "route_progression": 1,
+          "seek_enemy": 133
+        },
+        "total_reward": 6.3617
+      },
+      "update_index": 3
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-bc-live-smoke-buffer-0004.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-bc-live-smoke-ppo-0004.pt",
+      "rollout_summary": {
+        "action_reward": 0.0,
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 660.8798,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 94,
+        "positive_reward_steps": 154,
+        "records": 256,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 108,
+          "open_use_line": 23,
+          "route_progression": 1,
+          "seek_enemy": 124
+        },
+        "total_reward": 7.1388
+      },
+      "update_index": 4
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-pos-bc-live-smoke-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-pos-bc-live-smoke-ppo-0000.pt",
+      "rollout_summary": {
+        "action_reward": 0.0,
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 673.2314,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 110,
+        "positive_reward_steps": 143,
+        "records": 256,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 43,
+          "open_use_line": 16,
+          "press_exit": 10,
+          "recover_stuck": 1,
+          "retreat": 2,
+          "route_progression": 66,
+          "seek_enemy": 118
+        },
+        "total_reward": 6.7323
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-pos-bc-live-smoke-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-pos-bc-live-smoke-ppo-0001.pt",
+      "rollout_summary": {
+        "action_reward": -0.02,
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 631.0977,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 108,
+        "positive_reward_steps": 143,
+        "records": 256,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 30,
+          "fire": 1,
+          "open_use_line": 18,
+          "press_exit": 21,
+          "retreat": 2,
+          "route_progression": 55,
+          "seek_enemy": 129
+        },
+        "total_reward": 6.291
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-pos-bc-live-smoke-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-pos-bc-live-smoke-ppo-0002.pt",
+      "rollout_summary": {
+        "action_reward": -0.04,
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 883.5121,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 56,
+        "positive_reward_steps": 197,
+        "records": 256,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 16,
+          "fire": 2,
+          "open_use_line": 52,
+          "press_exit": 29,
+          "recover_stuck": 1,
+          "retreat": 1,
+          "route_progression": 24,
+          "seek_enemy": 131
+        },
+        "total_reward": 8.7951
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-pos-bc-live-smoke-buffer-0003.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-pos-bc-live-smoke-ppo-0003.pt",
+      "rollout_summary": {
+        "action_reward": 0.0,
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 756.1357,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 60,
+        "positive_reward_steps": 188,
+        "records": 256,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 10,
+          "open_use_line": 29,
+          "press_exit": 27,
+          "retreat": 1,
+          "route_progression": 34,
+          "seek_enemy": 155
+        },
+        "total_reward": 7.5614
+      },
+      "update_index": 3
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-pos-bc-live-smoke-buffer-0004.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-pos-bc-live-smoke-ppo-0004.pt",
+      "rollout_summary": {
+        "action_reward": 0.0,
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 757.7642,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 63,
+        "positive_reward_steps": 186,
+        "records": 256,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 5,
+          "open_use_line": 32,
+          "press_exit": 26,
+          "retreat": 2,
+          "route_progression": 30,
+          "seek_enemy": 161
+        },
+        "total_reward": 7.5776
+      },
+      "update_index": 4
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-visible-curriculum-smoke-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-visible-curriculum-smoke-ppo-0000.pt",
+      "rollout_summary": {
+        "action_reward": 0.0,
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": -2.9269,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 63,
+        "positive_reward_steps": 65,
+        "records": 128,
+        "reset_warmup_steps": 102400,
+        "reset_warmup_stop_reasons": {
+          "limit": 128
+        },
+        "reset_warmup_tics": 262144,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 21,
+          "open_use_line": 11,
+          "press_exit": 10,
+          "recover_stuck": 1,
+          "route_progression": 26,
+          "seek_enemy": 59
+        },
+        "total_reward": -0.0293
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-bounded-curriculum-smoke-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-bounded-curriculum-smoke-ppo-0000.pt",
+      "rollout_summary": {
+        "action_reward": 0.0,
+        "damage_delta": 0,
+        "done_count": 0,
+        "enemy_distance_delta": -13.8779,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 68,
+        "positive_reward_steps": 60,
+        "records": 128,
+        "reset_warmup_steps": 17024,
+        "reset_warmup_stop_reasons": {
+          "tic_limit": 128
+        },
+        "reset_warmup_tics": 44800,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 15,
+          "open_use_line": 20,
+          "press_exit": 7,
+          "recover_stuck": 1,
+          "route_progression": 24,
+          "seek_enemy": 61
+        },
+        "total_reward": -0.1388
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-bounded-curriculum-metric-smoke-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-bounded-curriculum-metric-smoke-ppo-0000.pt",
+      "rollout_summary": {
+        "action_reward": 0.0,
+        "damage_delta": 0,
+        "done_count": 0,
+        "enemy_distance_delta": -10.1987,
+        "max_kills": 0,
+        "min_health": 100,
+        "negative_reward_steps": 14,
+        "positive_reward_steps": 2,
+        "records": 16,
+        "reset_warmup_steps": 133,
+        "reset_warmup_stop_reasons": {
+          "tic_limit": 1
+        },
+        "reset_warmup_tics": 350,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 4,
+          "press_exit": 1,
+          "recover_stuck": 1,
+          "route_progression": 3,
+          "seek_enemy": 7
+        },
+        "total_reward": -0.102
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-episode-start-combat-smoke-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-episode-start-combat-smoke-ppo-0000.pt",
+      "rollout_summary": {
+        "action_reward": 54.85,
+        "damage_delta": 60,
+        "done_count": 1,
+        "enemy_distance_delta": 29.2902,
+        "max_kills": 1,
+        "min_health": 80,
+        "negative_reward_steps": 5,
+        "positive_reward_steps": 111,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 113,
+        "skill_counts": {
+          "engage": 12,
+          "fire": 110,
+          "retreat": 1,
+          "route_progression": 5
+        },
+        "total_reward": 76.5429
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-episode-start-combat-smoke-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-episode-start-combat-smoke-ppo-0001.pt",
+      "rollout_summary": {
+        "action_reward": 56.93,
+        "damage_delta": 65,
+        "done_count": 1,
+        "enemy_distance_delta": 85.4195,
+        "max_kills": 1,
+        "min_health": 82,
+        "negative_reward_steps": 6,
+        "positive_reward_steps": 121,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 115,
+        "skill_counts": {
+          "engage": 7,
+          "fire": 115,
+          "route_progression": 6
+        },
+        "total_reward": 80.2442
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-episode-start-combat-smoke-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-episode-start-combat-smoke-ppo-0002.pt",
+      "rollout_summary": {
+        "action_reward": 54.4,
+        "damage_delta": 70,
+        "done_count": 1,
+        "enemy_distance_delta": 62.824,
+        "max_kills": 1,
+        "min_health": 69,
+        "negative_reward_steps": 12,
+        "positive_reward_steps": 115,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 111,
+        "skill_counts": {
+          "engage": 9,
+          "fire": 109,
+          "recover_stuck": 1,
+          "route_progression": 9
+        },
+        "total_reward": 77.9482
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-independent-combat-start-smoke-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-independent-combat-start-smoke-ppo-0000.pt",
+      "rollout_summary": {
+        "action_reward": 1.91,
+        "damage_delta": 40,
+        "done_count": 2,
+        "enemy_distance_delta": 366.525,
+        "max_kills": 0,
+        "min_health": 79,
+        "negative_reward_steps": 56,
+        "positive_reward_steps": 72,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 47,
+        "skill_counts": {
+          "engage": 13,
+          "fire": 15,
+          "open_use_line": 15,
+          "press_exit": 15,
+          "recover_stuck": 12,
+          "retreat": 26,
+          "route_progression": 15,
+          "seek_enemy": 17
+        },
+        "total_reward": 12.4953
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-independent-combat-start-smoke-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-independent-combat-start-smoke-ppo-0001.pt",
+      "rollout_summary": {
+        "action_reward": 0.88,
+        "damage_delta": 15,
+        "done_count": 2,
+        "enemy_distance_delta": 308.5243,
+        "max_kills": 0,
+        "min_health": 77,
+        "negative_reward_steps": 69,
+        "positive_reward_steps": 59,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 31,
+        "skill_counts": {
+          "engage": 6,
+          "fire": 21,
+          "open_use_line": 20,
+          "press_exit": 16,
+          "recover_stuck": 13,
+          "retreat": 23,
+          "route_progression": 22,
+          "seek_enemy": 7
+        },
+        "total_reward": 5.5852
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-independent-combat-start-smoke-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-independent-combat-start-smoke-ppo-0002.pt",
+      "rollout_summary": {
+        "action_reward": -0.84,
+        "damage_delta": 5,
+        "done_count": 2,
+        "enemy_distance_delta": 476.932,
+        "max_kills": 0,
+        "min_health": 71,
+        "negative_reward_steps": 54,
+        "positive_reward_steps": 74,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 36,
+        "skill_counts": {
+          "engage": 10,
+          "fire": 9,
+          "open_use_line": 15,
+          "press_exit": 10,
+          "recover_stuck": 13,
+          "retreat": 25,
+          "route_progression": 26,
+          "seek_enemy": 20
+        },
+        "total_reward": 2.8293
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-independent-combat-start-smoke-buffer-0003.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-independent-combat-start-smoke-ppo-0003.pt",
+      "rollout_summary": {
+        "action_reward": -0.84,
+        "damage_delta": 0,
+        "done_count": 2,
+        "enemy_distance_delta": 541.383,
+        "max_kills": 0,
+        "min_health": 76,
+        "negative_reward_steps": 57,
+        "positive_reward_steps": 71,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 17,
+        "skill_counts": {
+          "engage": 14,
+          "fire": 28,
+          "open_use_line": 10,
+          "press_exit": 15,
+          "recover_stuck": 17,
+          "retreat": 8,
+          "route_progression": 21,
+          "seek_enemy": 15
+        },
+        "total_reward": 3.4038
+      },
+      "update_index": 3
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-independent-combat-start-smoke-buffer-0004.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-independent-combat-start-smoke-ppo-0004.pt",
+      "rollout_summary": {
+        "action_reward": 5.61,
+        "damage_delta": 15,
+        "done_count": 2,
+        "enemy_distance_delta": 588.2304,
+        "max_kills": 0,
+        "min_health": 80,
+        "negative_reward_steps": 39,
+        "positive_reward_steps": 88,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 35,
+        "skill_counts": {
+          "engage": 15,
+          "fire": 31,
+          "open_use_line": 5,
+          "press_exit": 7,
+          "recover_stuck": 18,
+          "retreat": 10,
+          "route_progression": 17,
+          "seek_enemy": 25
+        },
+        "total_reward": 13.2923
+      },
+      "update_index": 4
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-independent-combat-start-smoke-buffer-0005.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-independent-combat-start-smoke-ppo-0005.pt",
+      "rollout_summary": {
+        "action_reward": 1.91,
+        "damage_delta": 0,
+        "done_count": 2,
+        "enemy_distance_delta": 442.6867,
+        "max_kills": 0,
+        "min_health": 82,
+        "negative_reward_steps": 47,
+        "positive_reward_steps": 81,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 19,
+        "skill_counts": {
+          "engage": 15,
+          "fire": 28,
+          "open_use_line": 8,
+          "press_exit": 10,
+          "recover_stuck": 29,
+          "retreat": 6,
+          "route_progression": 12,
+          "seek_enemy": 20
+        },
+        "total_reward": 5.1969
+      },
+      "update_index": 5
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-independent-combat-start-smoke-buffer-0006.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-independent-combat-start-smoke-ppo-0006.pt",
+      "rollout_summary": {
+        "action_reward": 6.89,
+        "damage_delta": 35,
+        "done_count": 2,
+        "enemy_distance_delta": 483.3536,
+        "max_kills": 0,
+        "min_health": 76,
+        "negative_reward_steps": 56,
+        "positive_reward_steps": 72,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 40,
+        "skill_counts": {
+          "engage": 5,
+          "fire": 40,
+          "open_use_line": 16,
+          "press_exit": 10,
+          "recover_stuck": 11,
+          "retreat": 10,
+          "route_progression": 9,
+          "seek_enemy": 27
+        },
+        "total_reward": 17.3135
+      },
+      "update_index": 6
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-independent-combat-start-smoke-buffer-0007.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-independent-combat-start-smoke-ppo-0007.pt",
+      "rollout_summary": {
+        "action_reward": 11.73,
+        "damage_delta": 40,
+        "done_count": 2,
+        "enemy_distance_delta": 446.5292,
+        "max_kills": 0,
+        "min_health": 85,
+        "negative_reward_steps": 48,
+        "positive_reward_steps": 80,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 56,
+        "skill_counts": {
+          "engage": 4,
+          "fire": 43,
+          "open_use_line": 8,
+          "press_exit": 10,
+          "recover_stuck": 15,
+          "retreat": 8,
+          "route_progression": 4,
+          "seek_enemy": 36
+        },
+        "total_reward": 23.2953
+      },
+      "update_index": 7
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-masked-independent-combat-start-smoke-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-masked-independent-combat-start-smoke-ppo-0000.pt",
+      "rollout_summary": {
+        "action_reward": 5.45,
+        "damage_delta": 75,
+        "done_count": 1,
+        "enemy_distance_delta": 222.8707,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 3.6016,
+        "min_health": 85,
+        "negative_reward_steps": 58,
+        "positive_reward_steps": 70,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 78,
+        "skill_counts": {
+          "engage": 30,
+          "fire": 17,
+          "retreat": 50,
+          "seek_enemy": 31
+        },
+        "total_reward": 21.8987
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-masked-independent-combat-start-smoke-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-masked-independent-combat-start-smoke-ppo-0001.pt",
+      "rollout_summary": {
+        "action_reward": 6.85,
+        "damage_delta": 55,
+        "done_count": 2,
+        "enemy_distance_delta": 412.0651,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 3.3906,
+        "min_health": 85,
+        "negative_reward_steps": 49,
+        "positive_reward_steps": 78,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 50,
+        "skill_counts": {
+          "engage": 27,
+          "fire": 17,
+          "retreat": 29,
+          "seek_enemy": 55
+        },
+        "total_reward": 21.0707
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-masked-independent-combat-start-smoke-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-masked-independent-combat-start-smoke-ppo-0002.pt",
+      "rollout_summary": {
+        "action_reward": 2.55,
+        "damage_delta": 10,
+        "done_count": 1,
+        "enemy_distance_delta": 328.9942,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 3.2891,
+        "min_health": 84,
+        "negative_reward_steps": 53,
+        "positive_reward_steps": 75,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 37,
+        "skill_counts": {
+          "engage": 28,
+          "fire": 8,
+          "retreat": 52,
+          "seek_enemy": 40
+        },
+        "total_reward": 6.9099
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-masked-independent-combat-start-smoke-buffer-0003.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-masked-independent-combat-start-smoke-ppo-0003.pt",
+      "rollout_summary": {
+        "action_reward": 1.6,
+        "damage_delta": 35,
+        "done_count": 1,
+        "enemy_distance_delta": 398.6321,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 3.3516,
+        "min_health": 76,
+        "negative_reward_steps": 47,
+        "positive_reward_steps": 80,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 45,
+        "skill_counts": {
+          "engage": 36,
+          "fire": 7,
+          "retreat": 35,
+          "seek_enemy": 50
+        },
+        "total_reward": 11.5663
+      },
+      "update_index": 3
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-masked-independent-combat-start-smoke-buffer-0004.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-masked-independent-combat-start-smoke-ppo-0004.pt",
+      "rollout_summary": {
+        "action_reward": 0.9,
+        "damage_delta": 30,
+        "done_count": 2,
+        "enemy_distance_delta": 392.0272,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 3.2891,
+        "min_health": 79,
+        "negative_reward_steps": 57,
+        "positive_reward_steps": 71,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 37,
+        "skill_counts": {
+          "engage": 25,
+          "fire": 5,
+          "retreat": 50,
+          "seek_enemy": 48
+        },
+        "total_reward": 9.7403
+      },
+      "update_index": 4
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-masked-independent-combat-start-smoke-buffer-0005.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-masked-independent-combat-start-smoke-ppo-0005.pt",
+      "rollout_summary": {
+        "action_reward": 0.65,
+        "damage_delta": 15,
+        "done_count": 2,
+        "enemy_distance_delta": 427.1278,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 3.3281,
+        "min_health": 76,
+        "negative_reward_steps": 52,
+        "positive_reward_steps": 76,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 42,
+        "skill_counts": {
+          "engage": 23,
+          "fire": 5,
+          "retreat": 53,
+          "seek_enemy": 47
+        },
+        "total_reward": 6.7513
+      },
+      "update_index": 5
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-masked-independent-combat-start-smoke-buffer-0006.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-masked-independent-combat-start-smoke-ppo-0006.pt",
+      "rollout_summary": {
+        "action_reward": 3.1,
+        "damage_delta": 25,
+        "done_count": 2,
+        "enemy_distance_delta": 402.1399,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 3.375,
+        "min_health": 85,
+        "negative_reward_steps": 53,
+        "positive_reward_steps": 75,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 48,
+        "skill_counts": {
+          "engage": 13,
+          "fire": 10,
+          "retreat": 53,
+          "seek_enemy": 52
+        },
+        "total_reward": 11.2214
+      },
+      "update_index": 6
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-masked-independent-combat-start-smoke-buffer-0007.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-masked-independent-combat-start-smoke-ppo-0007.pt",
+      "rollout_summary": {
+        "action_reward": 14.6,
+        "damage_delta": 25,
+        "done_count": 2,
+        "enemy_distance_delta": 292.2449,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 3.6406,
+        "min_health": 85,
+        "negative_reward_steps": 44,
+        "positive_reward_steps": 84,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 82,
+        "skill_counts": {
+          "engage": 9,
+          "fire": 34,
+          "retreat": 43,
+          "seek_enemy": 42
+        },
+        "total_reward": 21.8924
+      },
+      "update_index": 7
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-tight-mask-independent-combat-start-smoke-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0000.pt",
+      "rollout_summary": {
+        "action_reward": 21.05,
+        "damage_delta": 70,
+        "done_count": 1,
+        "enemy_distance_delta": 59.3458,
+        "invalid_action_steps": 0,
+        "max_kills": 1,
+        "mean_action_mask_size": 2.0938,
+        "min_health": 85,
+        "negative_reward_steps": 59,
+        "positive_reward_steps": 66,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 118,
+        "skill_counts": {
+          "engage": 69,
+          "fire": 49,
+          "retreat": 2,
+          "route_progression": 8
+        },
+        "total_reward": 45.1935
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-tight-mask-independent-combat-start-smoke-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0001.pt",
+      "rollout_summary": {
+        "action_reward": 26.9,
+        "damage_delta": 55,
+        "done_count": 1,
+        "enemy_distance_delta": 74.9286,
+        "invalid_action_steps": 0,
+        "max_kills": 1,
+        "mean_action_mask_size": 2.0391,
+        "min_health": 80,
+        "negative_reward_steps": 54,
+        "positive_reward_steps": 72,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 122,
+        "skill_counts": {
+          "engage": 65,
+          "fire": 60,
+          "retreat": 2,
+          "route_progression": 1
+        },
+        "total_reward": 48.0493
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-tight-mask-independent-combat-start-smoke-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0002.pt",
+      "rollout_summary": {
+        "action_reward": 35.6,
+        "damage_delta": 55,
+        "done_count": 1,
+        "enemy_distance_delta": 67.818,
+        "invalid_action_steps": 0,
+        "max_kills": 1,
+        "mean_action_mask_size": 1.9922,
+        "min_health": 80,
+        "negative_reward_steps": 43,
+        "positive_reward_steps": 84,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 124,
+        "skill_counts": {
+          "engage": 49,
+          "fire": 76,
+          "retreat": 3
+        },
+        "total_reward": 56.6782
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-tight-mask-independent-combat-start-smoke-buffer-0003.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0003.pt",
+      "rollout_summary": {
+        "action_reward": 38.9,
+        "damage_delta": 55,
+        "done_count": 1,
+        "enemy_distance_delta": 45.2319,
+        "invalid_action_steps": 0,
+        "max_kills": 1,
+        "mean_action_mask_size": 1.9141,
+        "min_health": 85,
+        "negative_reward_steps": 26,
+        "positive_reward_steps": 93,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 113,
+        "skill_counts": {
+          "engage": 44,
+          "fire": 81,
+          "retreat": 2,
+          "route_progression": 1
+        },
+        "total_reward": 59.9023
+      },
+      "update_index": 3
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-tight-mask-independent-combat-start-smoke-buffer-0004.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0004.pt",
+      "rollout_summary": {
+        "action_reward": 39.75,
+        "damage_delta": 55,
+        "done_count": 1,
+        "enemy_distance_delta": 61.4798,
+        "invalid_action_steps": 0,
+        "max_kills": 1,
+        "mean_action_mask_size": 1.8281,
+        "min_health": 80,
+        "negative_reward_steps": 22,
+        "positive_reward_steps": 88,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 107,
+        "skill_counts": {
+          "engage": 46,
+          "fire": 82
+        },
+        "total_reward": 60.7648
+      },
+      "update_index": 4
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-tight-mask-independent-combat-start-smoke-buffer-0005.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0005.pt",
+      "rollout_summary": {
+        "action_reward": 30.4,
+        "damage_delta": 55,
+        "done_count": 1,
+        "enemy_distance_delta": 61.9938,
+        "invalid_action_steps": 0,
+        "max_kills": 1,
+        "mean_action_mask_size": 1.8203,
+        "min_health": 80,
+        "negative_reward_steps": 37,
+        "positive_reward_steps": 73,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 107,
+        "skill_counts": {
+          "engage": 63,
+          "fire": 65
+        },
+        "total_reward": 51.4199
+      },
+      "update_index": 5
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-tight-mask-independent-combat-start-smoke-buffer-0006.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0006.pt",
+      "rollout_summary": {
+        "action_reward": 32.05,
+        "damage_delta": 55,
+        "done_count": 1,
+        "enemy_distance_delta": 62.561,
+        "invalid_action_steps": 0,
+        "max_kills": 1,
+        "mean_action_mask_size": 1.8281,
+        "min_health": 80,
+        "negative_reward_steps": 36,
+        "positive_reward_steps": 74,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 107,
+        "skill_counts": {
+          "engage": 60,
+          "fire": 68
+        },
+        "total_reward": 53.0756
+      },
+      "update_index": 6
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-tight-mask-independent-combat-start-smoke-buffer-0007.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0007.pt",
+      "rollout_summary": {
+        "action_reward": 30.5,
+        "damage_delta": 60,
+        "done_count": 1,
+        "enemy_distance_delta": -155.8809,
+        "invalid_action_steps": 0,
+        "max_kills": 2,
+        "mean_action_mask_size": 1.8125,
+        "min_health": 80,
+        "negative_reward_steps": 36,
+        "positive_reward_steps": 71,
+        "records": 128,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 105,
+        "skill_counts": {
+          "engage": 63,
+          "fire": 65
+        },
+        "total_reward": 60.3412
+      },
+      "update_index": 7
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-transfer-spawn-smoke-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-transfer-spawn-smoke-ppo-0000.pt",
+      "rollout_summary": {
+        "action_reward": 0.0,
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 659.4849,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 2.0,
+        "min_health": 100,
+        "negative_reward_steps": 100,
+        "positive_reward_steps": 149,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "route_progression": 91,
+          "seek_enemy": 165
+        },
+        "total_reward": 7.1248
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-transfer-spawn-smoke-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-transfer-spawn-smoke-ppo-0001.pt",
+      "rollout_summary": {
+        "action_reward": 0.0,
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 633.6527,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 2.0,
+        "min_health": 100,
+        "negative_reward_steps": 110,
+        "positive_reward_steps": 141,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "route_progression": 86,
+          "seek_enemy": 170
+        },
+        "total_reward": 6.8665
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-recovery-fixed-fast-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-recovery-fixed-fast-ppo-0000.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1283.85,
+            "y": -3121.04
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 47,
+          "source_run": "ppo-first-visible-train-buffer-0003",
+          "visible_enemy_on_reset": true
+        },
+        "index": 0,
+        "name": "visible_contact_fast",
+        "note": "Fresh-reset visible-contact point reached early by first-visible PPO curriculum.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84138436,
+          "y_fp": -204540457
+        },
+        "selected_index": 0,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 35.9624,
+        "checkpoint_selection_score": 334.8568,
+        "contact_reward": 20.0,
+        "curriculum_stage_counts": {
+          "visible_contact_fast": 512
+        },
+        "damage_delta": 25,
+        "done_count": 1,
+        "enemy_distance_delta": 190.1545,
+        "fire_on_shootable_steps": 75,
+        "first_shootable_contacts": 1,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 2,
+        "mean_action_mask_size": 2.2812,
+        "min_health": 94,
+        "missed_shootable_fire_steps": 7,
+        "negative_reward_steps": 165,
+        "positive_reward_steps": 343,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -1.1876,
+        "route_attempt_steps": 48,
+        "route_failed_steps": 46,
+        "route_progress_units": 19.2357,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 82,
+        "skill_counts": {
+          "engage": 50,
+          "fire": 75,
+          "open_use_line": 128,
+          "recover_stuck": 1,
+          "route_progression": 48,
+          "seek_enemy": 210
+        },
+        "total_reward": 83.9568,
+        "visible_contact_distance_delta": 127.2872,
+        "visible_contact_progress_reward": 1.273,
+        "visible_enemy_steps": 126
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-recovery-fixed-fast-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-recovery-fixed-fast-ppo-0001.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1283.85,
+            "y": -3121.04
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 47,
+          "source_run": "ppo-first-visible-train-buffer-0003",
+          "visible_enemy_on_reset": true
+        },
+        "index": 0,
+        "name": "visible_contact_fast",
+        "note": "Fresh-reset visible-contact point reached early by first-visible PPO curriculum.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84138436,
+          "y_fp": -204540457
+        },
+        "selected_index": 0,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": -1.6348,
+        "checkpoint_selection_score": -10.1308,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_fast": 512
+        },
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": -214.4293,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 2.0977,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 287,
+        "positive_reward_steps": 204,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -1.6348,
+        "route_attempt_steps": 73,
+        "route_failed_steps": 71,
+        "route_progress_units": 49.5241,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 121,
+          "open_use_line": 30,
+          "route_progression": 73,
+          "seek_enemy": 288
+        },
+        "total_reward": -3.0308,
+        "visible_contact_distance_delta": 74.8232,
+        "visible_contact_progress_reward": 0.7485,
+        "visible_enemy_steps": 113
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-recovery-fixed-fast-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-recovery-fixed-fast-ppo-0002.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1283.85,
+            "y": -3121.04
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 47,
+          "source_run": "ppo-first-visible-train-buffer-0003",
+          "visible_enemy_on_reset": true
+        },
+        "index": 0,
+        "name": "visible_contact_fast",
+        "note": "Fresh-reset visible-contact point reached early by first-visible PPO curriculum.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84138436,
+          "y_fp": -204540457
+        },
+        "selected_index": 0,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": -2.1249,
+        "checkpoint_selection_score": -9.0145,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_fast": 512
+        },
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 49.6184,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 2.2793,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 317,
+        "positive_reward_steps": 192,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -2.1249,
+        "route_attempt_steps": 77,
+        "route_failed_steps": 74,
+        "route_progress_units": 9.5089,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 73,
+          "open_use_line": 84,
+          "route_progression": 77,
+          "seek_enemy": 278
+        },
+        "total_reward": -1.6145,
+        "visible_contact_distance_delta": 1.424,
+        "visible_contact_progress_reward": 0.0142,
+        "visible_enemy_steps": 23
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-recovery-fixed-fast-buffer-0003.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-recovery-fixed-fast-ppo-0003.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1283.85,
+            "y": -3121.04
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 47,
+          "source_run": "ppo-first-visible-train-buffer-0003",
+          "visible_enemy_on_reset": true
+        },
+        "index": 0,
+        "name": "visible_contact_fast",
+        "note": "Fresh-reset visible-contact point reached early by first-visible PPO curriculum.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84138436,
+          "y_fp": -204540457
+        },
+        "selected_index": 0,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": -2.0091,
+        "checkpoint_selection_score": -9.9301,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_fast": 512
+        },
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": -218.7101,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 2.0039,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 276,
+        "positive_reward_steps": 201,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -2.0091,
+        "route_attempt_steps": 72,
+        "route_failed_steps": 71,
+        "route_progress_units": 12.0921,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 133,
+          "route_progression": 72,
+          "seek_enemy": 307
+        },
+        "total_reward": -2.8301,
+        "visible_contact_distance_delta": 136.6129,
+        "visible_contact_progress_reward": 1.3655,
+        "visible_enemy_steps": 118
+      },
+      "update_index": 3
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-recovery-long-backoff-fast-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-recovery-long-backoff-fast-ppo-0000.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1283.85,
+            "y": -3121.04
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 47,
+          "source_run": "ppo-first-visible-train-buffer-0003",
+          "visible_enemy_on_reset": true
+        },
+        "index": 0,
+        "name": "visible_contact_fast",
+        "note": "Fresh-reset visible-contact point reached early by first-visible PPO curriculum.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84138436,
+          "y_fp": -204540457
+        },
+        "selected_index": 0,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 35.886,
+        "checkpoint_selection_score": 351.2012,
+        "contact_reward": 20.0,
+        "curriculum_stage_counts": {
+          "visible_contact_fast": 512
+        },
+        "damage_delta": 30,
+        "done_count": 1,
+        "enemy_distance_delta": 622.2986,
+        "fire_on_shootable_steps": 68,
+        "first_shootable_contacts": 1,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 2,
+        "mean_action_mask_size": 2.1836,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 5,
+        "negative_reward_steps": 144,
+        "positive_reward_steps": 366,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 2.136,
+        "route_attempt_steps": 40,
+        "route_failed_steps": 20,
+        "route_progress_units": 273.5951,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 73,
+        "skill_counts": {
+          "engage": 98,
+          "fire": 68,
+          "open_use_line": 56,
+          "route_progression": 40,
+          "seek_enemy": 250
+        },
+        "total_reward": 89.2012,
+        "visible_contact_distance_delta": 109.2302,
+        "visible_contact_progress_reward": 1.0924,
+        "visible_enemy_steps": 96
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-recovery-long-backoff-fast-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-recovery-long-backoff-fast-ppo-0001.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1283.85,
+            "y": -3121.04
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 47,
+          "source_run": "ppo-first-visible-train-buffer-0003",
+          "visible_enemy_on_reset": true
+        },
+        "index": 0,
+        "name": "visible_contact_fast",
+        "note": "Fresh-reset visible-contact point reached early by first-visible PPO curriculum.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84138436,
+          "y_fp": -204540457
+        },
+        "selected_index": 0,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": -1.3796,
+        "checkpoint_selection_score": -5.8398,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_fast": 512
+        },
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": -68.5745,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 2.1895,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 287,
+        "positive_reward_steps": 223,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -1.3796,
+        "route_attempt_steps": 48,
+        "route_failed_steps": 48,
+        "route_progress_units": 6.0411,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 117,
+          "open_use_line": 41,
+          "route_progression": 48,
+          "seek_enemy": 306
+        },
+        "total_reward": -1.0398,
+        "visible_contact_distance_delta": 102.5484,
+        "visible_contact_progress_reward": 1.0253,
+        "visible_enemy_steps": 41
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-recovery-long-backoff-fast-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-recovery-long-backoff-fast-ppo-0002.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1283.85,
+            "y": -3121.04
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 47,
+          "source_run": "ppo-first-visible-train-buffer-0003",
+          "visible_enemy_on_reset": true
+        },
+        "index": 0,
+        "name": "visible_contact_fast",
+        "note": "Fresh-reset visible-contact point reached early by first-visible PPO curriculum.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84138436,
+          "y_fp": -204540457
+        },
+        "selected_index": 0,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": -1.1229,
+        "checkpoint_selection_score": -5.7524,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_fast": 512
+        },
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": -58.2987,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 2.0605,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 260,
+        "positive_reward_steps": 252,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -1.1229,
+        "route_attempt_steps": 42,
+        "route_failed_steps": 42,
+        "route_progress_units": 13.7127,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 99,
+          "open_use_line": 11,
+          "route_progression": 42,
+          "seek_enemy": 360
+        },
+        "total_reward": -1.5524,
+        "visible_contact_distance_delta": 15.3502,
+        "visible_contact_progress_reward": 0.1535,
+        "visible_enemy_steps": 4
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-recovery-long-backoff-fast-buffer-0003.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-recovery-long-backoff-fast-ppo-0003.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1283.85,
+            "y": -3121.04
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 47,
+          "source_run": "ppo-first-visible-train-buffer-0003",
+          "visible_enemy_on_reset": true
+        },
+        "index": 0,
+        "name": "visible_contact_fast",
+        "note": "Fresh-reset visible-contact point reached early by first-visible PPO curriculum.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84138436,
+          "y_fp": -204540457
+        },
+        "selected_index": 0,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 11.7678,
+        "checkpoint_selection_score": 317.1199,
+        "contact_reward": 20.0,
+        "curriculum_stage_counts": {
+          "visible_contact_fast": 512
+        },
+        "damage_delta": 33,
+        "done_count": 1,
+        "enemy_distance_delta": 772.711,
+        "fire_on_shootable_steps": 23,
+        "first_shootable_contacts": 1,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 2,
+        "mean_action_mask_size": 2.3672,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 5,
+        "negative_reward_steps": 130,
+        "positive_reward_steps": 382,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.5178,
+        "route_attempt_steps": 3,
+        "route_failed_steps": 0,
+        "route_progress_units": 51.7826,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 28,
+        "skill_counts": {
+          "engage": 114,
+          "fire": 23,
+          "open_use_line": 85,
+          "route_progression": 3,
+          "seek_enemy": 287
+        },
+        "total_reward": 69.6199,
+        "visible_contact_distance_delta": 352.4956,
+        "visible_contact_progress_reward": 3.5246,
+        "visible_enemy_steps": 124
+      },
+      "update_index": 3
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-recovery-round-robin-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-recovery-round-robin-ppo-0000.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1283.85,
+            "y": -3121.04
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 47,
+          "source_run": "ppo-first-visible-train-buffer-0003",
+          "visible_enemy_on_reset": true
+        },
+        "index": 0,
+        "name": "visible_contact_fast",
+        "note": "Fresh-reset visible-contact point reached early by first-visible PPO curriculum.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84138436,
+          "y_fp": -204540457
+        },
+        "selected_index": 0,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": -1.229,
+        "checkpoint_selection_score": -5.4991,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_fast": 512
+        },
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": -66.226,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 2.2441,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 329,
+        "positive_reward_steps": 179,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -1.229,
+        "route_attempt_steps": 46,
+        "route_failed_steps": 46,
+        "route_progress_units": 15.0958,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 98,
+          "open_use_line": 51,
+          "route_progression": 46,
+          "seek_enemy": 317
+        },
+        "total_reward": -0.8991,
+        "visible_contact_distance_delta": 99.2214,
+        "visible_contact_progress_reward": 0.9922,
+        "visible_enemy_steps": 32
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-recovery-round-robin-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-recovery-round-robin-ppo-0001.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1287.17,
+            "y": -3119.59
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 238,
+          "source_run": "ppo-first-visible-train-buffer-0000",
+          "visible_enemy_on_reset": true
+        },
+        "index": 1,
+        "name": "visible_contact_route",
+        "note": "Fresh-reset visible-contact point from first-visible route-progress rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84355741,
+          "y_fp": -204445474
+        },
+        "selected_index": 1,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": -0.9821,
+        "checkpoint_selection_score": -4.9157,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_route": 512
+        },
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": -197.1033,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 2.0957,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 302,
+        "positive_reward_steps": 195,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -0.9821,
+        "route_attempt_steps": 38,
+        "route_failed_steps": 37,
+        "route_progress_units": 12.7873,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 161,
+          "open_use_line": 11,
+          "recover_stuck": 1,
+          "route_progression": 38,
+          "seek_enemy": 301
+        },
+        "total_reward": -1.2157,
+        "visible_contact_distance_delta": 120.7417,
+        "visible_contact_progress_reward": 1.2074,
+        "visible_enemy_steps": 49
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-recovery-round-robin-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-recovery-round-robin-ppo-0002.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1263.19,
+            "y": -3117.44
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 237,
+          "source_run": "ppo-first-visible-train-buffer-0001",
+          "visible_enemy_on_reset": true
+        },
+        "index": 2,
+        "name": "visible_contact_seek",
+        "note": "Fresh-reset visible-contact point from first-visible seek rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 82784606,
+          "y_fp": -204304576
+        },
+        "selected_index": 2,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": -0.9819,
+        "checkpoint_selection_score": -5.9398,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_seek": 512
+        },
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": -155.6653,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 2.166,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 296,
+        "positive_reward_steps": 190,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -0.9819,
+        "route_attempt_steps": 38,
+        "route_failed_steps": 38,
+        "route_progress_units": 15.8112,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 128,
+          "open_use_line": 29,
+          "route_progression": 38,
+          "seek_enemy": 317
+        },
+        "total_reward": -2.1398,
+        "visible_contact_distance_delta": 39.87,
+        "visible_contact_progress_reward": 0.3986,
+        "visible_enemy_steps": 13
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-recovery-round-robin-buffer-0003.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-recovery-round-robin-ppo-0003.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "bridge_target": "shootable combat",
+          "damage_observed_with_heuristic": true,
+          "doom_units": {
+            "x": 3248,
+            "y": -3280
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": true
+        },
+        "index": 3,
+        "name": "combat_start",
+        "note": "Known shootable combat start used as the bridge target after visible-contact starts.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 212860928,
+          "y_fp": -214958080
+        },
+        "selected_index": 3,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 135.3606,
+        "checkpoint_selection_score": 829.1819,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "combat_start": 512
+        },
+        "damage_delta": 140,
+        "done_count": 1,
+        "enemy_distance_delta": -462.0197,
+        "fire_on_shootable_steps": 271,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 3,
+        "mean_action_mask_size": 2.4531,
+        "min_health": 37,
+        "missed_shootable_fire_steps": 8,
+        "negative_reward_steps": 113,
+        "positive_reward_steps": 395,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.2606,
+        "route_attempt_steps": 23,
+        "route_failed_steps": 15,
+        "route_progress_units": 71.0636,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 279,
+        "skill_counts": {
+          "engage": 58,
+          "fire": 271,
+          "open_use_line": 33,
+          "recover_stuck": 2,
+          "retreat": 39,
+          "route_progression": 23,
+          "seek_enemy": 86
+        },
+        "total_reward": 198.1819,
+        "visible_contact_distance_delta": 190.1415,
+        "visible_contact_progress_reward": 1.9012,
+        "visible_enemy_steps": 469
+      },
+      "update_index": 3
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-recovery-round-robin-buffer-0004.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-recovery-round-robin-ppo-0004.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1283.85,
+            "y": -3121.04
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 47,
+          "source_run": "ppo-first-visible-train-buffer-0003",
+          "visible_enemy_on_reset": true
+        },
+        "index": 0,
+        "name": "visible_contact_fast",
+        "note": "Fresh-reset visible-contact point reached early by first-visible PPO curriculum.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84138436,
+          "y_fp": -204540457
+        },
+        "selected_index": 0,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 53.5223,
+        "checkpoint_selection_score": 377.1582,
+        "contact_reward": 20.0,
+        "curriculum_stage_counts": {
+          "visible_contact_fast": 512
+        },
+        "damage_delta": 25,
+        "done_count": 1,
+        "enemy_distance_delta": 336.7914,
+        "fire_on_shootable_steps": 106,
+        "first_shootable_contacts": 1,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 2,
+        "mean_action_mask_size": 2.2773,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 3,
+        "negative_reward_steps": 146,
+        "positive_reward_steps": 362,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.6723,
+        "route_attempt_steps": 12,
+        "route_failed_steps": 6,
+        "route_progress_units": 85.2251,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 109,
+        "skill_counts": {
+          "engage": 118,
+          "fire": 106,
+          "open_use_line": 74,
+          "route_progression": 12,
+          "seek_enemy": 202
+        },
+        "total_reward": 102.7582,
+        "visible_contact_distance_delta": 86.8056,
+        "visible_contact_progress_reward": 0.8682,
+        "visible_enemy_steps": 126
+      },
+      "update_index": 4
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-recovery-round-robin-buffer-0005.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-recovery-round-robin-ppo-0005.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1287.17,
+            "y": -3119.59
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 238,
+          "source_run": "ppo-first-visible-train-buffer-0000",
+          "visible_enemy_on_reset": true
+        },
+        "index": 1,
+        "name": "visible_contact_route",
+        "note": "Fresh-reset visible-contact point from first-visible route-progress rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84355741,
+          "y_fp": -204445474
+        },
+        "selected_index": 1,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": -0.8023,
+        "checkpoint_selection_score": -5.0699,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_route": 512
+        },
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": -191.7765,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 2.0488,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 311,
+        "positive_reward_steps": 196,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -0.8023,
+        "route_attempt_steps": 28,
+        "route_failed_steps": 28,
+        "route_progress_units": 3.7678,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 129,
+          "open_use_line": 8,
+          "route_progression": 28,
+          "seek_enemy": 347
+        },
+        "total_reward": -2.2699,
+        "visible_contact_distance_delta": 45.0173,
+        "visible_contact_progress_reward": 0.4503,
+        "visible_enemy_steps": 26
+      },
+      "update_index": 5
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-recovery-round-robin-buffer-0006.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-recovery-round-robin-ppo-0006.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1263.19,
+            "y": -3117.44
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 237,
+          "source_run": "ppo-first-visible-train-buffer-0001",
+          "visible_enemy_on_reset": true
+        },
+        "index": 2,
+        "name": "visible_contact_seek",
+        "note": "Fresh-reset visible-contact point from first-visible seek rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 82784606,
+          "y_fp": -204304576
+        },
+        "selected_index": 2,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": -0.1637,
+        "checkpoint_selection_score": 0.8079,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_seek": 512
+        },
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 66.367,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 2.2383,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 265,
+        "positive_reward_steps": 246,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -0.1637,
+        "route_attempt_steps": 6,
+        "route_failed_steps": 6,
+        "route_progress_units": 1.6278,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 117,
+          "open_use_line": 31,
+          "route_progression": 6,
+          "seek_enemy": 358
+        },
+        "total_reward": 1.4079,
+        "visible_contact_distance_delta": 90.7962,
+        "visible_contact_progress_reward": 0.9075,
+        "visible_enemy_steps": 50
+      },
+      "update_index": 6
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-recovery-round-robin-buffer-0007.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-recovery-round-robin-ppo-0007.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "bridge_target": "shootable combat",
+          "damage_observed_with_heuristic": true,
+          "doom_units": {
+            "x": 3248,
+            "y": -3280
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": true
+        },
+        "index": 3,
+        "name": "combat_start",
+        "note": "Known shootable combat start used as the bridge target after visible-contact starts.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 212860928,
+          "y_fp": -214958080
+        },
+        "selected_index": 3,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 151.7511,
+        "checkpoint_selection_score": 890.931,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "combat_start": 512
+        },
+        "damage_delta": 150,
+        "done_count": 1,
+        "enemy_distance_delta": 176.9977,
+        "fire_on_shootable_steps": 305,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 3,
+        "mean_action_mask_size": 2.502,
+        "min_health": 64,
+        "missed_shootable_fire_steps": 8,
+        "negative_reward_steps": 59,
+        "positive_reward_steps": 443,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -0.3489,
+        "route_attempt_steps": 10,
+        "route_failed_steps": 10,
+        "route_progress_units": -4.8881,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 313,
+        "skill_counts": {
+          "engage": 37,
+          "fire": 305,
+          "open_use_line": 44,
+          "press_exit": 18,
+          "retreat": 8,
+          "route_progression": 10,
+          "seek_enemy": 90
+        },
+        "total_reward": 222.431,
+        "visible_contact_distance_delta": 52.9864,
+        "visible_contact_progress_reward": 0.5301,
+        "visible_enemy_steps": 382
+      },
+      "update_index": 7
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-line-memory-route-probe-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-line-memory-route-probe-ppo-0000.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1287.17,
+            "y": -3119.59
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 238,
+          "source_run": "ppo-first-visible-train-buffer-0000",
+          "visible_enemy_on_reset": true
+        },
+        "index": 1,
+        "name": "visible_contact_route",
+        "note": "Fresh-reset visible-contact point from first-visible route-progress rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84355741,
+          "y_fp": -204445474
+        },
+        "selected_index": 1,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": -0.142,
+        "checkpoint_selection_score": 0.3891,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_route": 256
+        },
+        "damage_delta": 0,
+        "done_count": 0,
+        "enemy_distance_delta": 52.5609,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 2.3945,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 143,
+        "positive_reward_steps": 106,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -0.142,
+        "route_attempt_steps": 4,
+        "route_failed_steps": 4,
+        "route_progress_units": -2.2003,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 59,
+          "open_use_line": 20,
+          "route_progression": 4,
+          "seek_enemy": 173
+        },
+        "total_reward": 0.7891,
+        "visible_contact_distance_delta": 40.5475,
+        "visible_contact_progress_reward": 0.4054,
+        "visible_enemy_steps": 41
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-line-memory-route-probe-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-line-memory-route-probe-ppo-0001.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1287.17,
+            "y": -3119.59
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 238,
+          "source_run": "ppo-first-visible-train-buffer-0000",
+          "visible_enemy_on_reset": true
+        },
+        "index": 1,
+        "name": "visible_contact_route",
+        "note": "Fresh-reset visible-contact point from first-visible route-progress rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84355741,
+          "y_fp": -204445474
+        },
+        "selected_index": 1,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": -0.0204,
+        "checkpoint_selection_score": 1.0536,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_route": 256
+        },
+        "damage_delta": 0,
+        "done_count": 0,
+        "enemy_distance_delta": 50.185,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 2.2539,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 103,
+        "positive_reward_steps": 138,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -0.0204,
+        "route_attempt_steps": 1,
+        "route_failed_steps": 1,
+        "route_progress_units": 0.956,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 60,
+          "open_use_line": 9,
+          "route_progression": 1,
+          "seek_enemy": 186
+        },
+        "total_reward": 1.1536,
+        "visible_contact_distance_delta": 67.2144,
+        "visible_contact_progress_reward": 0.6722,
+        "visible_enemy_steps": 58
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-line-memory-route-probe-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-line-memory-route-probe-ppo-0002.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1287.17,
+            "y": -3119.59
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 238,
+          "source_run": "ppo-first-visible-train-buffer-0000",
+          "visible_enemy_on_reset": true
+        },
+        "index": 1,
+        "name": "visible_contact_route",
+        "note": "Fresh-reset visible-contact point from first-visible route-progress rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84355741,
+          "y_fp": -204445474
+        },
+        "selected_index": 1,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": -0.1217,
+        "checkpoint_selection_score": 1.0306,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_route": 256
+        },
+        "damage_delta": 0,
+        "done_count": 0,
+        "enemy_distance_delta": 115.606,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 2.0312,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 82,
+        "positive_reward_steps": 167,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -0.1217,
+        "route_attempt_steps": 4,
+        "route_failed_steps": 4,
+        "route_progress_units": -0.17,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 22,
+          "route_progression": 4,
+          "seek_enemy": 230
+        },
+        "total_reward": 1.4306,
+        "visible_contact_distance_delta": 39.6263,
+        "visible_contact_progress_reward": 0.3961,
+        "visible_enemy_steps": 28
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-line-followthrough-route-probe-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-line-followthrough-route-probe-ppo-0000.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1287.17,
+            "y": -3119.59
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 238,
+          "source_run": "ppo-first-visible-train-buffer-0000",
+          "visible_enemy_on_reset": true
+        },
+        "index": 1,
+        "name": "visible_contact_route",
+        "note": "Fresh-reset visible-contact point from first-visible route-progress rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84355741,
+          "y_fp": -204445474
+        },
+        "selected_index": 1,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 20.9,
+        "checkpoint_selection_score": 234.0045,
+        "contact_reward": 20.0,
+        "curriculum_stage_counts": {
+          "visible_contact_route": 256
+        },
+        "damage_delta": 25,
+        "done_count": 0,
+        "enemy_distance_delta": 823.5847,
+        "fire_on_shootable_steps": 42,
+        "first_shootable_contacts": 1,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 1,
+        "mean_action_mask_size": 1.5977,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 2,
+        "negative_reward_steps": 22,
+        "positive_reward_steps": 189,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.0,
+        "route_attempt_steps": 0,
+        "route_failed_steps": 0,
+        "route_progress_units": 0.0,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 44,
+        "skill_counts": {
+          "engage": 13,
+          "fire": 42,
+          "open_use_line": 172,
+          "recover_stuck": 1,
+          "seek_enemy": 28
+        },
+        "total_reward": 65.0045,
+        "visible_contact_distance_delta": 86.8685,
+        "visible_contact_progress_reward": 0.8687,
+        "visible_enemy_steps": 65
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-line-followthrough-route-probe-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-line-followthrough-route-probe-ppo-0001.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1287.17,
+            "y": -3119.59
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 238,
+          "source_run": "ppo-first-visible-train-buffer-0000",
+          "visible_enemy_on_reset": true
+        },
+        "index": 1,
+        "name": "visible_contact_route",
+        "note": "Fresh-reset visible-contact point from first-visible route-progress rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84355741,
+          "y_fp": -204445474
+        },
+        "selected_index": 1,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 25.9,
+        "checkpoint_selection_score": 322.3874,
+        "contact_reward": 20.0,
+        "curriculum_stage_counts": {
+          "visible_contact_route": 256
+        },
+        "damage_delta": 25,
+        "done_count": 0,
+        "enemy_distance_delta": 28.8696,
+        "fire_on_shootable_steps": 52,
+        "first_shootable_contacts": 1,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 2,
+        "mean_action_mask_size": 1.5938,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 2,
+        "negative_reward_steps": 31,
+        "positive_reward_steps": 224,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.0,
+        "route_attempt_steps": 0,
+        "route_failed_steps": 0,
+        "route_progress_units": 0.0,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 54,
+        "skill_counts": {
+          "engage": 48,
+          "fire": 52,
+          "open_use_line": 112,
+          "seek_enemy": 44
+        },
+        "total_reward": 73.3874,
+        "visible_contact_distance_delta": 219.8665,
+        "visible_contact_progress_reward": 2.1985,
+        "visible_enemy_steps": 93
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-line-followthrough-route-probe-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-line-followthrough-route-probe-ppo-0002.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1287.17,
+            "y": -3119.59
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 238,
+          "source_run": "ppo-first-visible-train-buffer-0000",
+          "visible_enemy_on_reset": true
+        },
+        "index": 1,
+        "name": "visible_contact_route",
+        "note": "Fresh-reset visible-contact point from first-visible route-progress rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84355741,
+          "y_fp": -204445474
+        },
+        "selected_index": 1,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": -0.0968,
+        "checkpoint_selection_score": 0.3905,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_route": 256
+        },
+        "damage_delta": 0,
+        "done_count": 0,
+        "enemy_distance_delta": 48.9201,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 1.9766,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 120,
+        "positive_reward_steps": 121,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -0.0968,
+        "route_attempt_steps": 3,
+        "route_failed_steps": 3,
+        "route_progress_units": -0.6831,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 76,
+          "open_use_line": 25,
+          "route_progression": 3,
+          "seek_enemy": 152
+        },
+        "total_reward": 0.6905,
+        "visible_contact_distance_delta": 29.8163,
+        "visible_contact_progress_reward": 0.2979,
+        "visible_enemy_steps": 64
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-line-followthrough-seek-probe-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-line-followthrough-seek-probe-ppo-0000.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1263.19,
+            "y": -3117.44
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 237,
+          "source_run": "ppo-first-visible-train-buffer-0001",
+          "visible_enemy_on_reset": true
+        },
+        "index": 2,
+        "name": "visible_contact_seek",
+        "note": "Fresh-reset visible-contact point from first-visible seek rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 82784606,
+          "y_fp": -204304576
+        },
+        "selected_index": 2,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": -0.126,
+        "checkpoint_selection_score": 10.2849,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_seek": 256
+        },
+        "damage_delta": 0,
+        "done_count": 0,
+        "enemy_distance_delta": 1064.8598,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 1.8242,
+        "min_health": 97,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 34,
+        "positive_reward_steps": 189,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -0.126,
+        "route_attempt_steps": 4,
+        "route_failed_steps": 4,
+        "route_progress_units": -0.6005,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 44,
+          "open_use_line": 131,
+          "route_progression": 4,
+          "seek_enemy": 77
+        },
+        "total_reward": 10.6849,
+        "visible_contact_distance_delta": 25.2336,
+        "visible_contact_progress_reward": 0.2523,
+        "visible_enemy_steps": 14
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-line-followthrough-seek-probe-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-line-followthrough-seek-probe-ppo-0001.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1263.19,
+            "y": -3117.44
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 237,
+          "source_run": "ppo-first-visible-train-buffer-0001",
+          "visible_enemy_on_reset": true
+        },
+        "index": 2,
+        "name": "visible_contact_seek",
+        "note": "Fresh-reset visible-contact point from first-visible seek rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 82784606,
+          "y_fp": -204304576
+        },
+        "selected_index": 2,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 28.8859,
+        "checkpoint_selection_score": 342.2907,
+        "contact_reward": 20.0,
+        "curriculum_stage_counts": {
+          "visible_contact_seek": 256
+        },
+        "damage_delta": 30,
+        "done_count": 0,
+        "enemy_distance_delta": 534.9437,
+        "fire_on_shootable_steps": 57,
+        "first_shootable_contacts": 1,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 2,
+        "mean_action_mask_size": 1.793,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 5,
+        "negative_reward_steps": 32,
+        "positive_reward_steps": 224,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.6359,
+        "route_attempt_steps": 9,
+        "route_failed_steps": 1,
+        "route_progress_units": 66.5872,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 62,
+        "skill_counts": {
+          "engage": 56,
+          "fire": 57,
+          "open_use_line": 69,
+          "route_progression": 9,
+          "seek_enemy": 65
+        },
+        "total_reward": 83.8907,
+        "visible_contact_distance_delta": 265.5409,
+        "visible_contact_progress_reward": 2.6555,
+        "visible_enemy_steps": 98
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-line-followthrough-seek-probe-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-line-followthrough-seek-probe-ppo-0002.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1263.19,
+            "y": -3117.44
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 237,
+          "source_run": "ppo-first-visible-train-buffer-0001",
+          "visible_enemy_on_reset": true
+        },
+        "index": 2,
+        "name": "visible_contact_seek",
+        "note": "Fresh-reset visible-contact point from first-visible seek rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 82784606,
+          "y_fp": -204304576
+        },
+        "selected_index": 2,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": -0.1402,
+        "checkpoint_selection_score": -0.8334,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_seek": 256
+        },
+        "damage_delta": 0,
+        "done_count": 0,
+        "enemy_distance_delta": -18.4777,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 2.0117,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 131,
+        "positive_reward_steps": 118,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -0.1402,
+        "route_attempt_steps": 7,
+        "route_failed_steps": 7,
+        "route_progress_units": 6.976,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 98,
+          "open_use_line": 15,
+          "route_progression": 7,
+          "seek_enemy": 136
+        },
+        "total_reward": -0.1334,
+        "visible_contact_distance_delta": 19.1651,
+        "visible_contact_progress_reward": 0.1917,
+        "visible_enemy_steps": 30
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-followthrough-round-robin-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-followthrough-round-robin-ppo-0000.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1283.85,
+            "y": -3121.04
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 47,
+          "source_run": "ppo-first-visible-train-buffer-0003",
+          "visible_enemy_on_reset": true
+        },
+        "index": 0,
+        "name": "visible_contact_fast",
+        "note": "Fresh-reset visible-contact point reached early by first-visible PPO curriculum.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84138436,
+          "y_fp": -204540457
+        },
+        "selected_index": 0,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 36.4,
+        "checkpoint_selection_score": 328.6771,
+        "contact_reward": 20.0,
+        "curriculum_stage_counts": {
+          "visible_contact_fast": 256
+        },
+        "damage_delta": 20,
+        "done_count": 0,
+        "enemy_distance_delta": -235.2775,
+        "fire_on_shootable_steps": 73,
+        "first_shootable_contacts": 1,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 2,
+        "mean_action_mask_size": 1.6641,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 2,
+        "negative_reward_steps": 12,
+        "positive_reward_steps": 192,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.0,
+        "route_attempt_steps": 0,
+        "route_failed_steps": 0,
+        "route_progress_units": 0.0,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 75,
+        "skill_counts": {
+          "engage": 15,
+          "fire": 73,
+          "open_use_line": 159,
+          "seek_enemy": 9
+        },
+        "total_reward": 79.1771,
+        "visible_contact_distance_delta": 112.9881,
+        "visible_contact_progress_reward": 1.13,
+        "visible_enemy_steps": 106
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-followthrough-round-robin-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-followthrough-round-robin-ppo-0001.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1287.17,
+            "y": -3119.59
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 238,
+          "source_run": "ppo-first-visible-train-buffer-0000",
+          "visible_enemy_on_reset": true
+        },
+        "index": 1,
+        "name": "visible_contact_route",
+        "note": "Fresh-reset visible-contact point from first-visible route-progress rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84355741,
+          "y_fp": -204445474
+        },
+        "selected_index": 1,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 19.7262,
+        "checkpoint_selection_score": 327.1806,
+        "contact_reward": 20.0,
+        "curriculum_stage_counts": {
+          "visible_contact_route": 256
+        },
+        "damage_delta": 30,
+        "done_count": 0,
+        "enemy_distance_delta": 770.5221,
+        "fire_on_shootable_steps": 38,
+        "first_shootable_contacts": 1,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 2,
+        "mean_action_mask_size": 1.9648,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 2,
+        "negative_reward_steps": 19,
+        "positive_reward_steps": 237,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.8262,
+        "route_attempt_steps": 7,
+        "route_failed_steps": 0,
+        "route_progress_units": 82.62,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 40,
+        "skill_counts": {
+          "engage": 54,
+          "fire": 38,
+          "open_use_line": 90,
+          "route_progression": 7,
+          "seek_enemy": 67
+        },
+        "total_reward": 75.1806,
+        "visible_contact_distance_delta": 174.9196,
+        "visible_contact_progress_reward": 1.7493,
+        "visible_enemy_steps": 73
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-followthrough-round-robin-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-followthrough-round-robin-ppo-0002.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1263.19,
+            "y": -3117.44
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 237,
+          "source_run": "ppo-first-visible-train-buffer-0001",
+          "visible_enemy_on_reset": true
+        },
+        "index": 2,
+        "name": "visible_contact_seek",
+        "note": "Fresh-reset visible-contact point from first-visible seek rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 82784606,
+          "y_fp": -204304576
+        },
+        "selected_index": 2,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": -0.129,
+        "checkpoint_selection_score": -0.3834,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_seek": 256
+        },
+        "damage_delta": 0,
+        "done_count": 0,
+        "enemy_distance_delta": 34.9602,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 1.9531,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 148,
+        "positive_reward_steps": 108,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": -0.129,
+        "route_attempt_steps": 7,
+        "route_failed_steps": 7,
+        "route_progress_units": 8.101,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 88,
+          "open_use_line": 41,
+          "route_progression": 7,
+          "seek_enemy": 120
+        },
+        "total_reward": 0.3166,
+        "visible_contact_distance_delta": 9.5979,
+        "visible_contact_progress_reward": 0.0961,
+        "visible_enemy_steps": 22
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-followthrough-round-robin-buffer-0003.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-followthrough-round-robin-ppo-0003.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "bridge_target": "shootable combat",
+          "damage_observed_with_heuristic": true,
+          "doom_units": {
+            "x": 3248,
+            "y": -3280
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": true
+        },
+        "index": 3,
+        "name": "combat_start",
+        "note": "Known shootable combat start used as the bridge target after visible-contact starts.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 212860928,
+          "y_fp": -214958080
+        },
+        "selected_index": 3,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 47.95,
+        "checkpoint_selection_score": 292.4531,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "combat_start": 256
+        },
+        "damage_delta": 50,
+        "done_count": 0,
+        "enemy_distance_delta": 234.1826,
+        "fire_on_shootable_steps": 96,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 1,
+        "mean_action_mask_size": 1.6016,
+        "min_health": 40,
+        "missed_shootable_fire_steps": 1,
+        "negative_reward_steps": 59,
+        "positive_reward_steps": 153,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.0,
+        "route_attempt_steps": 0,
+        "route_failed_steps": 0,
+        "route_progress_units": 0.0,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 97,
+        "skill_counts": {
+          "engage": 1,
+          "fire": 96,
+          "open_use_line": 159
+        },
+        "total_reward": 70.4531,
+        "visible_contact_distance_delta": 196.1238,
+        "visible_contact_progress_reward": 1.9615,
+        "visible_enemy_steps": 256
+      },
+      "update_index": 3
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-line-bypass-seek-probe-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-line-bypass-seek-probe-ppo-0000.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1263.19,
+            "y": -3117.44
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 237,
+          "source_run": "ppo-first-visible-train-buffer-0001",
+          "visible_enemy_on_reset": true
+        },
+        "index": 2,
+        "name": "visible_contact_seek",
+        "note": "Fresh-reset visible-contact point from first-visible seek rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 82784606,
+          "y_fp": -204304576
+        },
+        "selected_index": 2,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 0.0,
+        "checkpoint_selection_score": 15.3586,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_seek": 256
+        },
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 1506.5275,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 1.6406,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 75,
+        "positive_reward_steps": 181,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.0,
+        "route_attempt_steps": 0,
+        "route_failed_steps": 0,
+        "route_progress_units": 0.0,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "open_use_line": 256
+        },
+        "total_reward": 15.3586,
+        "visible_contact_distance_delta": 29.328,
+        "visible_contact_progress_reward": 0.2932,
+        "visible_enemy_steps": 8
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-line-bypass-seek-probe-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-line-bypass-seek-probe-ppo-0001.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1263.19,
+            "y": -3117.44
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 237,
+          "source_run": "ppo-first-visible-train-buffer-0001",
+          "visible_enemy_on_reset": true
+        },
+        "index": 2,
+        "name": "visible_contact_seek",
+        "note": "Fresh-reset visible-contact point from first-visible seek rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 82784606,
+          "y_fp": -204304576
+        },
+        "selected_index": 2,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 0.0,
+        "checkpoint_selection_score": 15.4782,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_seek": 256
+        },
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 1481.4998,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 1.6055,
+        "min_health": 91,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 39,
+        "positive_reward_steps": 217,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.0,
+        "route_attempt_steps": 0,
+        "route_failed_steps": 0,
+        "route_progress_units": 0.0,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 6,
+          "open_use_line": 241,
+          "recover_stuck": 4,
+          "seek_enemy": 5
+        },
+        "total_reward": 15.4782,
+        "visible_contact_distance_delta": 93.3168,
+        "visible_contact_progress_reward": 0.9331,
+        "visible_enemy_steps": 19
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-line-bypass-seek-probe-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-line-bypass-seek-probe-ppo-0002.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1263.19,
+            "y": -3117.44
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 237,
+          "source_run": "ppo-first-visible-train-buffer-0001",
+          "visible_enemy_on_reset": true
+        },
+        "index": 2,
+        "name": "visible_contact_seek",
+        "note": "Fresh-reset visible-contact point from first-visible seek rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 82784606,
+          "y_fp": -204304576
+        },
+        "selected_index": 2,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 0.0,
+        "checkpoint_selection_score": 49.1466,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_seek": 256
+        },
+        "damage_delta": 15,
+        "done_count": 1,
+        "enemy_distance_delta": 1590.3802,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 1.5859,
+        "min_health": 91,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 22,
+        "positive_reward_steps": 234,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.0,
+        "route_attempt_steps": 0,
+        "route_failed_steps": 0,
+        "route_progress_units": 0.0,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 7,
+          "open_use_line": 246,
+          "recover_stuck": 2,
+          "seek_enemy": 1
+        },
+        "total_reward": 19.1466,
+        "visible_contact_distance_delta": 51.2786,
+        "visible_contact_progress_reward": 0.5126,
+        "visible_enemy_steps": 11
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-line-guarded-seek-probe-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-line-guarded-seek-probe-ppo-0000.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1263.19,
+            "y": -3117.44
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 237,
+          "source_run": "ppo-first-visible-train-buffer-0001",
+          "visible_enemy_on_reset": true
+        },
+        "index": 2,
+        "name": "visible_contact_seek",
+        "note": "Fresh-reset visible-contact point from first-visible seek rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 82784606,
+          "y_fp": -204304576
+        },
+        "selected_index": 2,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 0.0,
+        "checkpoint_selection_score": 15.4705,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_seek": 256
+        },
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 1483.5366,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 1.7656,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 72,
+        "positive_reward_steps": 184,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.0,
+        "route_attempt_steps": 0,
+        "route_failed_steps": 0,
+        "route_progress_units": 0.0,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 5,
+          "open_use_line": 245,
+          "seek_enemy": 6
+        },
+        "total_reward": 15.4705,
+        "visible_contact_distance_delta": 63.5159,
+        "visible_contact_progress_reward": 0.6351,
+        "visible_enemy_steps": 11
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-line-guarded-seek-probe-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-line-guarded-seek-probe-ppo-0001.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1263.19,
+            "y": -3117.44
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 237,
+          "source_run": "ppo-first-visible-train-buffer-0001",
+          "visible_enemy_on_reset": true
+        },
+        "index": 2,
+        "name": "visible_contact_seek",
+        "note": "Fresh-reset visible-contact point from first-visible seek rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 82784606,
+          "y_fp": -204304576
+        },
+        "selected_index": 2,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 0.0,
+        "checkpoint_selection_score": 79.5842,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_seek": 256
+        },
+        "damage_delta": 30,
+        "done_count": 1,
+        "enemy_distance_delta": 1310.6569,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 1.6719,
+        "min_health": 85,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 35,
+        "positive_reward_steps": 221,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.0,
+        "route_attempt_steps": 0,
+        "route_failed_steps": 0,
+        "route_progress_units": 0.0,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 12,
+          "open_use_line": 232,
+          "recover_stuck": 3,
+          "seek_enemy": 9
+        },
+        "total_reward": 19.5842,
+        "visible_contact_distance_delta": 92.7609,
+        "visible_contact_progress_reward": 0.9275,
+        "visible_enemy_steps": 18
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-line-guarded-seek-probe-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-line-guarded-seek-probe-ppo-0002.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1263.19,
+            "y": -3117.44
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 237,
+          "source_run": "ppo-first-visible-train-buffer-0001",
+          "visible_enemy_on_reset": true
+        },
+        "index": 2,
+        "name": "visible_contact_seek",
+        "note": "Fresh-reset visible-contact point from first-visible seek rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 82784606,
+          "y_fp": -204304576
+        },
+        "selected_index": 2,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 0.0,
+        "checkpoint_selection_score": 167.0458,
+        "contact_reward": 0.0,
+        "curriculum_stage_counts": {
+          "visible_contact_seek": 256
+        },
+        "damage_delta": 30,
+        "done_count": 1,
+        "enemy_distance_delta": 1553.3001,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 1,
+        "mean_action_mask_size": 1.6133,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 35,
+        "positive_reward_steps": 221,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.0,
+        "route_attempt_steps": 0,
+        "route_failed_steps": 0,
+        "route_progress_units": 0.0,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 4,
+          "open_use_line": 246,
+          "recover_stuck": 1,
+          "seek_enemy": 5
+        },
+        "total_reward": 32.0458,
+        "visible_contact_distance_delta": 51.2787,
+        "visible_contact_progress_reward": 0.5125,
+        "visible_enemy_steps": 11
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-context-seek-probe-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-context-seek-probe-ppo-0000.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1263.19,
+            "y": -3117.44
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 237,
+          "source_run": "ppo-first-visible-train-buffer-0001",
+          "visible_enemy_on_reset": true
+        },
+        "index": 2,
+        "name": "visible_contact_seek",
+        "note": "Fresh-reset visible-contact point from first-visible seek rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 82784606,
+          "y_fp": -204304576
+        },
+        "selected_index": 2,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 0.0,
+        "checkpoint_selection_score": 234.0726,
+        "contact_context_active_steps": 512,
+        "contact_reward": 0.0,
+        "contact_use_line_active_steps": 512,
+        "contact_use_line_close_steps": 385,
+        "contact_use_line_followthrough_steps": 488,
+        "curriculum_stage_counts": {
+          "visible_contact_seek": 512
+        },
+        "damage_delta": 51,
+        "done_count": 2,
+        "enemy_distance_delta": 2644.7867,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 1,
+        "mean_action_mask_size": 1.6699,
+        "mean_contact_use_line_age_norm": 0.0294,
+        "mean_contact_use_line_distance_norm": 0.0978,
+        "min_health": 91,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 18,
+        "positive_reward_steps": 494,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.0,
+        "route_attempt_steps": 0,
+        "route_failed_steps": 0,
+        "route_progress_units": 0.0,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 4,
+          "open_use_line": 501,
+          "recover_stuck": 1,
+          "seek_enemy": 6
+        },
+        "total_reward": 57.0726,
+        "visible_contact_distance_delta": 69.4691,
+        "visible_contact_progress_reward": 0.6946,
+        "visible_enemy_steps": 15
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-context-seek-probe-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-context-seek-probe-ppo-0001.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1263.19,
+            "y": -3117.44
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 237,
+          "source_run": "ppo-first-visible-train-buffer-0001",
+          "visible_enemy_on_reset": true
+        },
+        "index": 2,
+        "name": "visible_contact_seek",
+        "note": "Fresh-reset visible-contact point from first-visible seek rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 82784606,
+          "y_fp": -204304576
+        },
+        "selected_index": 2,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 49.7,
+        "checkpoint_selection_score": 485.8806,
+        "contact_context_active_steps": 512,
+        "contact_reward": 40.0,
+        "contact_use_line_active_steps": 457,
+        "contact_use_line_close_steps": 303,
+        "contact_use_line_followthrough_steps": 316,
+        "curriculum_stage_counts": {
+          "visible_contact_seek": 512
+        },
+        "damage_delta": 56,
+        "done_count": 1,
+        "enemy_distance_delta": -372.3035,
+        "fire_on_shootable_steps": 101,
+        "first_shootable_contacts": 2,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 2,
+        "mean_action_mask_size": 1.4668,
+        "mean_contact_use_line_age_norm": 0.0322,
+        "mean_contact_use_line_distance_norm": 0.0828,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 16,
+        "negative_reward_steps": 88,
+        "positive_reward_steps": 424,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.0,
+        "route_attempt_steps": 0,
+        "route_failed_steps": 0,
+        "route_progress_units": 0.0,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 117,
+        "skill_counts": {
+          "engage": 24,
+          "fire": 101,
+          "open_use_line": 337,
+          "recover_stuck": 9,
+          "retreat": 1,
+          "seek_enemy": 40
+        },
+        "total_reward": 139.3806,
+        "visible_contact_distance_delta": 220.3662,
+        "visible_contact_progress_reward": 2.2035,
+        "visible_enemy_steps": 135
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-context-seek-probe-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-context-seek-probe-ppo-0002.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1263.19,
+            "y": -3117.44
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 237,
+          "source_run": "ppo-first-visible-train-buffer-0001",
+          "visible_enemy_on_reset": true
+        },
+        "index": 2,
+        "name": "visible_contact_seek",
+        "note": "Fresh-reset visible-contact point from first-visible seek rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 82784606,
+          "y_fp": -204304576
+        },
+        "selected_index": 2,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 17.4938,
+        "checkpoint_selection_score": 299.7162,
+        "contact_context_active_steps": 512,
+        "contact_reward": 20.0,
+        "contact_use_line_active_steps": 475,
+        "contact_use_line_close_steps": 300,
+        "contact_use_line_followthrough_steps": 361,
+        "curriculum_stage_counts": {
+          "visible_contact_seek": 512
+        },
+        "damage_delta": 15,
+        "done_count": 2,
+        "enemy_distance_delta": 1785.9374,
+        "fire_on_shootable_steps": 35,
+        "first_shootable_contacts": 1,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 2,
+        "mean_action_mask_size": 1.623,
+        "mean_contact_use_line_age_norm": 0.0296,
+        "mean_contact_use_line_distance_norm": 0.1438,
+        "min_health": 85,
+        "missed_shootable_fire_steps": 3,
+        "negative_reward_steps": 79,
+        "positive_reward_steps": 432,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.1438,
+        "route_attempt_steps": 2,
+        "route_failed_steps": 1,
+        "route_progress_units": 17.3822,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 38,
+        "skill_counts": {
+          "engage": 32,
+          "fire": 35,
+          "open_use_line": 374,
+          "recover_stuck": 14,
+          "route_progression": 2,
+          "seek_enemy": 55
+        },
+        "total_reward": 80.3162,
+        "visible_contact_distance_delta": 241.2969,
+        "visible_contact_progress_reward": 2.4128,
+        "visible_enemy_steps": 77
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-context-seek-probe-buffer-0003.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-context-seek-probe-ppo-0003.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1263.19,
+            "y": -3117.44
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 237,
+          "source_run": "ppo-first-visible-train-buffer-0001",
+          "visible_enemy_on_reset": true
+        },
+        "index": 2,
+        "name": "visible_contact_seek",
+        "note": "Fresh-reset visible-contact point from first-visible seek rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 82784606,
+          "y_fp": -204304576
+        },
+        "selected_index": 2,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 64.177,
+        "checkpoint_selection_score": 480.8646,
+        "contact_context_active_steps": 512,
+        "contact_reward": 40.0,
+        "contact_use_line_active_steps": 351,
+        "contact_use_line_close_steps": 232,
+        "contact_use_line_followthrough_steps": 216,
+        "curriculum_stage_counts": {
+          "visible_contact_seek": 512
+        },
+        "damage_delta": 35,
+        "done_count": 1,
+        "enemy_distance_delta": 1292.4328,
+        "fire_on_shootable_steps": 130,
+        "first_shootable_contacts": 2,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 2,
+        "mean_action_mask_size": 1.7227,
+        "mean_contact_use_line_age_norm": 0.0559,
+        "mean_contact_use_line_distance_norm": 0.1229,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 20,
+        "negative_reward_steps": 36,
+        "positive_reward_steps": 476,
+        "records": 512,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.177,
+        "route_attempt_steps": 2,
+        "route_failed_steps": 0,
+        "route_progress_units": 17.7048,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 150,
+        "skill_counts": {
+          "engage": 45,
+          "fire": 130,
+          "open_use_line": 230,
+          "recover_stuck": 11,
+          "route_progression": 2,
+          "seek_enemy": 94
+        },
+        "total_reward": 165.8646,
+        "visible_contact_distance_delta": 176.3211,
+        "visible_contact_progress_reward": 1.7631,
+        "visible_enemy_steps": 163
+      },
+      "update_index": 3
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-context-round-robin-buffer-0000.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-context-round-robin-ppo-0000.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1283.85,
+            "y": -3121.04
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 47,
+          "source_run": "ppo-first-visible-train-buffer-0003",
+          "visible_enemy_on_reset": true
+        },
+        "index": 0,
+        "name": "visible_contact_fast",
+        "note": "Fresh-reset visible-contact point reached early by first-visible PPO curriculum.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84138436,
+          "y_fp": -204540457
+        },
+        "selected_index": 0,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 0.0,
+        "checkpoint_selection_score": 15.044,
+        "contact_context_active_steps": 256,
+        "contact_reward": 0.0,
+        "contact_use_line_active_steps": 256,
+        "contact_use_line_close_steps": 188,
+        "contact_use_line_followthrough_steps": 217,
+        "curriculum_stage_counts": {
+          "visible_contact_fast": 256
+        },
+        "damage_delta": 0,
+        "done_count": 1,
+        "enemy_distance_delta": 1414.1519,
+        "fire_on_shootable_steps": 0,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 1.5781,
+        "mean_contact_use_line_age_norm": 0.022,
+        "mean_contact_use_line_distance_norm": 0.1072,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 0,
+        "negative_reward_steps": 40,
+        "positive_reward_steps": 216,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.0,
+        "route_attempt_steps": 0,
+        "route_failed_steps": 0,
+        "route_progress_units": 0.0,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 0,
+        "skill_counts": {
+          "engage": 10,
+          "open_use_line": 221,
+          "recover_stuck": 10,
+          "seek_enemy": 15
+        },
+        "total_reward": 15.044,
+        "visible_contact_distance_delta": 90.2522,
+        "visible_contact_progress_reward": 0.9026,
+        "visible_enemy_steps": 15
+      },
+      "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-context-round-robin-buffer-0001.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-context-round-robin-ppo-0001.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1287.17,
+            "y": -3119.59
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 238,
+          "source_run": "ppo-first-visible-train-buffer-0000",
+          "visible_enemy_on_reset": true
+        },
+        "index": 1,
+        "name": "visible_contact_route",
+        "note": "Fresh-reset visible-contact point from first-visible route-progress rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 84355741,
+          "y_fp": -204445474
+        },
+        "selected_index": 1,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 20.75,
+        "checkpoint_selection_score": 303.6261,
+        "contact_context_active_steps": 256,
+        "contact_reward": 20.0,
+        "contact_use_line_active_steps": 173,
+        "contact_use_line_close_steps": 71,
+        "contact_use_line_followthrough_steps": 81,
+        "curriculum_stage_counts": {
+          "visible_contact_route": 256
+        },
+        "damage_delta": 20,
+        "done_count": 0,
+        "enemy_distance_delta": 497.8278,
+        "fire_on_shootable_steps": 42,
+        "first_shootable_contacts": 1,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 2,
+        "mean_action_mask_size": 2.043,
+        "mean_contact_use_line_age_norm": 0.0911,
+        "mean_contact_use_line_distance_norm": 0.2432,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 5,
+        "negative_reward_steps": 41,
+        "positive_reward_steps": 211,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.0,
+        "route_attempt_steps": 0,
+        "route_failed_steps": 0,
+        "route_progress_units": 0.0,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 47,
+        "skill_counts": {
+          "engage": 36,
+          "fire": 42,
+          "open_use_line": 85,
+          "recover_stuck": 3,
+          "seek_enemy": 90
+        },
+        "total_reward": 72.6261,
+        "visible_contact_distance_delta": 239.7825,
+        "visible_contact_progress_reward": 2.3975,
+        "visible_enemy_steps": 86
+      },
+      "update_index": 1
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-context-round-robin-buffer-0002.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-context-round-robin-ppo-0002.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "doom_units": {
+            "x": 1263.19,
+            "y": -3117.44
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": false,
+          "source_record_index": 237,
+          "source_run": "ppo-first-visible-train-buffer-0001",
+          "visible_enemy_on_reset": true
+        },
+        "index": 2,
+        "name": "visible_contact_seek",
+        "note": "Fresh-reset visible-contact point from first-visible seek rollout.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 82784606,
+          "y_fp": -204304576
+        },
+        "selected_index": 2,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 18.7,
+        "checkpoint_selection_score": 308.8649,
+        "contact_context_active_steps": 256,
+        "contact_reward": 20.0,
+        "contact_use_line_active_steps": 209,
+        "contact_use_line_close_steps": 113,
+        "contact_use_line_followthrough_steps": 119,
+        "curriculum_stage_counts": {
+          "visible_contact_seek": 256
+        },
+        "damage_delta": 25,
+        "done_count": 1,
+        "enemy_distance_delta": 588.4711,
+        "fire_on_shootable_steps": 38,
+        "first_shootable_contacts": 1,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 2,
+        "mean_action_mask_size": 1.7969,
+        "mean_contact_use_line_age_norm": 0.0171,
+        "mean_contact_use_line_distance_norm": 0.2068,
+        "min_health": 100,
+        "missed_shootable_fire_steps": 6,
+        "negative_reward_steps": 16,
+        "positive_reward_steps": 240,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.0,
+        "route_attempt_steps": 0,
+        "route_failed_steps": 0,
+        "route_progress_units": 0.0,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 44,
+        "skill_counts": {
+          "engage": 22,
+          "fire": 38,
+          "open_use_line": 125,
+          "recover_stuck": 5,
+          "seek_enemy": 66
+        },
+        "total_reward": 70.8649,
+        "visible_contact_distance_delta": 128.0177,
+        "visible_contact_progress_reward": 1.2799,
+        "visible_enemy_steps": 65
+      },
+      "update_index": 2
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-contact-context-round-robin-buffer-0003.jsonl",
+      "checkpoint_path": "agent_models/ppo/ppo-contact-context-round-robin-ppo-0003.pt",
+      "curriculum_stage": {
+        "evidence": {
+          "bridge_target": "shootable combat",
+          "damage_observed_with_heuristic": true,
+          "doom_units": {
+            "x": 3248,
+            "y": -3280
+          },
+          "fresh_reset_validated": true,
+          "shootable_target_on_reset": true
+        },
+        "index": 3,
+        "name": "combat_start",
+        "note": "Known shootable combat start used as the bridge target after visible-contact starts.",
+        "requires_progressed_state": false,
+        "reset_start": {
+          "ammo_bullets": 50,
+          "armor": 0,
+          "face_nearest_enemy": true,
+          "health": 100,
+          "x_fp": 212860928,
+          "y_fp": -214958080
+        },
+        "selected_index": 3,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_reward": 27.35,
+        "checkpoint_selection_score": 124.8176,
+        "contact_context_active_steps": 256,
+        "contact_reward": 0.0,
+        "contact_use_line_active_steps": 200,
+        "contact_use_line_close_steps": 76,
+        "contact_use_line_followthrough_steps": 137,
+        "curriculum_stage_counts": {
+          "combat_start": 256
+        },
+        "damage_delta": 34,
+        "done_count": 0,
+        "enemy_distance_delta": -32.7752,
+        "fire_on_shootable_steps": 55,
+        "first_shootable_contacts": 0,
+        "first_visible_contacts": 0,
+        "invalid_action_steps": 0,
+        "max_kills": 0,
+        "mean_action_mask_size": 1.6016,
+        "mean_contact_use_line_age_norm": 0.0139,
+        "mean_contact_use_line_distance_norm": 0.3236,
+        "min_health": 84,
+        "missed_shootable_fire_steps": 3,
+        "negative_reward_steps": 107,
+        "positive_reward_steps": 148,
+        "records": 256,
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 0.0,
+        "route_attempt_steps": 0,
+        "route_failed_steps": 0,
+        "route_progress_units": 0.0,
+        "route_reached_steps": 0,
+        "shootable_target_steps": 58,
+        "skill_counts": {
+          "engage": 16,
+          "fire": 55,
+          "open_use_line": 144,
+          "recover_stuck": 5,
+          "retreat": 4,
+          "seek_enemy": 32
+        },
+        "total_reward": 32.3176,
+        "visible_contact_distance_delta": -152.4684,
+        "visible_contact_progress_reward": -1.525,
+        "visible_enemy_steps": 233
+      },
+      "update_index": 3
+    }
+  ],
+  "ppo_eval_history": [
+    {
+      "baseline": "heuristic",
+      "baseline_result": {
+        "episodes": [
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 0,
+            "min_health": 100,
+            "seed": 7,
+            "steps": 96,
+            "steps_to_exit": 256,
+            "stuck_events": 0,
+            "total_reward": 3.976
+          }
+        ],
+        "result": {
+          "episode_count": 1,
+          "level_completion_rate": 0.0,
+          "mean_kills": 0.0,
+          "mean_steps_to_exit": 256.0,
+          "mean_stuck_events": 0.0,
+          "policy_id": "heuristic_skill",
+          "survival_rate": 1.0
+        }
+      },
+      "candidate": {
+        "episodes": [
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 0,
+            "min_health": 100,
+            "seed": 7,
+            "steps": 70,
+            "steps_to_exit": 256,
+            "stuck_events": 0,
+            "total_reward": 3.0841
+          }
+        ],
+        "result": {
+          "episode_count": 1,
+          "level_completion_rate": 0.0,
+          "mean_kills": 0.0,
+          "mean_steps_to_exit": 256.0,
+          "mean_stuck_events": 0.0,
+          "policy_id": "ppo:agent_models/ppo/ppo-learning-smoke-ppo-0002.pt",
+          "survival_rate": 1.0
+        }
+      },
+      "checkpoint_path": "agent_models/ppo/ppo-learning-smoke-ppo-0002.pt",
+      "evaluated_at": "2026-06-27T13:08:10Z",
+      "promotion": {
+        "promote": true,
+        "reasons": []
+      },
+      "schema": "restfuldoom.ppo_eval.v1"
+    },
+    {
+      "baseline": "heuristic",
+      "baseline_result": {
+        "episodes": [
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 0,
+            "min_health": 100,
+            "seed": 7,
+            "steps": 96,
+            "steps_to_exit": 256,
+            "stuck_events": 0,
+            "total_reward": 3.976
+          }
+        ],
+        "result": {
+          "episode_count": 1,
+          "level_completion_rate": 0.0,
+          "mean_kills": 0.0,
+          "mean_reward": 3.976,
+          "mean_steps_to_exit": 256.0,
+          "mean_stuck_events": 0.0,
+          "policy_id": "heuristic_skill",
+          "survival_rate": 1.0
+        }
+      },
+      "candidate": {
+        "episodes": [
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 0,
+            "min_health": 100,
+            "seed": 7,
+            "steps": 67,
+            "steps_to_exit": 256,
+            "stuck_events": 0,
+            "total_reward": 4.817
+          }
+        ],
+        "result": {
+          "episode_count": 1,
+          "level_completion_rate": 0.0,
+          "mean_kills": 0.0,
+          "mean_reward": 4.817,
+          "mean_steps_to_exit": 256.0,
+          "mean_stuck_events": 0.0,
+          "policy_id": "ppo:agent_models/ppo/ppo-learning-smoke-ppo-0002.pt",
+          "survival_rate": 1.0
+        }
+      },
+      "checkpoint_path": "agent_models/ppo/ppo-learning-smoke-ppo-0002.pt",
+      "evaluated_at": "2026-06-27T13:09:22Z",
+      "promotion": {
+        "promote": true,
+        "reasons": []
+      },
+      "schema": "restfuldoom.ppo_eval.v1"
+    },
+    {
+      "baseline": "heuristic",
+      "baseline_result": {
+        "episodes": [
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 0,
+            "min_health": 100,
+            "seed": 7,
+            "steps": 96,
+            "steps_to_exit": 256,
+            "stuck_events": 0,
+            "total_reward": 3.976
+          }
+        ],
+        "result": {
+          "episode_count": 1,
+          "level_completion_rate": 0.0,
+          "mean_kills": 0.0,
+          "mean_reward": 3.976,
+          "mean_steps_to_exit": 256.0,
+          "mean_stuck_events": 0.0,
+          "policy_id": "heuristic_skill",
+          "survival_rate": 1.0
+        }
+      },
+      "candidate": {
+        "episodes": [
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 0,
+            "min_health": 100,
+            "seed": 7,
+            "steps": 68,
+            "steps_to_exit": 256,
+            "stuck_events": 0,
+            "total_reward": 2.1836
+          }
+        ],
+        "result": {
+          "episode_count": 1,
+          "level_completion_rate": 0.0,
+          "mean_kills": 0.0,
+          "mean_reward": 2.1836,
+          "mean_steps_to_exit": 256.0,
+          "mean_stuck_events": 0.0,
+          "policy_id": "ppo:agent_models/ppo/ppo-learning-smoke-ppo-0002.pt",
+          "survival_rate": 1.0
+        }
+      },
+      "checkpoint_path": "agent_models/ppo/ppo-learning-smoke-ppo-0002.pt",
+      "evaluated_at": "2026-06-27T13:10:27Z",
+      "promotion": {
+        "promote": false,
+        "reasons": [
+          "completion rate below promotion minimum",
+          "mean kills below promotion minimum",
+          "mean reward did not beat baseline"
+        ]
+      },
+      "schema": "restfuldoom.ppo_eval.v1"
+    },
+    {
+      "baseline": "heuristic",
+      "baseline_result": {
+        "episodes": [
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 0,
+            "min_health": 100,
+            "seed": 7,
+            "steps": 96,
+            "steps_to_exit": 256,
+            "stuck_events": 0,
+            "total_reward": 3.976
+          }
+        ],
+        "result": {
+          "episode_count": 1,
+          "level_completion_rate": 0.0,
+          "mean_kills": 0.0,
+          "mean_reward": 3.976,
+          "mean_steps_to_exit": 256.0,
+          "mean_stuck_events": 0.0,
+          "policy_id": "heuristic_skill",
+          "survival_rate": 1.0
+        }
+      },
+      "candidate": {
+        "episodes": [
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 0,
+            "min_health": 100,
+            "seed": 7,
+            "steps": 67,
+            "steps_to_exit": 256,
+            "stuck_events": 0,
+            "total_reward": 0.9062
+          }
+        ],
+        "result": {
+          "episode_count": 1,
+          "level_completion_rate": 0.0,
+          "mean_kills": 0.0,
+          "mean_reward": 0.9062,
+          "mean_steps_to_exit": 256.0,
+          "mean_stuck_events": 0.0,
+          "policy_id": "ppo:agent_models/ppo/ppo-macro-smoke-ppo-0002.pt",
+          "survival_rate": 1.0
+        }
+      },
+      "checkpoint_path": "agent_models/ppo/ppo-macro-smoke-ppo-0002.pt",
+      "evaluated_at": "2026-06-27T13:12:09Z",
+      "promotion": {
+        "promote": false,
+        "reasons": [
+          "completion rate below promotion minimum",
+          "mean kills below promotion minimum",
+          "mean reward did not beat baseline"
+        ]
+      },
+      "schema": "restfuldoom.ppo_eval.v1"
+    },
+    {
+      "baseline": "heuristic",
+      "baseline_result": {
+        "episodes": [
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 0,
+            "min_health": 100,
+            "seed": 7,
+            "steps": 197,
+            "steps_to_exit": 512,
+            "stuck_events": 0,
+            "total_reward": 3.989
+          }
+        ],
+        "result": {
+          "episode_count": 1,
+          "level_completion_rate": 0.0,
+          "mean_kills": 0.0,
+          "mean_reward": 3.989,
+          "mean_steps_to_exit": 512.0,
+          "mean_stuck_events": 0.0,
+          "policy_id": "heuristic_skill",
+          "survival_rate": 1.0
+        }
+      },
+      "candidate": {
+        "episodes": [
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 0,
+            "min_health": 100,
+            "seed": 7,
+            "steps": 197,
+            "steps_to_exit": 512,
+            "stuck_events": 0,
+            "total_reward": 3.0822
+          }
+        ],
+        "result": {
+          "episode_count": 1,
+          "level_completion_rate": 0.0,
+          "mean_kills": 0.0,
+          "mean_reward": 3.0822,
+          "mean_steps_to_exit": 512.0,
+          "mean_stuck_events": 0.0,
+          "policy_id": "ppo:agent_models/ppo/ppo-bc-live-smoke-ppo-0004.pt",
+          "survival_rate": 1.0
+        }
+      },
+      "checkpoint_path": "agent_models/ppo/ppo-bc-live-smoke-ppo-0004.pt",
+      "evaluated_at": "2026-06-27T13:19:37Z",
+      "promotion": {
+        "promote": false,
+        "reasons": [
+          "completion rate below promotion minimum",
+          "mean kills below promotion minimum",
+          "mean reward did not beat baseline"
+        ]
+      },
+      "schema": "restfuldoom.ppo_eval.v1"
+    },
+    {
+      "baseline": "random",
+      "baseline_result": {
+        "episodes": [
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 1,
+            "min_health": 82,
+            "seed": 7,
+            "steps": 116,
+            "steps_to_exit": 128,
+            "stuck_events": 0,
+            "total_reward": 40.7339
+          },
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 1,
+            "min_health": 65,
+            "seed": 8,
+            "steps": 122,
+            "steps_to_exit": 128,
+            "stuck_events": 0,
+            "total_reward": 42.4058
+          },
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 1,
+            "min_health": 80,
+            "seed": 9,
+            "steps": 128,
+            "steps_to_exit": 128,
+            "stuck_events": 0,
+            "total_reward": 42.0699
+          }
+        ],
+        "result": {
+          "episode_count": 3,
+          "level_completion_rate": 0.0,
+          "mean_kills": 1.0,
+          "mean_reward": 41.736533333333334,
+          "mean_steps_to_exit": 128.0,
+          "mean_stuck_events": 0.0,
+          "policy_id": "random_skill",
+          "survival_rate": 1.0
+        }
+      },
+      "candidate": {
+        "episodes": [
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 1,
+            "min_health": 65,
+            "seed": 7,
+            "steps": 114,
+            "steps_to_exit": 128,
+            "stuck_events": 81,
+            "total_reward": 72.254
+          },
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 1,
+            "min_health": 65,
+            "seed": 8,
+            "steps": 122,
+            "steps_to_exit": 128,
+            "stuck_events": 81,
+            "total_reward": 68.0185
+          },
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 1,
+            "min_health": 80,
+            "seed": 9,
+            "steps": 128,
+            "steps_to_exit": 128,
+            "stuck_events": 81,
+            "total_reward": 72.9148
+          }
+        ],
+        "result": {
+          "episode_count": 3,
+          "level_completion_rate": 0.0,
+          "mean_kills": 1.0,
+          "mean_reward": 71.06243333333333,
+          "mean_steps_to_exit": 128.0,
+          "mean_stuck_events": 81.0,
+          "policy_id": "ppo:agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0007.pt",
+          "survival_rate": 1.0
+        }
+      },
+      "checkpoint_path": "agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0007.pt",
+      "evaluated_at": "2026-06-27T14:05:00Z",
+      "promotion": {
+        "promote": false,
+        "reasons": [
+          "stuck events regressed"
+        ]
+      },
+      "schema": "restfuldoom.ppo_eval.v1"
+    },
+    {
+      "baseline": "random",
+      "baseline_result": {
+        "episodes": [
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 1,
+            "min_health": 82,
+            "seed": 7,
+            "steps": 116,
+            "steps_to_exit": 128,
+            "stuck_events": 0,
+            "total_reward": 40.7339
+          },
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 1,
+            "min_health": 65,
+            "seed": 8,
+            "steps": 122,
+            "steps_to_exit": 128,
+            "stuck_events": 0,
+            "total_reward": 42.4058
+          },
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 1,
+            "min_health": 80,
+            "seed": 9,
+            "steps": 128,
+            "steps_to_exit": 128,
+            "stuck_events": 0,
+            "total_reward": 42.0699
+          }
+        ],
+        "result": {
+          "episode_count": 3,
+          "level_completion_rate": 0.0,
+          "mean_kills": 1.0,
+          "mean_reward": 41.736533333333334,
+          "mean_steps_to_exit": 128.0,
+          "mean_stuck_events": 0.0,
+          "policy_id": "random_skill",
+          "survival_rate": 1.0
+        }
+      },
+      "candidate": {
+        "episodes": [
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 1,
+            "min_health": 65,
+            "seed": 7,
+            "steps": 114,
+            "steps_to_exit": 128,
+            "stuck_events": 0,
+            "total_reward": 72.2087
+          },
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 1,
+            "min_health": 65,
+            "seed": 8,
+            "steps": 122,
+            "steps_to_exit": 128,
+            "stuck_events": 0,
+            "total_reward": 67.4557
+          },
+          {
+            "death": false,
+            "done_reason": "max_steps",
+            "level_completed": false,
+            "max_kills": 1,
+            "min_health": 80,
+            "seed": 9,
+            "steps": 128,
+            "steps_to_exit": 128,
+            "stuck_events": 0,
+            "total_reward": 72.9148
+          }
+        ],
+        "result": {
+          "episode_count": 3,
+          "level_completion_rate": 0.0,
+          "mean_kills": 1.0,
+          "mean_reward": 70.85973333333332,
+          "mean_steps_to_exit": 128.0,
+          "mean_stuck_events": 0.0,
+          "policy_id": "ppo:agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0007.pt",
+          "survival_rate": 1.0
+        }
+      },
+      "checkpoint_path": "agent_models/ppo/ppo-tight-mask-independent-combat-start-smoke-ppo-0007.pt",
+      "evaluated_at": "2026-06-27T14:05:55Z",
+      "promotion": {
+        "promote": true,
+        "reasons": []
+      },
+      "schema": "restfuldoom.ppo_eval.v1"
     }
   ],
   "ppo_policy": {
-    "buffer_path": "trajectories/ppo/ppo-learning-smoke-buffer-0002.jsonl",
-    "checkpoint_path": "agent_models/ppo/ppo-learning-smoke-ppo-0002.pt",
+    "buffer_path": "trajectories/ppo/ppo-contact-context-round-robin-buffer-0003.jsonl",
+    "checkpoint_path": "agent_models/ppo/ppo-contact-context-round-robin-ppo-0003.pt",
+    "curriculum": {
+      "mode": "round_robin",
+      "name": "e1m1-contact-to-combat",
+      "schema": "restfuldoom.ppo_curriculum.v1",
+      "seed": 7,
+      "stages": [
+        {
+          "evidence": {
+            "doom_units": {
+              "x": 1283.85,
+              "y": -3121.04
+            },
+            "fresh_reset_validated": true,
+            "shootable_target_on_reset": false,
+            "source_record_index": 47,
+            "source_run": "ppo-first-visible-train-buffer-0003",
+            "visible_enemy_on_reset": true
+          },
+          "index": 0,
+          "name": "visible_contact_fast",
+          "note": "Fresh-reset visible-contact point reached early by first-visible PPO curriculum.",
+          "requires_progressed_state": false,
+          "reset_start": {
+            "ammo_bullets": 50,
+            "armor": 0,
+            "face_nearest_enemy": true,
+            "health": 100,
+            "x_fp": 84138436,
+            "y_fp": -204540457
+          },
+          "validated": true
+        },
+        {
+          "evidence": {
+            "doom_units": {
+              "x": 1287.17,
+              "y": -3119.59
+            },
+            "fresh_reset_validated": true,
+            "shootable_target_on_reset": false,
+            "source_record_index": 238,
+            "source_run": "ppo-first-visible-train-buffer-0000",
+            "visible_enemy_on_reset": true
+          },
+          "index": 1,
+          "name": "visible_contact_route",
+          "note": "Fresh-reset visible-contact point from first-visible route-progress rollout.",
+          "requires_progressed_state": false,
+          "reset_start": {
+            "ammo_bullets": 50,
+            "armor": 0,
+            "face_nearest_enemy": true,
+            "health": 100,
+            "x_fp": 84355741,
+            "y_fp": -204445474
+          },
+          "validated": true
+        },
+        {
+          "evidence": {
+            "doom_units": {
+              "x": 1263.19,
+              "y": -3117.44
+            },
+            "fresh_reset_validated": true,
+            "shootable_target_on_reset": false,
+            "source_record_index": 237,
+            "source_run": "ppo-first-visible-train-buffer-0001",
+            "visible_enemy_on_reset": true
+          },
+          "index": 2,
+          "name": "visible_contact_seek",
+          "note": "Fresh-reset visible-contact point from first-visible seek rollout.",
+          "requires_progressed_state": false,
+          "reset_start": {
+            "ammo_bullets": 50,
+            "armor": 0,
+            "face_nearest_enemy": true,
+            "health": 100,
+            "x_fp": 82784606,
+            "y_fp": -204304576
+          },
+          "validated": true
+        },
+        {
+          "evidence": {
+            "bridge_target": "shootable combat",
+            "damage_observed_with_heuristic": true,
+            "doom_units": {
+              "x": 3248,
+              "y": -3280
+            },
+            "fresh_reset_validated": true,
+            "shootable_target_on_reset": true
+          },
+          "index": 3,
+          "name": "combat_start",
+          "note": "Known shootable combat start used as the bridge target after visible-contact starts.",
+          "requires_progressed_state": false,
+          "reset_start": {
+            "ammo_bullets": 50,
+            "armor": 0,
+            "face_nearest_enemy": true,
+            "health": 100,
+            "x_fp": 212860928,
+            "y_fp": -214958080
+          },
+          "validated": true
+        }
+      ],
+      "start_index": 0
+    },
+    "curriculum_stage": {
+      "evidence": {
+        "bridge_target": "shootable combat",
+        "damage_observed_with_heuristic": true,
+        "doom_units": {
+          "x": 3248,
+          "y": -3280
+        },
+        "fresh_reset_validated": true,
+        "shootable_target_on_reset": true
+      },
+      "index": 3,
+      "name": "combat_start",
+      "note": "Known shootable combat start used as the bridge target after visible-contact starts.",
+      "requires_progressed_state": false,
+      "reset_start": {
+        "ammo_bullets": 50,
+        "armor": 0,
+        "face_nearest_enemy": true,
+        "health": 100,
+        "x_fp": 212860928,
+        "y_fp": -214958080
+      },
+      "selected_index": 3,
+      "validated": true
+    },
     "eval_history": [],
     "goal_preset": "combat",
     "metrics": {
-      "approx_kl": 0.0016795408446341753,
-      "entropy": 2.061277598142624,
-      "policy_loss": -0.0017217762069776654,
-      "value_loss": 0.06366535741835833
+      "approx_kl": 0.009312038465092579,
+      "entropy": 0.2436677689353625,
+      "policy_loss": -0.00536019013573726,
+      "value_loss": 8.281751076380411
     },
     "reward_config": {
+      "first_shootable_bonus": 20.0,
+      "first_visible_bonus": 0.0,
       "goal_preset": "combat",
       "kill_goal_bonus": 10.0,
       "level_complete_bonus": 100.0,
       "required_kills": 1,
       "target_x_fp": null,
-      "target_y_fp": null
+      "target_y_fp": null,
+      "terminate_on_first_shootable": false,
+      "terminate_on_first_visible": false,
+      "visible_contact_progress_reward": 0.01
     },
     "rollout_summary": {
-      "damage_delta": 0,
-      "done_count": 1,
-      "enemy_distance_delta": 338.0478,
-      "max_kills": 0,
-      "min_health": 100,
-      "negative_reward_steps": 84,
-      "positive_reward_steps": 157,
-      "records": 256,
-      "skill_counts": {
-        "engage": 39,
-        "fire": 30,
-        "open_use_line": 24,
-        "press_exit": 29,
-        "recover_stuck": 37,
-        "retreat": 35,
-        "route_progression": 32,
-        "seek_enemy": 30
+      "action_reward": 27.35,
+      "checkpoint_selection_score": 124.8176,
+      "contact_context_active_steps": 256,
+      "contact_reward": 0.0,
+      "contact_use_line_active_steps": 200,
+      "contact_use_line_close_steps": 76,
+      "contact_use_line_followthrough_steps": 137,
+      "curriculum_stage_counts": {
+        "combat_start": 256
       },
-      "total_reward": 3.3805
+      "damage_delta": 34,
+      "done_count": 0,
+      "enemy_distance_delta": -32.7752,
+      "fire_on_shootable_steps": 55,
+      "first_shootable_contacts": 0,
+      "first_visible_contacts": 0,
+      "invalid_action_steps": 0,
+      "max_kills": 0,
+      "mean_action_mask_size": 1.6016,
+      "mean_contact_use_line_age_norm": 0.0139,
+      "mean_contact_use_line_distance_norm": 0.3236,
+      "min_health": 84,
+      "missed_shootable_fire_steps": 3,
+      "negative_reward_steps": 107,
+      "positive_reward_steps": 148,
+      "records": 256,
+      "reset_warmup_steps": 0,
+      "reset_warmup_stop_reasons": {},
+      "reset_warmup_tics": 0,
+      "route_action_reward": 0.0,
+      "route_attempt_steps": 0,
+      "route_failed_steps": 0,
+      "route_progress_units": 0.0,
+      "route_reached_steps": 0,
+      "shootable_target_steps": 58,
+      "skill_counts": {
+        "engage": 16,
+        "fire": 55,
+        "open_use_line": 144,
+        "recover_stuck": 5,
+        "retreat": 4,
+        "seek_enemy": 32
+      },
+      "total_reward": 32.3176,
+      "visible_contact_distance_delta": -152.4684,
+      "visible_contact_progress_reward": -1.525,
+      "visible_enemy_steps": 233
     },
     "schema": "restfuldoom.ppo_policy.v1",
-    "update_index": 2
+    "update_index": 3
   },
   "schema": "restfuldoom.agent_memory.v1",
   "successes": [
@@ -7052,5 +12457,5 @@
       "visited_cells": 62
     }
   ],
-  "updated_at": "2026-06-27T13:00:24Z"
+  "updated_at": "2026-06-27T17:23:47Z"
 }
