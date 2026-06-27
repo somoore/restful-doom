@@ -12,6 +12,7 @@ from restfuldoom_agent.ppo_agent import (
     _checkpoint_selection_score,
     _checkpoint_resume_score,
     _checkpoint_resume_score_source,
+    _evaluate_checkpoint_curriculum,
     _redacted_restore_argv,
     _render_snapshot_restore_command,
     _policy_eval_selection_score,
@@ -31,7 +32,7 @@ from restfuldoom_agent.ppo import (
     RolloutBuffer,
     TORCH_AVAILABLE,
 )
-from restfuldoom_agent.ppo_eval import EpisodeEval, PolicyEval, decide_promotion
+from restfuldoom_agent.ppo_eval import EpisodeEval, PolicyEval, _aggregate, decide_promotion
 from restfuldoom_agent.snapshot_curriculum import load_snapshot_curriculum
 from restfuldoom_agent.schemas import (
     ACTION_SCHEMA,
@@ -1123,6 +1124,67 @@ def test_policy_eval_selection_score_rewards_cross_stage_competence():
     assert _policy_eval_selection_score(useful) > _policy_eval_selection_score(weak)
 
 
+def test_policy_eval_aggregates_earned_kills_not_restored_snapshot_kills():
+    inherited = EpisodeEval(
+        seed=7,
+        total_reward=0.0,
+        level_completed=False,
+        death=False,
+        max_kills=3,
+        min_health=100,
+        steps=64,
+        steps_to_exit=64,
+        stuck_events=0,
+        done_reason="max_steps",
+        start_kills=3,
+        kill_delta=0,
+        max_kill_gain=0,
+    )
+    earned = EpisodeEval(
+        seed=8,
+        total_reward=10.0,
+        level_completed=False,
+        death=False,
+        max_kills=4,
+        min_health=96,
+        steps=64,
+        steps_to_exit=64,
+        stuck_events=0,
+        done_reason="max_steps",
+        start_kills=3,
+        kill_delta=1,
+        max_kill_gain=1,
+        max_items=3,
+        start_items=2,
+        item_delta=1,
+        max_item_gain=1,
+        max_secrets=1,
+        start_secrets=1,
+        secret_delta=0,
+        max_secret_gain=0,
+        start_episode=1,
+        start_map=1,
+        end_episode=1,
+        end_map=1,
+        level_transition_delta=0,
+        reset_source="snapshot_restore",
+    )
+
+    inherited_eval = _aggregate("ppo:inherited", [inherited])
+    earned_eval = _aggregate("ppo:earned", [earned])
+
+    assert inherited_eval.result.mean_kills == 0.0
+    assert inherited_eval.episodes[0].start_kills == 3
+    assert inherited_eval.episodes[0].max_kill_gain == 0
+    assert earned_eval.result.mean_kills == 1.0
+    assert earned_eval.to_dict()["episodes"][0]["start_items"] == 2
+    assert earned_eval.to_dict()["episodes"][0]["max_item_gain"] == 1
+    assert earned_eval.to_dict()["episodes"][0]["reset_source"] == "snapshot_restore"
+    assert _policy_eval_selection_score(earned_eval) > _policy_eval_selection_score(
+        inherited_eval
+    )
+
+
 def test_checkpoint_resume_score_prefers_curriculum_eval_when_present():
     rollout_summary = {"checkpoint_selection_score": 500.0}
     checkpoint_eval = {
@@ -1134,6 +1196,129 @@ def test_checkpoint_resume_score_prefers_curriculum_eval_when_present():
     assert _checkpoint_resume_score_source(checkpoint_eval) == "checkpoint_curriculum_eval"
     assert _checkpoint_resume_score(rollout_summary, None) == 500.0
     assert _checkpoint_resume_score_source(None) == "rollout_summary"
+
+
+def test_checkpoint_curriculum_eval_restores_snapshot_stages(monkeypatch, tmp_path):
+    seen_configs = []
+
+    async def fake_evaluate_checkpoint(checkpoint_path, env_config, **kwargs):
+        env = SimpleNamespace(config=env_config)
+        kwargs["before_reset"](env, 0)
+        seen_configs.append(env.config)
+        return PolicyEval(
+            result=EvaluationResult(
+                policy_id=f"ppo:{checkpoint_path}",
+                level_completion_rate=0.0,
+                mean_kills=0.0,
+                survival_rate=1.0,
+                mean_steps_to_exit=16,
+                mean_stuck_events=0.0,
+                episode_count=1,
+                mean_reward=0.0,
+            ),
+            episodes=[
+                EpisodeEval(
+                    seed=7,
+                    total_reward=0.0,
+                    level_completed=False,
+                    death=False,
+                    max_kills=1,
+                    min_health=100,
+                    steps=16,
+                    steps_to_exit=16,
+                    stuck_events=0,
+                    done_reason="max_steps",
+                    start_kills=1,
+                    kill_delta=0,
+                    max_kill_gain=0,
+                )
+            ],
+        )
+
+    monkeypatch.setattr(
+        "restfuldoom_agent.ppo_agent.evaluate_checkpoint",
+        fake_evaluate_checkpoint,
+    )
+    args = SimpleNamespace(
+        endpoint="127.0.0.1:50051",
+        token=None,
+        agent_port=50051,
+        tls=False,
+        authority=None,
+        skill=2,
+        episode=1,
+        map=1,
+        seed=7,
+        run_id="eval-snapshot-test",
+        goal_preset="combat",
+        target_x_fp=None,
+        target_y_fp=None,
+        max_steps=700,
+        checkpoint_eval_max_steps=16,
+        checkpoint_eval_episodes=1,
+        checkpoint_eval_sample=False,
+        device="cpu",
+        level_complete_bonus=100.0,
+        kill_goal_bonus=10.0,
+        required_kills=1,
+        memory_path=tmp_path / "memory.json",
+        reset_timeout_seconds=5.0,
+        reset_attempts=2,
+        reset_start_angle_degrees=None,
+        reset_start_health=None,
+        reset_start_armor=None,
+        reset_start_ammo_bullets=None,
+        reset_start_face_nearest_enemy=False,
+        reset_warmup_steps=0,
+        reset_warmup_max_tics=0,
+        reset_warmup_until_visible=False,
+        reset_warmup_until_shootable=False,
+        first_visible_bonus=0.0,
+        first_shootable_bonus=0.0,
+        visible_contact_progress_reward=0.0,
+        terminate_on_first_visible=False,
+        terminate_on_first_shootable=False,
+        snapshot_restore_command=None,
+        snapshot_restore_cwd=None,
+        snapshot_restore_timeout_seconds=60.0,
+        snapshot_verify_restored_state=True,
+        snapshot_verify_tick_tolerance=35,
+        snapshot_verify_stream_tick=False,
+        snapshot_verify_position_tolerance_fp=160 * 65536,
+    )
+    curriculum = {
+        "schema": "restfuldoom.ppo_curriculum.v1",
+        "name": "snapshot-eval-test",
+        "mode": "fixed",
+        "start_index": 0,
+        "stages": [
+            {
+                "index": 0,
+                "name": "first_kill_snapshot",
+                "reset_mode": "snapshot",
+                "expected_state": {"kills": 1},
+                "snapshot": {"id": "slot-3", "slot": 3, "ref": "save_slot:3"},
+            }
+        ],
+    }
+
+    payload = asyncio.run(
+        _evaluate_checkpoint_curriculum(
+            tmp_path / "candidate.pt",
+            args,
+            curriculum=curriculum,
+            update_index=2,
+        )
+    )
+
+    assert payload["schema"] == "restfuldoom.ppo_checkpoint_curriculum_eval.v1"
+    assert seen_configs
+    config = seen_configs[0]
+    assert config.reset_mode == "snapshot"
+    assert config.snapshot == {"id": "slot-3", "slot": 3, "ref": "save_slot:3"}
+    assert config.curriculum_stage["snapshot_restore"]["api_method"] == "grpc_load_snapshot"
+    assert config.curriculum_stage["snapshot_restore"]["slot"] == 3
+    assert payload["stages"][0]["result"]["result"]["mean_kills"] == 0.0
 
 
 def test_curriculum_eval_best_replaces_legacy_rollout_best():

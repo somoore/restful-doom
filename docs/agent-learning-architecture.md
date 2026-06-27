@@ -706,6 +706,12 @@ Recent PPO evidence:
   (`kill_delta=1`, `max_kill_gain=1`). Snapshot summaries intentionally
   distinguish those earned fields from absolute `max_kills`, because absolute
   counters may be inherited from the loaded slot.
+- Checkpoint curriculum eval now uses the same reset path as PPO collection for
+  snapshot stages, so eval-scored best checkpoints cannot silently evaluate a
+  native-slot curriculum as fresh teleports. Eval episodes also record
+  start-vs-earned counters for kills, items, secrets, and map transitions. Live
+  smoke `ppo-snapshot-eval-fields-smoke` confirmed the `first-kill` slot
+  reported `start_kills=1`, `max_kills=1`, but earned `mean_kills=0.0`.
 
 ## Next Architecture Work
 

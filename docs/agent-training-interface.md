@@ -365,6 +365,15 @@ Absolute `max_kills` can be nonzero immediately after loading a progressed
 checkpoint selection scores use the earned fields. This keeps a checkpoint from
 looking better merely because a reset slot already contained kills.
 
+Checkpoint curriculum eval follows the same contract. Each eval stage is reset
+through `_env_config_for_stage()`, so snapshot stages restore native save slots
+or external artifacts instead of falling back to teleport-like fresh starts.
+Serialized `EpisodeEval` rows include `reset_source`, start/end episode/map,
+`start_kills`, absolute `max_kills`, earned `kill_delta`/`max_kill_gain`, and
+item/secret deltas/gains. The aggregate `mean_kills` used for eval selection is
+earned after reset; inherited snapshot kills remain visible only as start-state
+metadata.
+
 The validator checks the schema, stage structure, local snapshot files, and
 `sha256:` digests. PPO experiments can load an unvalidated manifest for plumbing
 smokes, but any promotion or export meant to resume in cloud should use a

@@ -860,11 +860,32 @@ async def _evaluate_checkpoint_curriculum(
     for stage_index, stage in enumerate(stages):
         stage_dict = dict(stage) if isinstance(stage, dict) else {}
         stage_name = str(stage_dict.get("name", f"stage_{stage_index}"))
-        env_config = replace(
-            _env_config_for_start(args, stage_dict.get("reset_start", {})),
+        env_config = _env_config_for_stage(
+            args,
+            curriculum,
+            stage_dict,
             run_id=f"{args.run_id}-checkpoint-eval-{update_index:04d}-{stage_name}",
             max_steps=args.checkpoint_eval_max_steps,
         )
+
+        def before_reset(env: DoomAgentEnv, episode_index: int) -> None:
+            active_stage = _prepare_stage_for_reset(
+                stage_dict,
+                args,
+                update_index=update_index,
+                reset_index=episode_index,
+            )
+            env.config = _env_config_for_stage(
+                args,
+                curriculum,
+                active_stage,
+                run_id=(
+                    f"{args.run_id}-checkpoint-eval-{update_index:04d}-"
+                    f"{stage_name}-episode{episode_index:03d}"
+                ),
+                max_steps=args.checkpoint_eval_max_steps,
+            )
+
         result = await evaluate_checkpoint(
             str(checkpoint_path),
             env_config,
@@ -873,6 +894,7 @@ async def _evaluate_checkpoint_curriculum(
             seed=args.seed + update_index * 1000 + stage_index * 100,
             device=args.device,
             deterministic=not args.checkpoint_eval_sample,
+            before_reset=before_reset,
         )
         stage_score = _policy_eval_selection_score(result)
         stage_records.append(

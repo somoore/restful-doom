@@ -37,6 +37,8 @@ The punchline is:
   PPO restore plumbing, and native agent save-slot restore are implemented.
 - Snapshot PPO summaries distinguish earned kill progress from absolute kill
   counters inherited from restored slots.
+- Checkpoint curriculum eval restores snapshot stages through the same native
+  slot/external restore path and serializes start-vs-earned counters.
 - Full independent PPO level completion from E1M1 spawn is not proven yet.
 - Next major unlock: capture real Hellbox/Shrink progressed-map snapshots and
   train/evaluate PPO through the promotion gate.
@@ -662,6 +664,10 @@ Snapshot-backed runs also report earned kill fields: `kill_delta`,
 `max_kill_gain`, `snapshot_kill_delta`, and `snapshot_max_kill_gain`. Use those
 fields, not absolute `max_kills`, when judging whether PPO earned a kill after
 restoring from a slot that may already contain prior kills.
+Checkpoint curriculum eval uses the same rule: `mean_kills` is earned after the
+eval reset, while each serialized episode keeps `start_kills`, absolute
+`max_kills`, `kill_delta`, `max_kill_gain`, `reset_source`, start/end map, and
+item/secret deltas so snapshot-stage wins are auditable.
 Topology-context runs report `topology_frontier_active_steps`,
 `mean_topology_current_cell_visits_norm`,
 `mean_topology_open_cell_min_visit_norm`, and
