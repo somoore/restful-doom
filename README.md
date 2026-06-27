@@ -33,8 +33,11 @@ The punchline is:
 - Behavior-cloned skill selector is trained from a successful trajectory, but
   this is supervised imitation rather than independent RL.
 - PPO combat-start curriculum can learn kills from reward feedback.
+- Snapshot-backed curriculum contracts, manifest builder, artifact validator,
+  and PPO restore plumbing are implemented.
 - Full independent PPO level completion from E1M1 spawn is not proven yet.
-- Next major unlock: snapshot-backed curriculum for progressed map states.
+- Next major unlock: capture real Hellbox/Shrink progressed-map snapshots and
+  train/evaluate PPO through the promotion gate.
 
 ## Architecture
 
@@ -544,6 +547,38 @@ progressed doors, enemy movement, and map mutations. Rollout rows include
 `snapshot_restore_count`, `snapshot_stage_counts`, and restore timing fields.
 Training-job exports include snapshot curriculum metadata and local snapshot
 artifacts when the manifest references files.
+
+Build a manifest directly from a trajectory before capturing real VM snapshots:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.snapshot_builder \
+    --trajectory trajectories/brain-train-68-current-success.jsonl \
+    --output trajectories/e1m1-snapshot-curriculum.json \
+    --name e1m1-progressed-bottlenecks \
+    --snapshot-dir snapshots \
+    --auto first-visible \
+    --auto first-shootable \
+    --auto first-damage
+```
+
+The builder records the source row, selected milestone, expected first restored
+state, reset-start evidence, and placeholder snapshot paths. If a local capture
+command is available, add `--capture-command` with placeholders such as
+`{snapshot_path_sh}`, `{snapshot_id_sh}`, `{stage_name_sh}`, `{record_index}`,
+and `{tick}`. After capture, validate the manifest and artifact digests:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.snapshot_curriculum \
+    trajectories/e1m1-snapshot-curriculum.json \
+    --validate \
+    --require-artifacts
+```
+
+`scripts/hellbox-agent-demo.sh snapshot-plan` wraps the same builder around the
+current Hellbox trajectory, and `snapshot-validate` runs the validator. Treat a
+manifest with missing artifacts as a planning document only; promotion-quality
+PPO runs should use a validated manifest with real snapshot files and
+`sha256:` digests.
 
 PPO rollout summaries include route diagnostics for spawn-to-contact work:
 `route_attempt_steps`, `route_reached_steps`, `route_failed_steps`,

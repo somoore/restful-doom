@@ -12,12 +12,18 @@ CONFIG="${ROLLOUT_CONFIG:-$ROOT/agent/examples/hellbox-rollout.json}"
 TRAJECTORY_JSONL="${TRAJECTORY_JSONL:-$ROOT/trajectories/hellbox-run.jsonl}"
 TOKEN_JSON="${HELLBOX_TOKEN_JSON:-$ROOT/trajectories/agent-doom-token.json}"
 DEMO_NOTES="${HELLBOX_DEMO_NOTES:-$ROOT/trajectories/hellbox-demo-notes.jsonl}"
+SNAPSHOT_CURRICULUM="${SNAPSHOT_CURRICULUM:-$ROOT/trajectories/snapshot-curriculum.json}"
+SNAPSHOT_DIR="${SNAPSHOT_DIR:-$ROOT/snapshots}"
+SNAPSHOT_INDEXES="${SNAPSHOT_INDEXES:-}"
+SNAPSHOT_AUTO="${SNAPSHOT_AUTO:-first-visible first-shootable first-damage}"
+SNAPSHOT_CAPTURE_COMMAND="${SNAPSHOT_CAPTURE_COMMAND:-}"
+SNAPSHOT_REQUIRE_ARTIFACTS="${SNAPSHOT_REQUIRE_ARTIFACTS:-0}"
 FREEZE_AFTER_SECONDS="${FREEZE_AFTER_SECONDS:-8}"
 THAW_AFTER_SECONDS="${THAW_AFTER_SECONDS:-3}"
 
 usage() {
     cat >&2 <<EOF
-usage: $(basename "$0") build|up|token|run|suspend|resume|validate|production-demo|loop
+usage: $(basename "$0") build|up|token|run|suspend|resume|validate|snapshot-plan|snapshot-validate|production-demo|loop
 
 Environment:
   HELLBOX_CLI             CLI binary. Default: shrink
@@ -30,6 +36,12 @@ Environment:
   HELLBOX_TOKEN_JSON      Token JSON path. Default: trajectories/agent-doom-token.json
   ROLLOUT_CONFIG          JSON rollout config. Default: agent/examples/hellbox-rollout.json
   TRAJECTORY_JSONL        Output trajectory path. Default: trajectories/hellbox-run.jsonl
+  SNAPSHOT_CURRICULUM     Snapshot curriculum manifest path.
+  SNAPSHOT_DIR            Snapshot artifact directory.
+  SNAPSHOT_INDEXES        Comma-separated zero-based trajectory rows to snapshot.
+  SNAPSHOT_AUTO           Space-separated auto selectors. Default: first-visible first-shootable first-damage
+  SNAPSHOT_CAPTURE_COMMAND Optional command template that writes {snapshot_path_sh}.
+  SNAPSHOT_REQUIRE_ARTIFACTS Set to 1 to require local snapshot files during validation.
 
 The run command uses raw token JSON from '$HELLBOX_CLI token --raw' unless
 endpoint/token overrides are present in the environment. The token command writes
@@ -165,6 +177,40 @@ print(
 PY
 }
 
+snapshot_plan() {
+    local args=(
+        --trajectory "$TRAJECTORY_JSONL"
+        --output "$SNAPSHOT_CURRICULUM"
+        --name "$NAME-progressed-bottlenecks"
+        --snapshot-dir "$SNAPSHOT_DIR"
+        --capsule "$NAME"
+    )
+    if [ -n "$SNAPSHOT_INDEXES" ]; then
+        args+=(--indexes "$SNAPSHOT_INDEXES")
+    fi
+    if [ -n "$SNAPSHOT_AUTO" ]; then
+        local selector
+        for selector in $SNAPSHOT_AUTO; do
+            args+=(--auto "$selector")
+        done
+    fi
+    if [ -n "$SNAPSHOT_CAPTURE_COMMAND" ]; then
+        args+=(--capture-command "$SNAPSHOT_CAPTURE_COMMAND")
+    fi
+    if [ "$SNAPSHOT_REQUIRE_ARTIFACTS" = "1" ]; then
+        args+=(--require-capture-artifacts)
+    fi
+    PYTHONPATH="$ROOT/agent" "$PYTHON_BIN" -m restfuldoom_agent.snapshot_builder "${args[@]}"
+}
+
+snapshot_validate() {
+    local args=("$SNAPSHOT_CURRICULUM" --validate)
+    if [ "$SNAPSHOT_REQUIRE_ARTIFACTS" = "1" ]; then
+        args+=(--require-artifacts)
+    fi
+    PYTHONPATH="$ROOT/agent" "$PYTHON_BIN" -m restfuldoom_agent.snapshot_curriculum "${args[@]}"
+}
+
 case "${1:-}" in
     build)
         RESTFUL_DOOM_CAPSULE_DIR="$ROOT/capsule" "$HELLBOX_CLI" build --name "$NAME"
@@ -196,6 +242,14 @@ case "${1:-}" in
     validate)
         validate_trajectory
         note "validate"
+        ;;
+    snapshot-plan)
+        snapshot_plan
+        note "snapshot-plan"
+        ;;
+    snapshot-validate)
+        snapshot_validate
+        note "snapshot-validate"
         ;;
     production-demo)
         "$0" build

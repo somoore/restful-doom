@@ -276,3 +276,33 @@ restore timing/exit metadata, expected state, and the actual first observed
 state. Training exports include `snapshot_curriculum`,
 `snapshot_restore_context`, and any local snapshot artifact files referenced by
 the manifest.
+
+The manifest can be generated from existing JSONL trajectory evidence before
+the VM artifacts exist:
+
+```bash
+PYTHONPATH=agent python -m restfuldoom_agent.snapshot_builder \
+    --trajectory trajectories/brain-train-68-current-success.jsonl \
+    --output trajectories/e1m1-snapshot-curriculum.json \
+    --name e1m1-progressed-bottlenecks \
+    --snapshot-dir snapshots \
+    --auto first-visible \
+    --auto first-shootable \
+    --auto first-damage
+```
+
+That output is a capture plan until every referenced artifact is present and
+validated:
+
+```bash
+PYTHONPATH=agent python -m restfuldoom_agent.snapshot_curriculum \
+    trajectories/e1m1-snapshot-curriculum.json \
+    --validate \
+    --require-artifacts
+```
+
+The validator checks the schema, stage structure, local snapshot files, and
+`sha256:` digests. PPO experiments can load an unvalidated manifest for plumbing
+smokes, but any promotion or export meant to resume in cloud should use a
+validated manifest so the training bundle carries real progressed-state
+artifacts rather than teleport approximations.

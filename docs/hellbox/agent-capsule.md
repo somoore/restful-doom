@@ -151,7 +151,8 @@ seeded replay until that field is true in a verified build.
 - Confirm the trajectory file grows with `state`, `reward`, `next_action`, `last_seen_tick`, `reconnect_attempts`, and `metadata` fields.
 - For PPO demos, confirm `trajectories/ppo/*.jsonl` contains rollout records with `obs`, `action`, `reward`, `done`, `value`, and `logprob`, and confirm `agent_models/ppo/*.pt` checkpoints are written.
 - For mixed-stage PPO demos, confirm rollout summaries include `curriculum_stage_counts` with more than one stage and JSONL rows preserve per-record `info.curriculum_stage.name`.
-- For snapshot-backed PPO demos, validate the `restfuldoom.snapshot_curriculum.v1` manifest, run with `--snapshot-curriculum` plus a local restore command, and confirm no snapshot row calls `ResetEpisode` after restore.
+- For snapshot-backed PPO demos, build a capture plan with `scripts/hellbox-agent-demo.sh snapshot-plan`, validate the `restfuldoom.snapshot_curriculum.v1` manifest with `snapshot-validate`, run with `--snapshot-curriculum` plus a local restore command, and confirm no snapshot row calls `ResetEpisode` after restore.
+- Treat a snapshot manifest with missing artifacts as planning-only. Set `SNAPSHOT_REQUIRE_ARTIFACTS=1` for promotion-quality validation so local snapshot files and `sha256:` digests are checked before training/export.
 - Confirm snapshot rollout rows include `info.reset_context.source == "snapshot_restore"` and summaries include `snapshot_restore_count`, `snapshot_stage_counts`, and restore timing fields.
 - Export a resume bundle after PPO training and confirm the manifest includes `ppo_checkpoints`, `observation_schema`, `action_schema`, `reward_config`, and `eval_history`.
 - For snapshot-backed training, also confirm the export manifest includes `snapshot_curriculum`, `snapshot_restore_context`, and any local `snapshot_artifacts`.
