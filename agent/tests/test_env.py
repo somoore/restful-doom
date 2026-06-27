@@ -687,6 +687,8 @@ def test_doom_agent_env_snapshot_reset_observes_without_episode_reset():
     assert reset_context["snapshot_id"] == "snap-1"
     assert reset_context["restore"]["returncode"] == 0
     assert reset_context["actual_first_state"]["tick"] == 700
+    assert reset_context["restored_state_verification"]["valid"] is True
+    assert reset_context["restored_state_verification"]["compared_fields"] == ["tick"]
 
 
 def test_doom_agent_env_snapshot_reset_can_load_server_slot():
@@ -731,6 +733,40 @@ def test_doom_agent_env_snapshot_reset_can_load_server_slot():
     assert reset_context["restore"]["api_method"] == "grpc_load_snapshot"
     assert reset_context["restore"]["returncode"] == 0
     assert reset_context["actual_first_state"]["tick"] == 800
+    assert reset_context["restored_state_verification"]["valid"] is True
+    assert reset_context["restored_state_verification"]["enabled"] is True
+
+
+def test_doom_agent_env_snapshot_reset_fails_on_unverified_server_slot():
+    first = _state(tick=900, enemy=True)
+    client = _FakeClient([first])
+    env = DoomAgentEnv(
+        DoomEnvConfig(
+            reset_mode="snapshot",
+            snapshot={
+                "id": "slot-3",
+                "ref": "save_slot:3",
+                "slot": 3,
+            },
+            curriculum_stage={
+                "name": "first_contact_snapshot",
+                "reset_mode": "snapshot",
+                "expected_state": {"tick": 800},
+            },
+            snapshot_verify_tick_tolerance=0,
+        ),
+        client=client,
+        controller=SkillController(),
+    )
+
+    async def run():
+        try:
+            await env.reset(seed=99)
+        finally:
+            await env.close()
+
+    with pytest.raises(RuntimeError, match="snapshot restored-state verification failed"):
+        asyncio.run(run())
 
 
 def test_doom_agent_env_aggregates_macro_action_tics():

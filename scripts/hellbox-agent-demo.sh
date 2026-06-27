@@ -19,13 +19,16 @@ SNAPSHOT_AUTO="${SNAPSHOT_AUTO:-first-visible first-shootable first-damage}"
 SNAPSHOT_SAVE_SLOT_BASE="${SNAPSHOT_SAVE_SLOT_BASE:-}"
 SNAPSHOT_SLOT="${SNAPSHOT_SLOT:-0}"
 SNAPSHOT_CAPTURE_COMMAND="${SNAPSHOT_CAPTURE_COMMAND:-}"
+SNAPSHOT_CAPTURE_MAX_STATES="${SNAPSHOT_CAPTURE_MAX_STATES:-12000}"
+SNAPSHOT_VERIFY_LOADS="${SNAPSHOT_VERIFY_LOADS:-0}"
 SNAPSHOT_REQUIRE_ARTIFACTS="${SNAPSHOT_REQUIRE_ARTIFACTS:-0}"
+BRAIN_MEMORY="${BRAIN_MEMORY:-$ROOT/agent_memory/e1m1.json}"
 FREEZE_AFTER_SECONDS="${FREEZE_AFTER_SECONDS:-8}"
 THAW_AFTER_SECONDS="${THAW_AFTER_SECONDS:-3}"
 
 usage() {
     cat >&2 <<EOF
-usage: $(basename "$0") build|up|token|run|suspend|resume|validate|snapshot-plan|snapshot-validate|snapshot-save|snapshot-load|production-demo|loop
+usage: $(basename "$0") build|up|token|run|suspend|resume|validate|snapshot-plan|snapshot-capture|snapshot-validate|snapshot-save|snapshot-load|production-demo|loop
 
 Environment:
   HELLBOX_CLI             CLI binary. Default: shrink
@@ -45,7 +48,10 @@ Environment:
   SNAPSHOT_SAVE_SLOT_BASE Optional first Doom agent save slot assigned to generated stages.
   SNAPSHOT_SLOT           Native Doom agent save slot for snapshot-save/load. Default: 0
   SNAPSHOT_CAPTURE_COMMAND Optional command template that writes {snapshot_path_sh}.
+  SNAPSHOT_CAPTURE_MAX_STATES Max brain rollout states for snapshot-capture. Default: 12000
+  SNAPSHOT_VERIFY_LOADS    Set to 1 to load each captured native slot after capture.
   SNAPSHOT_REQUIRE_ARTIFACTS Set to 1 to require local snapshot files during validation.
+  BRAIN_MEMORY             Structured brain memory path. Default: agent_memory/e1m1.json
 
 The run command uses raw token JSON from '$HELLBOX_CLI token --raw' unless
 endpoint/token overrides are present in the environment. The token command writes
@@ -218,6 +224,35 @@ snapshot_validate() {
     PYTHONPATH="$ROOT/agent" "$PYTHON_BIN" -m restfuldoom_agent.snapshot_curriculum "${args[@]}"
 }
 
+snapshot_capture() {
+    ensure_token_json
+    local args=(
+        --token-json "$TOKEN_JSON"
+        --agent-port "$AGENT_PORT"
+        --tls
+        --memory-path "$BRAIN_MEMORY"
+        --trajectory-jsonl "$TRAJECTORY_JSONL"
+        --output "$SNAPSHOT_CURRICULUM"
+        --name "$NAME-progressed-bottlenecks"
+        --snapshot-dir "$SNAPSHOT_DIR"
+        --capsule "$NAME"
+        --max-states "$SNAPSHOT_CAPTURE_MAX_STATES"
+    )
+    if [ -n "$SNAPSHOT_SAVE_SLOT_BASE" ]; then
+        args+=(--save-slot-base "$SNAPSHOT_SAVE_SLOT_BASE")
+    fi
+    if [ -n "$SNAPSHOT_AUTO" ]; then
+        local selector
+        for selector in $SNAPSHOT_AUTO; do
+            args+=(--auto "$selector")
+        done
+    fi
+    if [ "$SNAPSHOT_VERIFY_LOADS" = "1" ]; then
+        args+=(--verify-loads)
+    fi
+    PYTHONPATH="$ROOT/agent" "$PYTHON_BIN" -m restfuldoom_agent.snapshot_capture "${args[@]}"
+}
+
 snapshot_slot_command() {
     ensure_token_json
     PYTHONPATH="$ROOT/agent" "$PYTHON_BIN" -m restfuldoom_agent.snapshot_slots "$1" \
@@ -263,6 +298,10 @@ case "${1:-}" in
     snapshot-plan)
         snapshot_plan
         note "snapshot-plan"
+        ;;
+    snapshot-capture)
+        snapshot_capture
+        note "snapshot-capture"
         ;;
     snapshot-validate)
         snapshot_validate

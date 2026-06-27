@@ -569,6 +569,38 @@ add `--capture-command` with placeholders such as
 `{snapshot_path_sh}`, `{snapshot_id_sh}`, `{stage_name_sh}`, `{record_index}`,
 and `{tick}`. After capture, validate the manifest and artifact digests:
 
+For native in-process curriculum, capture real save slots while the structured
+brain drives Doom:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.snapshot_capture \
+    --token-json trajectories/agent-doom-token.json \
+    --tls \
+    --memory-path agent_memory/e1m1.json \
+    --trajectory-jsonl trajectories/snapshot-capture.jsonl \
+    --output trajectories/e1m1-snapshot-curriculum.json \
+    --name e1m1-progressed-bottlenecks \
+    --save-slot-base 3 \
+    --auto first-visible \
+    --auto first-shootable \
+    --auto first-damage \
+    --verify-loads
+```
+
+This command runs the deterministic structured brain, queues native
+`SaveSnapshot` requests at the first matching protobuf milestones, and writes a
+PPO-ready `restfuldoom.snapshot_curriculum.v1` manifest using
+`snapshot.slot` / `save_slot:N` refs. `--verify-loads` optionally loads each
+captured slot after the rollout and records whether the restored protobuf state
+matches the expected map/position/shootable-target evidence.
+
+During PPO training, snapshot resets verify the first restored protobuf state
+against the stage `expected_state` before collecting rollout records. The check
+compares only fields present in the manifest, including map/episode, health,
+kills/items/secrets, shootable/visible contact, and position/tick with
+tolerances. A mismatch fails the reset by default; `ppo_agent
+--no-snapshot-verify-restored-state` exists only for debugging broken manifests.
+
 ```
 PYTHONPATH=agent python -m restfuldoom_agent.snapshot_curriculum \
     trajectories/e1m1-snapshot-curriculum.json \
@@ -577,14 +609,16 @@ PYTHONPATH=agent python -m restfuldoom_agent.snapshot_curriculum \
 ```
 
 `scripts/hellbox-agent-demo.sh snapshot-plan` wraps the same builder around the
-current Hellbox trajectory, and `snapshot-validate` runs the validator. Set
+current Hellbox trajectory, `snapshot-capture` runs the live structured-brain
+capture command, and `snapshot-validate` runs the validator. Set
 `SNAPSHOT_SAVE_SLOT_BASE=3` to assign native Doom agent save slots to generated
-stages. Snapshot stages with `snapshot.slot` or `snapshot.ref: "save_slot:N"`
-can restore through the native gRPC `LoadSnapshot` RPC; stages without a slot
-still use `--snapshot-restore-command` for Hellbox/Shrink artifacts. Treat a
-manifest with missing artifacts as a planning document only; promotion-quality
-PPO runs should use a validated manifest with real snapshot files and
-`sha256:` digests or a verified native save-slot capture.
+or captured stages. Snapshot stages with `snapshot.slot` or
+`snapshot.ref: "save_slot:N"` can restore through the native gRPC
+`LoadSnapshot` RPC; stages without a slot still use
+`--snapshot-restore-command` for Hellbox/Shrink artifacts. Treat a manifest
+with missing artifacts as a planning document only; promotion-quality PPO runs
+should use a validated manifest with real snapshot files and `sha256:` digests
+or a verified native save-slot capture.
 
 Native save slots can be captured or restored directly against a running Doom
 agent endpoint:

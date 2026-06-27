@@ -379,6 +379,7 @@ class DoomAgentClient:
         reconnect: bool = True,
         backoff: BackoffConfig | None = None,
         on_reconnect: Any | None = None,
+        on_step_before_action_send: Any | None = None,
         rollout_metadata: dict[str, Any] | None = None,
     ) -> AsyncIterator[RolloutStep]:
         """Streams a policy rollout without retaining states in memory."""
@@ -417,8 +418,6 @@ class DoomAgentClient:
                         policy_started = time.perf_counter()
                         action = await policy.next_action(state)
                         policy_latency_ms = (time.perf_counter() - policy_started) * 1000.0
-                        if action is not None:
-                            await action_queue.put(action)
 
                         state_summary = summarize_state(state)
                         reward_summary = summarize_reward(transition)
@@ -446,6 +445,11 @@ class DoomAgentClient:
                             reconnect_attempts=reconnect_attempts,
                             metadata=metadata,
                         )
+
+                        await _maybe_call(on_step_before_action_send, step)
+
+                        if action is not None:
+                            await action_queue.put(action)
 
                         if trajectory is not None:
                             trajectory.write(

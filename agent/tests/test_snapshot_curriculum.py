@@ -1,7 +1,15 @@
 import json
 import sys
+import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 
+from restfuldoom_agent.snapshot_capture import (
+    SnapshotCaptureConfig,
+    SnapshotMilestoneTracker,
+    _capture_stage,
+)
+from restfuldoom_agent.env import _verify_snapshot_restored_state
 from restfuldoom_agent.snapshot_builder import (
     _redact_command,
     build_snapshot_curriculum_from_trajectory,
@@ -169,6 +177,137 @@ def test_snapshot_capture_command_redacts_tokens():
     assert "secret" not in redacted
     assert "abc" not in redacted
     assert "<redacted>" in redacted
+
+
+def test_native_snapshot_capture_tracker_groups_same_record_selectors():
+    tracker = SnapshotMilestoneTracker(
+        ("first-visible", "first-shootable", "first-damage")
+    )
+
+    first = tracker.observe(_trajectory_row(0, visible=False, shootable=False))
+    second = tracker.observe(
+        _trajectory_row(
+            1,
+            visible=True,
+            shootable=True,
+            damage_delta=20,
+        )
+    )
+    tracker.mark_captured(second)
+    third = tracker.observe(
+        _trajectory_row(
+            2,
+            visible=True,
+            shootable=True,
+            damage_delta=20,
+        )
+    )
+
+    assert first == []
+    assert second == ["first-visible", "first-shootable", "first-damage"]
+    assert tracker.complete is True
+    assert third == []
+
+
+def test_native_snapshot_capture_stage_queues_save_slot(tmp_path):
+    record = _trajectory_row(
+        2,
+        visible=True,
+        shootable=True,
+        skill="fire",
+        damage_delta=20,
+    )
+    config = SnapshotCaptureConfig(
+        output_path=tmp_path / "manifest.json",
+        name="native-capture",
+        snapshot_dir=tmp_path / "snapshots",
+        save_slot_base=4,
+    )
+    client = _FakeSnapshotClient()
+
+    stage = asyncio.run(
+        _capture_stage(
+            client,
+            config,
+            record,
+            selectors=["first-shootable", "first-damage"],
+            line_index=2,
+            order=0,
+            trajectory=tmp_path / "run.jsonl",
+            run_id="capture-test",
+        )
+    )
+
+    assert client.save_requests == [
+        {
+            "slot": 4,
+            "description": "first-shootable-2",
+            "run_id": "capture-test-slot-4",
+        }
+    ]
+    assert stage["snapshot"]["slot"] == 4
+    assert stage["snapshot"]["ref"] == "save_slot:4"
+    assert stage["capture"]["method"] == "grpc_save_snapshot"
+    assert stage["capture"]["save_queued"] is True
+    assert stage["evidence"]["selectors"] == ["first-shootable", "first-damage"]
+    assert stage["expected_state"]["damage_delta"] == 20
+
+
+def test_native_snapshot_load_verification_matches_progressed_state():
+    expected = {
+        "episode": 1,
+        "map": 1,
+        "position_fp": [100 * 65536, -200 * 65536, 0],
+        "shootable_target": True,
+    }
+    observed = {
+        "episode": 1,
+        "map": 1,
+        "position_fp": [101 * 65536, -200 * 65536, 0],
+        "combat": {"has_shootable_target": True},
+    }
+    wrong_map = {**observed, "map": 2}
+
+    assert _verify_snapshot_restored_state(
+        actual=observed,
+        expected=expected,
+        raw_state=_state(combat=True),
+        enabled=True,
+        tick_tolerance=35,
+        position_tolerance_fp=160 * 65536,
+    )["valid"]
+    assert not _verify_snapshot_restored_state(
+        actual=wrong_map,
+        expected=expected,
+        raw_state=_state(combat=True),
+        enabled=True,
+        tick_tolerance=35,
+        position_tolerance_fp=160 * 65536,
+    )["valid"]
+
+
+class _FakeSnapshotClient:
+    def __init__(self):
+        self.save_requests = []
+
+    async def save_snapshot(self, *, slot, description="", run_id=""):
+        self.save_requests.append(
+            {"slot": slot, "description": description, "run_id": run_id}
+        )
+        return SimpleNamespace(
+            accepted=True,
+            message="queued",
+            slot=slot,
+            save_queued=True,
+            load_queued=False,
+        )
+
+
+def _state(*, combat=False):
+    return SimpleNamespace(
+        enemies=[],
+        combat=SimpleNamespace(has_shootable_target=combat, target_is_enemy=combat),
+    )
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:

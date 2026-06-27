@@ -94,6 +94,9 @@ class DoomEnvConfig:
     curriculum_stage: dict[str, Any] | None = None
     reset_mode: str = "episode"
     snapshot: dict[str, Any] | None = None
+    snapshot_verify_restored_state: bool = True
+    snapshot_verify_tick_tolerance: int = 35
+    snapshot_verify_position_tolerance_fp: int = 160 * 65536
 
     def reward_goal(self) -> Goal:
         """Returns the reward goal for the configured preset."""
@@ -977,6 +980,7 @@ class DoomAgentEnv:
             if self.config.reset_mode == "episode" and self.config.reset_warmup_steps > 0
             else self.config.reset_mode,
         )
+        self._raise_if_snapshot_restore_unverified()
         self._reward_engine = RewardEngine(self.config.reward_goal())
         self._current_state = state
         self._start_level = (state.level.episode, state.level.map)
@@ -1001,6 +1005,18 @@ class DoomAgentEnv:
         if not isinstance(expected, dict):
             expected = {}
         reset_source = "snapshot_restore" if source == "snapshot" else source
+        actual = summarize_state(state)
+        verification = _verify_snapshot_restored_state(
+            actual=actual,
+            expected=expected,
+            raw_state=state,
+            enabled=reset_source == "snapshot_restore"
+            and bool(self.config.snapshot_verify_restored_state),
+            tick_tolerance=int(self.config.snapshot_verify_tick_tolerance),
+            position_tolerance_fp=int(
+                self.config.snapshot_verify_position_tolerance_fp
+            ),
+        )
         return {
             "schema": "restfuldoom.reset_context.v1",
             "source": reset_source,
@@ -1028,8 +1044,23 @@ class DoomAgentEnv:
                 if key in restore
             },
             "expected_state": dict(expected),
-            "actual_first_state": summarize_state(state),
+            "actual_first_state": actual,
+            "restored_state_verification": verification,
         }
+
+    def _raise_if_snapshot_restore_unverified(self) -> None:
+        if self._last_reset_context.get("source") != "snapshot_restore":
+            return
+        if not self.config.snapshot_verify_restored_state:
+            return
+        verification = self._last_reset_context.get("restored_state_verification", {})
+        if isinstance(verification, dict) and verification.get("valid"):
+            return
+        errors = []
+        if isinstance(verification, dict):
+            errors = list(verification.get("errors", []))
+        message = "; ".join(str(error) for error in errors) or "restored state mismatch"
+        raise RuntimeError(f"snapshot restored-state verification failed: {message}")
 
     async def _reset_from_snapshot(self) -> Any:
         """Reconnects and observes the current restored state without fresh-resetting Doom."""
@@ -1658,6 +1689,113 @@ def _player_xy_units(state: Any) -> tuple[float, float]:
         float(getattr(position, "x_fp", 0)) / 65536.0,
         float(getattr(position, "y_fp", 0)) / 65536.0,
     )
+
+
+def _verify_snapshot_restored_state(
+    *,
+    actual: dict[str, Any],
+    expected: dict[str, Any],
+    raw_state: Any,
+    enabled: bool,
+    tick_tolerance: int,
+    position_tolerance_fp: int,
+) -> dict[str, Any]:
+    """Verifies that a restored snapshot produced the expected first state."""
+    verification: dict[str, Any] = {
+        "schema": "restfuldoom.snapshot_restored_state_verification.v1",
+        "enabled": bool(enabled),
+        "valid": True,
+        "skipped": False,
+        "errors": [],
+        "compared_fields": [],
+        "tolerances": {
+            "tick": int(tick_tolerance),
+            "position_fp": int(position_tolerance_fp),
+        },
+    }
+    if not enabled:
+        verification["skipped"] = True
+        return verification
+    if not expected:
+        verification["skipped"] = True
+        return verification
+
+    errors: list[str] = []
+    compared: list[str] = []
+    for key in ("episode", "map", "health", "armor", "kills", "items", "secrets"):
+        if key not in expected:
+            continue
+        compared.append(key)
+        actual_value = actual.get(key)
+        expected_value = expected.get(key)
+        if _optional_int(actual_value) != _optional_int(expected_value):
+            errors.append(
+                f"{key} expected {expected_value!r} got {actual_value!r}"
+            )
+
+    if "tick" in expected:
+        compared.append("tick")
+        actual_tick = _optional_int(actual.get("tick"))
+        expected_tick = _optional_int(expected.get("tick"))
+        if actual_tick is None or expected_tick is None:
+            errors.append(
+                f"tick expected {expected.get('tick')!r} got {actual.get('tick')!r}"
+            )
+        elif abs(actual_tick - expected_tick) > tick_tolerance:
+            errors.append(
+                "tick drift "
+                f"{abs(actual_tick - expected_tick)} exceeds tolerance {tick_tolerance} "
+                f"(expected {expected_tick}, got {actual_tick})"
+            )
+
+    expected_position = expected.get("position_fp")
+    actual_position = actual.get("position_fp")
+    if isinstance(expected_position, list) and len(expected_position) >= 2:
+        compared.append("position_fp")
+        if not isinstance(actual_position, list) or len(actual_position) < 2:
+            errors.append(
+                f"position_fp expected {expected_position!r} got {actual_position!r}"
+            )
+        else:
+            dx = abs(int(actual_position[0]) - int(expected_position[0]))
+            dy = abs(int(actual_position[1]) - int(expected_position[1]))
+            if dx > position_tolerance_fp or dy > position_tolerance_fp:
+                errors.append(
+                    "position_fp drift exceeds tolerance "
+                    f"{position_tolerance_fp} (dx={dx}, dy={dy})"
+                )
+
+    if "visible_enemy" in expected:
+        compared.append("visible_enemy")
+        actual_visible = _has_visible_enemy(raw_state)
+        if actual_visible != bool(expected.get("visible_enemy")):
+            errors.append(
+                "visible_enemy expected "
+                f"{bool(expected.get('visible_enemy'))!r} got {actual_visible!r}"
+            )
+
+    if "shootable_target" in expected:
+        compared.append("shootable_target")
+        actual_shootable = _has_shootable_enemy(raw_state)
+        if actual_shootable != bool(expected.get("shootable_target")):
+            errors.append(
+                "shootable_target expected "
+                f"{bool(expected.get('shootable_target'))!r} got {actual_shootable!r}"
+            )
+
+    verification["compared_fields"] = compared
+    verification["errors"] = errors
+    verification["valid"] = not errors
+    return verification
+
+
+def _optional_int(value: object) -> int | None:
+    try:
+        if value is None:
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _distance_to_line_units(

@@ -308,9 +308,43 @@ the gRPC `LoadSnapshot` RPC and do not require an external restore command.
 Stages without a slot still use `--snapshot-restore-command` for
 Hellbox/Shrink or file-backed artifacts.
 
+Native save-slot manifests can also be captured directly from a live
+structured-brain rollout:
+
+```bash
+PYTHONPATH=agent python -m restfuldoom_agent.snapshot_capture \
+    --token-json trajectories/agent-doom-token.json \
+    --tls \
+    --memory-path agent_memory/e1m1.json \
+    --trajectory-jsonl trajectories/snapshot-capture.jsonl \
+    --output trajectories/e1m1-snapshot-curriculum.json \
+    --name e1m1-progressed-bottlenecks \
+    --save-slot-base 3 \
+    --auto first-visible \
+    --auto first-shootable \
+    --auto first-damage \
+    --verify-loads
+```
+
+The capture command uses the deterministic structured brain only to reach
+progressed states. It saves native `agentdoomN.dsg` slots at the first matching
+protobuf milestones and emits a normal `restfuldoom.snapshot_curriculum.v1`
+manifest. PPO still learns independently from reward feedback when the manifest
+is later passed to `ppo_agent --snapshot-curriculum`.
+
+Snapshot resets are verified by default. After an external restore or native
+`LoadSnapshot`, `DoomAgentEnv.reset()` observes the first protobuf state and
+compares it with the stage `expected_state`. The verifier compares only fields
+present in the manifest, with tolerances for tick and position drift, and writes
+`restfuldoom.snapshot_restored_state_verification.v1` into
+`reset_context.restored_state_verification`. PPO training fails the reset when
+verification is invalid unless `--no-snapshot-verify-restored-state` is set for
+debugging.
+
 Native slots can be managed with `python -m restfuldoom_agent.snapshot_slots
 save|load --slot N` or the Hellbox wrapper commands `snapshot-save` and
-`snapshot-load`.
+`snapshot-load`. The Hellbox wrapper `snapshot-capture` runs the live capture
+flow using the current token JSON and `SNAPSHOT_AUTO` selectors.
 
 The validator checks the schema, stage structure, local snapshot files, and
 `sha256:` digests. PPO experiments can load an unvalidated manifest for plumbing

@@ -276,6 +276,9 @@ async def evaluate(args: argparse.Namespace) -> dict[str, object]:
         visible_contact_progress_reward=args.visible_contact_progress_reward,
         terminate_on_first_visible=args.terminate_on_first_visible,
         terminate_on_first_shootable=args.terminate_on_first_shootable,
+        snapshot_verify_restored_state=args.snapshot_verify_restored_state,
+        snapshot_verify_tick_tolerance=args.snapshot_verify_tick_tolerance,
+        snapshot_verify_position_tolerance_fp=args.snapshot_verify_position_tolerance_fp,
     )
     candidate = await evaluate_checkpoint(
         str(args.eval_checkpoint),
@@ -1203,6 +1206,11 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         for context in snapshot_contexts
         if isinstance(context.get("restore", {}), dict)
     ]
+    snapshot_verifications = [
+        context.get("restored_state_verification", {})
+        for context in snapshot_contexts
+        if isinstance(context.get("restored_state_verification", {}), dict)
+    ]
     summary = {
         "records": len(records),
         "total_reward": round(sum(float(record.reward) for record in records), 4),
@@ -1327,6 +1335,13 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
             for context in snapshot_contexts
             if isinstance(context.get("restore", {}), dict)
             and int(context.get("restore", {}).get("returncode", 0)) != 0
+        ),
+        "snapshot_verification_count": len(snapshot_verifications),
+        "snapshot_verification_failures": sum(
+            1 for verification in snapshot_verifications if not verification.get("valid")
+        ),
+        "snapshot_verification_skipped": sum(
+            1 for verification in snapshot_verifications if verification.get("skipped")
         ),
         "snapshot_stage_counts": dict(sorted(snapshot_stage_counts.items())),
         "mean_snapshot_restore_seconds": round(
@@ -1475,6 +1490,19 @@ def main() -> None:
     )
     parser.add_argument("--snapshot-restore-cwd", type=Path)
     parser.add_argument("--snapshot-restore-timeout-seconds", type=float, default=60.0)
+    parser.add_argument(
+        "--no-snapshot-verify-restored-state",
+        dest="snapshot_verify_restored_state",
+        action="store_false",
+        default=True,
+        help="Disable expected_state checks after snapshot restore. Intended for debugging only.",
+    )
+    parser.add_argument("--snapshot-verify-tick-tolerance", type=int, default=35)
+    parser.add_argument(
+        "--snapshot-verify-position-tolerance-fp",
+        type=int,
+        default=160 * 65536,
+    )
     parser.add_argument(
         "--curriculum-mode",
         choices=["fixed", "round_robin", "progressive", "random"],
