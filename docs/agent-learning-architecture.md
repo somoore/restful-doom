@@ -128,6 +128,9 @@ and memory:
 - `fire` is available only when the combat probe reports a shootable enemy and
   the controller cooldown allows a shot.
 - `engage` is available when an enemy is visible.
+- `seek_enemy` is also available during visible-but-not-shootable contact, so
+  PPO can choose a different close/turn primitive instead of being forced into
+  `engage` when line-of-sight exists but the combat probe cannot fire.
 - `retreat` is available only for low health or close threats.
 - `seek_enemy` is available when no enemy is visible but memory/protobuf has a
   target to hunt.
@@ -504,6 +507,14 @@ Recent PPO evidence:
   `done_reason=first_visible_enemy`, and recorded `first_visible_contacts=1`
   plus `contact_reward=10.0`. It still had zero shootable-target steps, zero
   damage, and zero kills.
+- `ppo-first-visible-train`: repeated first-visible curriculum for four
+  updates. Three updates reached first visible contact, and the best update
+  reached it by record 47. Follow-up first-shootable probes still failed with
+  zero shootable-target steps, showing the next gap is contact-to-shootable
+  control rather than route-to-visible alone. Widening the visible-but-not-
+  shootable mask to include `seek_enemy` gives PPO another legal option at
+  contact, but live forced-action and widened-mask probes still did not reach
+  shootable contact.
 
 ## Next Architecture Work
 

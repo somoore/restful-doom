@@ -142,9 +142,11 @@ def test_skill_controller_observation_tracks_recent_route_failures():
 def test_skill_controller_action_mask_uses_affordances():
     controller = SkillController()
     combat_state = _state(enemy=True, combat=True)
+    visible_not_shootable_state = _state(enemy=True, combat=False)
     quiet_state = _state(enemy=False, combat=False)
 
     combat_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(combat_state)))
+    visible_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(visible_not_shootable_state)))
     quiet_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(quiet_state)))
 
     assert combat_mask["fire"]
@@ -153,6 +155,9 @@ def test_skill_controller_action_mask_uses_affordances():
     assert not combat_mask["seek_enemy"]
     assert not combat_mask["open_use_line"]
     assert not combat_mask["press_exit"]
+    assert not visible_mask["fire"]
+    assert visible_mask["engage"]
+    assert visible_mask["seek_enemy"]
     assert quiet_mask["route_progression"]
 
 

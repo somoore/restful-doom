@@ -380,6 +380,8 @@ class SkillController:
 
         if features.visible_enemies:
             mask["engage"] = True
+            if shootable is None and self.policy._select_known_enemy(features) is not None:
+                mask["seek_enemy"] = True
             nearest_visible = min(
                 (float(enemy["distance"]) for enemy in features.visible_enemies),
                 default=99999.0,
