@@ -91,6 +91,7 @@ class DoomEnvConfig:
     visible_contact_progress_reward: float = 0.0
     terminate_on_first_visible: bool = False
     terminate_on_first_shootable: bool = False
+    allowed_skills: tuple[str, ...] = ()
     curriculum: dict[str, Any] | None = None
     curriculum_stage: dict[str, Any] | None = None
     reset_mode: str = "episode"
@@ -1439,10 +1440,23 @@ class DoomAgentEnv:
     def action_mask(self) -> list[bool]:
         """Returns feasible PPO actions for the current state."""
         if self._current_state is None:
-            return [True for _ in SKILL_ACTIONS]
+            return self._filter_allowed_skills([True for _ in SKILL_ACTIONS])
         if hasattr(self.controller, "action_mask"):
-            return list(self.controller.action_mask(self._current_state))
-        return [True for _ in SKILL_ACTIONS]
+            return self._filter_allowed_skills(
+                list(self.controller.action_mask(self._current_state))
+            )
+        return self._filter_allowed_skills([True for _ in SKILL_ACTIONS])
+
+    def _filter_allowed_skills(self, mask: list[bool]) -> list[bool]:
+        allowed_skills = tuple(self.config.allowed_skills or ())
+        if not allowed_skills:
+            return mask
+        allowed = set(allowed_skills)
+        filtered = [
+            bool(value) and skill in allowed
+            for skill, value in zip(SKILL_ACTIONS, mask, strict=False)
+        ]
+        return filtered if any(filtered) else mask
 
     def _combat_action_reward(self, skill: str, had_shootable_target: bool) -> float:
         if had_shootable_target and skill == "fire":

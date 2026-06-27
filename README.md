@@ -305,6 +305,12 @@ The training API is:
   `ppo_best_checkpoint`. This is slower than rollout-only selection, but it
   helps avoid preserving a checkpoint that overfit one contact stage while
   regressing combat-start or another visible-contact start.
+- `--eval-checkpoint --checkpoint-eval-curriculum` runs the same cross-stage
+  curriculum eval without taking another training update.
+- `--allowed-skill <skill>` is an experiment-only allowlist applied after the
+  normal action mask. It can narrow probes to ladders such as
+  `close_visible_contact` plus `fire`, but it never makes a masked-out skill
+  feasible.
 - `--rollout-stage-mix round_robin|random` can rotate curriculum stages between
   episode resets inside one PPO rollout buffer. Pair it with
   `--rollout-stage-segment-tics <n>` for short experiments that need multiple
@@ -466,6 +472,40 @@ PYTHONPATH=agent python -m restfuldoom_agent.forced_option_eval \
     --max-steps 512 \
     --output trajectories/forced-option-report.json \
     --jsonl trajectories/forced-option-records.jsonl
+```
+
+When the forced primitive reaches a shootable state, add a handoff skill to test
+the full bridge without counting the expected post-shootable mask transition as
+an invalid forced action:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.forced_option_eval \
+    --endpoint 127.0.0.1:50051 \
+    --snapshot-curriculum trajectories/e1m1-snapshot-curriculum.json \
+    --stage-index 0 \
+    --force-skill close_visible_contact \
+    --shootable-handoff-skill fire \
+    --macro-steps 160 \
+    --max-steps 640
+```
+
+For PPO ladder probes, constrain the action surface before mixing broader
+curricula back in:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
+    --endpoint 127.0.0.1:50051 \
+    --snapshot-curriculum trajectories/e1m1-snapshot-curriculum.json \
+    --curriculum-mode fixed \
+    --curriculum-start-index 0 \
+    --resume-checkpoint agent_models/ppo/contact-checkpoint.pt \
+    --allowed-skill close_visible_contact \
+    --allowed-skill seek_enemy \
+    --allowed-skill fire \
+    --updates 2 \
+    --rollout-steps 192 \
+    --max-steps 640 \
+    --checkpoint-eval-curriculum
 ```
 
 For longer curriculum runs, add `--checkpoint-eval-curriculum` with small

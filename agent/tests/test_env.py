@@ -242,6 +242,27 @@ def test_skill_controller_action_mask_uses_affordances():
     assert quiet_mask["route_progression"]
 
 
+def test_doom_agent_env_allowed_skill_filter_narrows_action_mask():
+    env = DoomAgentEnv(
+        DoomEnvConfig(allowed_skills=("close_visible_contact", "fire")),
+        controller=SkillController(),
+    )
+
+    env._current_state = _state(enemy=True, combat=False)
+    visible_mask = dict(zip(SKILL_ACTIONS, env.action_mask()))
+    env._current_state = _state(enemy=True, combat=True)
+    combat_mask = dict(zip(SKILL_ACTIONS, env.action_mask()))
+    env._current_state = _state(enemy=False, combat=False)
+    quiet_mask = dict(zip(SKILL_ACTIONS, env.action_mask()))
+
+    assert visible_mask["close_visible_contact"]
+    assert not visible_mask["seek_enemy"]
+    assert not visible_mask["fire"]
+    assert combat_mask["fire"]
+    assert not combat_mask["close_visible_contact"]
+    assert quiet_mask["route_progression"]
+
+
 def test_skill_controller_contact_actions_use_visible_enemy_and_route_waypoint():
     controller = SkillController()
     state = _state(enemy=True, combat=False, enemy_distance=640, route=True, contact_use=True)

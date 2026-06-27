@@ -121,6 +121,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                 if resume_checkpoint is not None
                 else None,
                 "resume_migration": trainer.resume_migration,
+                "allowed_skills": list(args.allowed_skill or []),
             }
             trainer.save_checkpoint(
                 checkpoint_path,
@@ -136,6 +137,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     "visible_contact_progress_reward": args.visible_contact_progress_reward,
                     "terminate_on_first_visible": args.terminate_on_first_visible,
                     "terminate_on_first_shootable": args.terminate_on_first_shootable,
+                    "allowed_skills": list(args.allowed_skill or []),
                 },
                 extra=checkpoint_extra,
             )
@@ -162,6 +164,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                         "visible_contact_progress_reward": args.visible_contact_progress_reward,
                         "terminate_on_first_visible": args.terminate_on_first_visible,
                         "terminate_on_first_shootable": args.terminate_on_first_shootable,
+                        "allowed_skills": list(args.allowed_skill or []),
                     },
                     extra=checkpoint_extra,
                 )
@@ -182,6 +185,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                         "visible_contact_progress_reward": args.visible_contact_progress_reward,
                         "terminate_on_first_visible": args.terminate_on_first_visible,
                         "terminate_on_first_shootable": args.terminate_on_first_shootable,
+                        "allowed_skills": list(args.allowed_skill or []),
                     },
                     metrics=metrics,
                     rollout_summary=rollout_summary,
@@ -276,6 +280,7 @@ async def evaluate(args: argparse.Namespace) -> dict[str, object]:
         visible_contact_progress_reward=args.visible_contact_progress_reward,
         terminate_on_first_visible=args.terminate_on_first_visible,
         terminate_on_first_shootable=args.terminate_on_first_shootable,
+        allowed_skills=tuple(getattr(args, "allowed_skill", []) or ()),
         snapshot_verify_restored_state=args.snapshot_verify_restored_state,
         snapshot_verify_tick_tolerance=args.snapshot_verify_tick_tolerance,
         snapshot_verify_stream_tick=args.snapshot_verify_stream_tick,
@@ -326,6 +331,28 @@ async def evaluate(args: argparse.Namespace) -> dict[str, object]:
     }
 
 
+async def evaluate_curriculum(args: argparse.Namespace) -> dict[str, object]:
+    """Evaluates a PPO checkpoint across every active curriculum stage."""
+    if args.eval_checkpoint is None:
+        raise ValueError("--eval-checkpoint is required for curriculum eval")
+    reset_start = _resolve_reset_start(args)
+    curriculum = _build_training_curriculum(args, reset_start)
+    checkpoint_eval = await _evaluate_checkpoint_curriculum(
+        args.eval_checkpoint,
+        args,
+        curriculum=curriculum,
+        update_index=0,
+    )
+    return {
+        "schema": "restfuldoom.ppo_checkpoint_curriculum_eval_run.v1",
+        "checkpoint_path": str(args.eval_checkpoint),
+        "curriculum": curriculum,
+        "checkpoint_eval": checkpoint_eval,
+        "observation_schema": OBSERVATION_SCHEMA,
+        "action_schema": ACTION_SCHEMA,
+    }
+
+
 def _env_config_for_start(
     args: argparse.Namespace,
     reset_start: object,
@@ -368,6 +395,7 @@ def _env_config_for_start(
         visible_contact_progress_reward=args.visible_contact_progress_reward,
         terminate_on_first_visible=args.terminate_on_first_visible,
         terminate_on_first_shootable=args.terminate_on_first_shootable,
+        allowed_skills=tuple(getattr(args, "allowed_skill", []) or ()),
     )
 
 
@@ -921,6 +949,7 @@ async def _evaluate_checkpoint_curriculum(
         "episodes_per_stage": int(args.checkpoint_eval_episodes),
         "max_steps": int(args.checkpoint_eval_max_steps),
         "sample": bool(args.checkpoint_eval_sample),
+        "allowed_skills": list(getattr(args, "allowed_skill", []) or []),
         "stage_count": len(stage_records),
         "mean_stage_score": round(mean_score, 4),
         "worst_stage_score": round(worst_score, 4),
@@ -1659,6 +1688,16 @@ def main() -> None:
     parser.add_argument("--visible-contact-progress-reward", type=float, default=0.0)
     parser.add_argument("--terminate-on-first-visible", action="store_true")
     parser.add_argument("--terminate-on-first-shootable", action="store_true")
+    parser.add_argument(
+        "--allowed-skill",
+        action="append",
+        default=[],
+        choices=ACTION_SCHEMA["actions"],
+        help=(
+            "experiment-only skill allowlist applied after the normal action mask; "
+            "repeat to keep multiple skills"
+        ),
+    )
     parser.add_argument("--updates", type=int, default=1)
     parser.add_argument("--rollout-steps", type=int, default=512)
     parser.add_argument(
@@ -1712,7 +1751,8 @@ def main() -> None:
         action="store_true",
         help=(
             "After each PPO update, evaluate the checkpoint across every active "
-            "curriculum stage and use that aggregate score for best-checkpoint resume."
+            "curriculum stage and use that aggregate score for best-checkpoint resume. "
+            "With --eval-checkpoint, run the same curriculum eval without training."
         ),
     )
     parser.add_argument("--checkpoint-eval-episodes", type=int, default=1)
@@ -1725,7 +1765,10 @@ def main() -> None:
     parser.add_argument("--promotion-min-mean-kills", type=float, default=1.0)
     args = parser.parse_args()
     if args.eval_checkpoint:
-        print(json.dumps(asyncio.run(evaluate(args)), sort_keys=True))
+        if args.checkpoint_eval_curriculum:
+            print(json.dumps(asyncio.run(evaluate_curriculum(args)), sort_keys=True))
+        else:
+            print(json.dumps(asyncio.run(evaluate(args)), sort_keys=True))
     else:
         print(json.dumps(asyncio.run(train(args)), sort_keys=True))
 

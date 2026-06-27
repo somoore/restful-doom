@@ -49,17 +49,17 @@ def test_forced_option_eval_rejects_unknown_stage_index():
 
 def test_forced_option_eval_summarizes_forced_rollout():
     buffer = RolloutBuffer()
-    for index, (visible, shootable, allowed, skill) in enumerate(
+    for index, (visible, shootable, allowed, handoff, skill) in enumerate(
         [
-            (True, False, True, "close_visible_contact"),
-            (False, False, True, "close_visible_contact"),
-            (True, True, False, "fire"),
+            (True, False, True, False, "close_visible_contact"),
+            (False, False, True, False, "close_visible_contact"),
+            (True, True, False, True, "fire"),
         ]
     ):
         buffer.add(
             obs=[0.0],
-            action_mask=[False] * 9,
-            action=8,
+            action_mask=[False, True, False, False, False, False, False, False, allowed],
+            action=1 if handoff else 8,
             reward=0.0,
             done=index == 2,
             value=0.0,
@@ -68,6 +68,8 @@ def test_forced_option_eval_summarizes_forced_rollout():
                 "had_visible_enemy": visible,
                 "had_shootable_target": shootable,
                 "forced_action_allowed": allowed,
+                "selected_action_allowed": True,
+                "shootable_handoff_applied": handoff,
                 "skill": skill,
                 "decision": {
                     "skill": "contact_use_line" if index == 1 else skill,
@@ -90,6 +92,9 @@ def test_forced_option_eval_summarizes_forced_rollout():
     assert summary["records"] == 3
     assert summary["forced_allowed_steps"] == 2
     assert summary["forced_disallowed_steps"] == 1
+    assert summary["selected_disallowed_steps"] == 0
+    assert summary["shootable_handoff_steps"] == 1
+    assert summary["unhandled_forced_disallowed_steps"] == 0
     assert summary["lost_visible_contact_steps"] == 1
     assert summary["first_shootable_step"] == 2
     assert summary["actual_skill_counts"] == {
@@ -131,6 +136,9 @@ def test_forced_option_eval_comparison_keeps_failure_visible():
                 "forced_summary": {
                     "lost_visible_contact_steps": 2,
                     "forced_disallowed_steps": 0,
+                    "selected_disallowed_steps": 0,
+                    "shootable_handoff_steps": 3,
+                    "unhandled_forced_disallowed_steps": 0,
                     "stuck_steps": 1,
                     "recovery_steps": 0,
                 },
@@ -144,6 +152,9 @@ def test_forced_option_eval_comparison_keeps_failure_visible():
     assert rows[1]["visible_contact_distance_delta"] == 128.0
     assert rows[1]["enemy_distance_delta"] == 32.0
     assert rows[1]["contact_use_line_close_steps"] == 3
+    assert rows[1]["selected_disallowed_steps"] == 0
+    assert rows[1]["shootable_handoff_steps"] == 3
+    assert rows[1]["unhandled_forced_disallowed_steps"] == 0
     assert rows[1]["stuck_steps"] == 1
 
 
@@ -179,6 +190,7 @@ def test_forced_option_eval_arg_defaults():
                 "visible_contact_progress_reward": 0.001,
                 "terminate_on_first_visible": False,
                 "terminate_on_first_shootable": False,
+                "shootable_handoff_skill": "fire",
                 "no_snapshot_verify_restored_state": False,
                 "snapshot_verify_tick_tolerance": 35,
                 "snapshot_verify_stream_tick": False,
@@ -191,4 +203,5 @@ def test_forced_option_eval_arg_defaults():
 
     assert config.stage_indexes == (0, 2)
     assert config.forced_skills == ("close_visible_contact",)
+    assert config.shootable_handoff_skill == "fire"
     assert _skill_action_index("close_visible_contact") == 8

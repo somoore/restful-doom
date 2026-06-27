@@ -54,6 +54,7 @@ class ForcedOptionEvalConfig:
     visible_contact_progress_reward: float = 0.001
     terminate_on_first_visible: bool = False
     terminate_on_first_shootable: bool = False
+    shootable_handoff_skill: str | None = None
     snapshot_verify_restored_state: bool = True
     snapshot_verify_tick_tolerance: int = 35
     snapshot_verify_stream_tick: bool = False
@@ -117,17 +118,36 @@ async def _run_one(
             }
         for _ in range(max(1, int(config.macro_steps))):
             action_mask = env.action_mask()
-            transition = await env.step(action_index)
+            selected_action_index = action_index
+            selected_skill = forced_skill
+            forced_action_allowed = _action_allowed(action_mask, action_index)
+            handoff_applied = False
+            if (
+                not forced_action_allowed
+                and config.shootable_handoff_skill is not None
+            ):
+                handoff_index = _skill_action_index(config.shootable_handoff_skill)
+                if _action_allowed(action_mask, handoff_index):
+                    selected_action_index = handoff_index
+                    selected_skill = config.shootable_handoff_skill
+                    handoff_applied = True
+            transition = await env.step(selected_action_index)
             info = dict(transition.info)
             info["forced_skill"] = forced_skill
             info["forced_action_index"] = action_index
-            info["forced_action_allowed"] = (
-                0 <= action_index < len(action_mask) and bool(action_mask[action_index])
+            info["forced_action_allowed"] = forced_action_allowed
+            info["selected_forced_skill"] = selected_skill
+            info["selected_action_index"] = selected_action_index
+            info["selected_action_allowed"] = _action_allowed(
+                action_mask,
+                selected_action_index,
             )
+            info["shootable_handoff_skill"] = config.shootable_handoff_skill
+            info["shootable_handoff_applied"] = handoff_applied
             info["learning_trace"] = build_learning_trace(
                 obs=obs,
                 action_mask=action_mask,
-                action=action_index,
+                action=selected_action_index,
                 reward=transition.reward,
                 done=transition.done,
                 info=info,
@@ -135,7 +155,7 @@ async def _run_one(
             buffer.add(
                 obs=obs,
                 action_mask=action_mask,
-                action=action_index,
+                action=selected_action_index,
                 reward=transition.reward,
                 done=transition.done,
                 value=0.0,
@@ -251,6 +271,12 @@ def _forced_summary(buffer: RolloutBuffer) -> dict[str, Any]:
     allowed_steps = sum(
         1 for record in records if bool(record.info.get("forced_action_allowed"))
     )
+    selected_allowed_steps = sum(
+        1 for record in records if bool(record.info.get("selected_action_allowed"))
+    )
+    handoff_steps = sum(
+        1 for record in records if bool(record.info.get("shootable_handoff_applied"))
+    )
     visible_seen = False
     lost_visible_after_contact = 0
     first_shootable_step: int | None = None
@@ -293,6 +319,10 @@ def _forced_summary(buffer: RolloutBuffer) -> dict[str, Any]:
         "records": len(records),
         "forced_allowed_steps": allowed_steps,
         "forced_disallowed_steps": len(records) - allowed_steps,
+        "selected_allowed_steps": selected_allowed_steps,
+        "selected_disallowed_steps": len(records) - selected_allowed_steps,
+        "shootable_handoff_steps": handoff_steps,
+        "unhandled_forced_disallowed_steps": len(records) - allowed_steps - handoff_steps,
         "actual_skill_counts": dict(sorted(actual_skills.items())),
         "decision_skill_counts": dict(sorted(decision_skills.items())),
         "lost_visible_contact_steps": lost_visible_after_contact,
@@ -330,6 +360,15 @@ def _comparison(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 ),
                 "forced_disallowed_steps": int(
                     forced.get("forced_disallowed_steps", 0)
+                ),
+                "selected_disallowed_steps": int(
+                    forced.get("selected_disallowed_steps", 0)
+                ),
+                "shootable_handoff_steps": int(
+                    forced.get("shootable_handoff_steps", 0)
+                ),
+                "unhandled_forced_disallowed_steps": int(
+                    forced.get("unhandled_forced_disallowed_steps", 0)
                 ),
                 "stuck_steps": int(forced.get("stuck_steps", 0)),
                 "recovery_steps": int(forced.get("recovery_steps", 0)),
@@ -386,6 +425,10 @@ def _skill_action_index(skill: str) -> int:
         raise ValueError(f"unknown forced skill {skill!r}; choose one of: {choices}") from error
 
 
+def _action_allowed(action_mask: list[bool], action_index: int) -> bool:
+    return 0 <= action_index < len(action_mask) and bool(action_mask[action_index])
+
+
 def _curriculum_metadata(curriculum: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema": curriculum.get("schema"),
@@ -436,6 +479,7 @@ def _config_from_args(args: argparse.Namespace) -> ForcedOptionEvalConfig:
         visible_contact_progress_reward=args.visible_contact_progress_reward,
         terminate_on_first_visible=args.terminate_on_first_visible,
         terminate_on_first_shootable=args.terminate_on_first_shootable,
+        shootable_handoff_skill=args.shootable_handoff_skill,
         snapshot_verify_restored_state=not args.no_snapshot_verify_restored_state,
         snapshot_verify_tick_tolerance=args.snapshot_verify_tick_tolerance,
         snapshot_verify_stream_tick=args.snapshot_verify_stream_tick,
@@ -479,6 +523,14 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--visible-contact-progress-reward", type=float, default=0.001)
     parser.add_argument("--terminate-on-first-visible", action="store_true")
     parser.add_argument("--terminate-on-first-shootable", action="store_true")
+    parser.add_argument(
+        "--shootable-handoff-skill",
+        choices=SKILL_ACTIONS,
+        help=(
+            "optional skill to use when the forced skill becomes masked but the "
+            "handoff skill is currently allowed"
+        ),
+    )
     parser.add_argument("--no-snapshot-verify-restored-state", action="store_true")
     parser.add_argument("--snapshot-verify-tick-tolerance", type=int, default=35)
     parser.add_argument("--snapshot-verify-stream-tick", action="store_true")
