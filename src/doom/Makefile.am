@@ -74,6 +74,7 @@ deh_thing.c                                \
 deh_weapon.c
 
 FEATURE_REST_API_SOURCE_FILES =            \
+agent_bridge.c agent_bridge.h \
 api.c      api.h         \
 api_cJSON.c    api_cJSON.h \
 api_yuarel.c    api_yuarel.h \
@@ -86,4 +87,3 @@ api_obj_descriptions.c
 libdoom_a_SOURCES = $(SOURCE_FILES)                   \
                     $(FEATURE_DEHACKED_SOURCE_FILES)  \
                     $(FEATURE_REST_API_SOURCE_FILES)
-

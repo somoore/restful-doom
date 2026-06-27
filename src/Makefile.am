@@ -18,6 +18,13 @@ AM_CFLAGS = -I$(top_srcdir)/textscreen            \
 
 AM_LDFLAGS = 
 
+RUST_STATICLIB = $(top_builddir)/doom-grpc-server/target/release/libdoom_grpc_server.a
+RUST_SOURCES =                                                   \
+               $(top_srcdir)/doom-grpc-server/Cargo.toml         \
+               $(top_srcdir)/doom-grpc-server/build.rs           \
+               $(top_srcdir)/doom-grpc-server/src/lib.rs         \
+               $(top_srcdir)/proto/restfuldoom/v1/agent.proto
+
 # Common source files used by absolutely everything:
 
 COMMON_SOURCE_FILES=\
@@ -151,7 +158,14 @@ else
 @PROGRAM_PREFIX@doom_SOURCES=$(SOURCE_FILES_WITH_DEH)
 endif
 
-@PROGRAM_PREFIX@doom_LDADD = doom/libdoom.a $(EXTRA_LIBS)
+@PROGRAM_PREFIX@doom_DEPENDENCIES = doom/libdoom.a $(RUST_STATICLIB)
+@PROGRAM_PREFIX@doom_LDADD = doom/libdoom.a $(RUST_STATICLIB) $(EXTRA_LIBS)
+
+$(RUST_STATICLIB): $(RUST_SOURCES)
+	cd $(top_srcdir)/doom-grpc-server && \
+	    PROTOC="$(PROTOC)" \
+	    CARGO_TARGET_DIR="$(top_builddir)/doom-grpc-server/target" \
+	    "$(CARGO)" build --release
 
 $(SETUP_BINARIES): @PROGRAM_PREFIX@setup$(EXEEXT)
 	cp @PROGRAM_PREFIX@setup$(EXEEXT) $@
@@ -205,4 +219,3 @@ midiread : midifile.c
 MUS2MID_SOURCES = mus2mid.c memio.c z_native.c i_system.c m_argv.c m_misc.c
 mus2mid : $(MUS2MID_SOURCES)
 	$(CC) -DSTANDALONE -I$(top_builddir) $(CFLAGS) @LDFLAGS@ $(MUS2MID_SOURCES) -o $@
-

@@ -1,0 +1,84 @@
+#ifndef __AGENT_BRIDGE_H__
+#define __AGENT_BRIDGE_H__
+
+#include <stdint.h>
+
+#include "../d_ticcmd.h"
+
+#define AGENT_MAX_ENEMIES 128
+#define AGENT_MAX_OBJECTS 256
+
+typedef struct
+{
+    uint64_t tick;
+    int8_t forward_move;
+    int8_t side_move;
+    int16_t angle_turn;
+    uint8_t buttons;
+    uint8_t reserved[3];
+} agent_player_action_t;
+
+typedef struct
+{
+    int32_t id;
+    int32_t x_fp;
+    int32_t y_fp;
+    int32_t z_fp;
+    uint32_t angle_degrees;
+    int32_t height_fp;
+    int32_t health;
+    int32_t type_id;
+    int32_t internal_type;
+    uint32_t flags;
+    int32_t attacking_id;
+    int32_t distance_fp;
+    uint32_t line_of_sight;
+} agent_mobj_state_t;
+
+typedef struct
+{
+    agent_mobj_state_t object;
+    int32_t health;
+    int32_t armor;
+    int32_t kills;
+    int32_t items;
+    int32_t secrets;
+    int32_t ready_weapon;
+    uint32_t owned_weapons;
+    int32_t ammo_bullets;
+    int32_t ammo_shells;
+    int32_t ammo_cells;
+    int32_t ammo_rockets;
+    uint32_t key_cards;
+    uint32_t cheat_flags;
+    int32_t last_attacked_by;
+} agent_player_state_t;
+
+typedef struct
+{
+    uint64_t tick;
+    int32_t episode;
+    int32_t map;
+    int32_t skill;
+    int32_t level_time;
+    int32_t total_kills;
+    int32_t total_items;
+    int32_t total_secrets;
+    int32_t gamestate;
+    uint32_t player_active;
+    agent_player_state_t player;
+    uint32_t enemy_count;
+    uint32_t object_count;
+    agent_mobj_state_t enemies[AGENT_MAX_ENEMIES];
+    agent_mobj_state_t objects[AGENT_MAX_OBJECTS];
+} agent_game_state_snapshot_t;
+
+int restfuldoom_agent_init(uint16_t port);
+void restfuldoom_agent_publish_state(const agent_game_state_snapshot_t *snapshot);
+int restfuldoom_agent_take_action(agent_player_action_t *out_action);
+
+void AgentBridge_Init(int port);
+void AgentBridge_AfterTic(int completed_tic);
+void AgentBridge_ApplyTiccmd(ticcmd_t *cmd);
+
+#endif

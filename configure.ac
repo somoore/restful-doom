@@ -14,9 +14,15 @@ AC_CANONICAL_HOST
 orig_CFLAGS="$CFLAGS"
 
 AC_PROG_CC
-AC_PROG_CC_STDC
 AC_PROG_RANLIB
 AC_CHECK_PROG(HAVE_PYTHON, python, true, false)
+AC_PATH_PROG([CARGO], [cargo], [no])
+AC_PATH_PROG([RUSTC], [rustc], [no])
+AC_PATH_PROG([PROTOC], [protoc], [no])
+
+AS_IF([test "x$CARGO" = "xno"], [AC_MSG_ERROR([cargo is required for the Doom agent gRPC bridge])])
+AS_IF([test "x$RUSTC" = "xno"], [AC_MSG_ERROR([rustc is required for the Doom agent gRPC bridge])])
+AS_IF([test "x$PROTOC" = "xno"], [AC_MSG_ERROR([protoc is required for the Doom agent gRPC bridge])])
 
 OPT_LEVEL=2
 
@@ -166,6 +172,9 @@ AC_SUBST(SDLMIXER_LIBS)
 
 AC_SUBST(SDLNET_CFLAGS)
 AC_SUBST(SDLNET_LIBS)
+AC_SUBST(CARGO)
+AC_SUBST(RUSTC)
+AC_SUBST(PROTOC)
 
 AC_SUBST(ac_aux_dir)
 
@@ -199,4 +208,3 @@ src/setup/setup-manifest.xml
 textscreen/Makefile
 textscreen/examples/Makefile
 ])
-

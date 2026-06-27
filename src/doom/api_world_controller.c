@@ -49,7 +49,7 @@ cJSON *DescribeWorldState()
 
 // Controller methods
 
-api_response_t API_GetWorld(cJSON *req) {
+api_response_t API_GetWorld() {
   return (api_response_t) { 200, DescribeWorldState() };
 }
 

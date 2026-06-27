@@ -1,0 +1,9 @@
+.git
+**/target
+**/__pycache__
+**/*.pyc
+*.wad
+*.WAD
+*.lmp
+src/restful-doom
+src/restful-doom-setup

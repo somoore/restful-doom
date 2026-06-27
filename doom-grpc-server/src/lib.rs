@@ -1,0 +1,761 @@
+//! Provides the RESTful Doom gRPC bridge.
+//!
+//! The crate is compiled as a `staticlib` and linked into the C Doom binary.
+//! Doom calls the exported C ABI from the game thread with copied snapshots.
+//! The gRPC runtime runs on a background Tokio thread and communicates through
+//! bounded channels so the 35 Hz simulation loop never blocks on network I/O.
+
+// Rust guideline compliant 2026-02-21
+
+use std::collections::{HashMap, VecDeque};
+use std::net::SocketAddr;
+use std::sync::{Mutex, OnceLock};
+use std::thread;
+
+use mimalloc::MiMalloc;
+use prost::Message;
+use tokio::runtime::Builder;
+use tokio::sync::{mpsc, watch};
+use tokio_stream::wrappers::ReceiverStream;
+use tonic::{Request, Response, Status};
+use tracing::{event, Level};
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
+/// Generated protobuf types.
+pub mod proto {
+    tonic::include_proto!("restfuldoom.v1");
+}
+
+use proto::doom_agent_server::{DoomAgent, DoomAgentServer};
+use proto::{
+    Ammo, DoomKey, EnemyInfo, GameState, LevelInfo, MapObjectState, MouseInput, ObserveRequest,
+    PlayerAction, PlayerActionType, PlayerState, RawTiccmd, StateDelta, Vec3Fixed,
+};
+
+const DEFAULT_GRPC_PORT: u16 = 50_051;
+const ACTION_QUEUE_CAPACITY: usize = 256;
+const STATE_STREAM_CAPACITY: usize = 8;
+const MAX_ACTION_DURATION_TICS: u32 = 35;
+const DEFAULT_ACTION_AMOUNT: u32 = 10;
+const MAX_TIC_MOVE: i32 = 50;
+const MAX_TIC_TURN: i32 = i16::MAX as i32;
+const TURN_AMOUNT_SCALE: i32 = 64;
+const BT_ATTACK: u8 = 1;
+const BT_USE: u8 = 2;
+const BT_CHANGE: u8 = 4;
+const BT_WEAPONSHIFT: u32 = 3;
+
+static BRIDGE: OnceLock<Bridge> = OnceLock::new();
+
+#[derive(Debug)]
+struct Bridge {
+    latest_state: watch::Sender<GameState>,
+    action_rx: Mutex<mpsc::Receiver<AgentPlayerAction>>,
+}
+
+#[derive(Clone, Debug)]
+struct AgentRuntime {
+    latest_state: watch::Sender<GameState>,
+    action_tx: mpsc::Sender<AgentPlayerAction>,
+}
+
+#[tonic::async_trait]
+impl DoomAgent for AgentRuntime {
+    type GameSessionStream = ReceiverStream<Result<GameState, Status>>;
+    type ObserveStream = ReceiverStream<Result<GameState, Status>>;
+
+    /// Runs a bidirectional Doom agent stream.
+    async fn game_session(
+        &self,
+        request: Request<tonic::Streaming<PlayerAction>>,
+    ) -> Result<Response<Self::GameSessionStream>, Status> {
+        let mut inbound = request.into_inner();
+        let action_tx = self.action_tx.clone();
+
+        tokio::spawn(async move {
+            while let Ok(Some(action)) = inbound.message().await {
+                for command in player_action_to_commands(&action) {
+                    if action_tx.send(command).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok(Response::new(stream_states(
+            self.latest_state.subscribe(),
+            true,
+        )))
+    }
+
+    /// Streams Doom observations without taking actions.
+    async fn observe(
+        &self,
+        request: Request<ObserveRequest>,
+    ) -> Result<Response<Self::ObserveStream>, Status> {
+        let include_delta_state = request.into_inner().include_delta_state;
+        Ok(Response::new(stream_states(
+            self.latest_state.subscribe(),
+            include_delta_state,
+        )))
+    }
+}
+
+fn stream_states(
+    mut rx: watch::Receiver<GameState>,
+    include_delta_state: bool,
+) -> ReceiverStream<Result<GameState, Status>> {
+    let (tx, output) = mpsc::channel(STATE_STREAM_CAPACITY);
+
+    tokio::spawn(async move {
+        let mut previous: Option<GameState> = None;
+        loop {
+            if rx.changed().await.is_err() {
+                break;
+            }
+
+            let mut state = rx.borrow().clone();
+            if include_delta_state {
+                if let Some(last) = previous.as_ref() {
+                    state.delta_state = encode_delta(last, &state);
+                    state.has_delta_state = true;
+                }
+            }
+            previous = Some(state.clone());
+
+            if tx.send(Ok(state)).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    ReceiverStream::new(output)
+}
+
+fn encode_delta(previous: &GameState, current: &GameState) -> Vec<u8> {
+    let mut prior_enemy_ids = HashMap::with_capacity(previous.enemies.len());
+    for enemy in &previous.enemies {
+        if let Some(object) = &enemy.object {
+            prior_enemy_ids.insert(object.id, enemy);
+        }
+    }
+
+    let mut changed_enemies = Vec::new();
+    for enemy in &current.enemies {
+        let changed = enemy
+            .object
+            .as_ref()
+            .and_then(|object| prior_enemy_ids.remove(&object.id))
+            != Some(enemy);
+        if changed {
+            changed_enemies.push(*enemy);
+        }
+    }
+
+    let removed_enemy_ids = prior_enemy_ids.into_keys().collect();
+
+    let mut prior_object_ids = HashMap::with_capacity(previous.objects.len());
+    for object in &previous.objects {
+        prior_object_ids.insert(object.id, object);
+    }
+
+    let mut changed_objects = Vec::new();
+    for object in &current.objects {
+        let changed = prior_object_ids.remove(&object.id) != Some(object);
+        if changed {
+            changed_objects.push(*object);
+        }
+    }
+
+    let delta = StateDelta {
+        base_tick: previous.tick,
+        tick: current.tick,
+        player_changed: previous.player != current.player,
+        player: current.player,
+        changed_enemies,
+        removed_enemy_ids,
+        changed_objects,
+        removed_object_ids: prior_object_ids.into_keys().collect(),
+        level: current.level,
+        level_changed: previous.level != current.level,
+    };
+
+    delta.encode_to_vec()
+}
+
+fn player_action_to_commands(action: &PlayerAction) -> VecDeque<AgentPlayerAction> {
+    let duration = action
+        .duration_tics
+        .clamp(1, MAX_ACTION_DURATION_TICS)
+        .max(1);
+    let mut command = AgentPlayerAction {
+        tick: action.tick,
+        ..AgentPlayerAction::default()
+    };
+
+    apply_semantic_action(action.action(), action.amount, &mut command);
+
+    if let Some(raw) = action.raw.as_ref() {
+        apply_raw_ticcmd(raw, &mut command);
+    }
+
+    for key in &action.keys {
+        if key.pressed {
+            apply_key(key.key(), &mut command);
+        }
+    }
+
+    if let Some(mouse) = action.mouse.as_ref() {
+        apply_mouse(mouse, &mut command);
+    }
+
+    let mut commands = VecDeque::with_capacity(duration as usize);
+    for _ in 0..duration {
+        commands.push_back(command);
+    }
+    commands
+}
+
+fn apply_semantic_action(action: PlayerActionType, amount: u32, command: &mut AgentPlayerAction) {
+    let amount = if amount == 0 {
+        DEFAULT_ACTION_AMOUNT
+    } else {
+        amount
+    };
+    let movement = clamp_i32(amount as i32, -MAX_TIC_MOVE, MAX_TIC_MOVE);
+    let turn = clamp_i32(
+        (amount as i32) * TURN_AMOUNT_SCALE,
+        -MAX_TIC_TURN,
+        MAX_TIC_TURN,
+    );
+
+    match action {
+        PlayerActionType::ActionForward => add_forward(command, movement),
+        PlayerActionType::ActionBackward => add_forward(command, -movement),
+        PlayerActionType::ActionTurnLeft => add_turn(command, turn),
+        PlayerActionType::ActionTurnRight => add_turn(command, -turn),
+        PlayerActionType::ActionStrafeLeft => add_side(command, -movement),
+        PlayerActionType::ActionStrafeRight => add_side(command, movement),
+        PlayerActionType::ActionShoot => command.buttons |= BT_ATTACK,
+        PlayerActionType::ActionUse => command.buttons |= BT_USE,
+        PlayerActionType::ActionSwitchWeapon => {
+            let slot = amount.saturating_sub(1).min(7);
+            command.buttons |= BT_CHANGE | ((slot << BT_WEAPONSHIFT) as u8);
+        }
+        PlayerActionType::ActionUnspecified => {}
+    }
+}
+
+fn apply_raw_ticcmd(raw: &RawTiccmd, command: &mut AgentPlayerAction) {
+    add_forward(command, raw.forward_move);
+    add_side(command, raw.side_move);
+    add_turn(command, raw.angle_turn);
+    command.buttons |= raw.buttons as u8;
+}
+
+fn apply_key(key: DoomKey, command: &mut AgentPlayerAction) {
+    match key {
+        DoomKey::Forward => add_forward(command, 25),
+        DoomKey::Backward => add_forward(command, -25),
+        DoomKey::TurnLeft => add_turn(command, 640),
+        DoomKey::TurnRight => add_turn(command, -640),
+        DoomKey::StrafeLeft => add_side(command, -24),
+        DoomKey::StrafeRight => add_side(command, 24),
+        DoomKey::Shoot => command.buttons |= BT_ATTACK,
+        DoomKey::Use => command.buttons |= BT_USE,
+        DoomKey::Unspecified => {}
+    }
+}
+
+fn apply_mouse(mouse: &MouseInput, command: &mut AgentPlayerAction) {
+    add_turn(command, -mouse.turn.saturating_mul(8));
+    add_forward(command, mouse.forward);
+    command.buttons |= mouse.buttons as u8;
+}
+
+fn add_forward(command: &mut AgentPlayerAction, value: i32) {
+    command.forward_move = clamp_i32(
+        command.forward_move as i32 + value,
+        -MAX_TIC_MOVE,
+        MAX_TIC_MOVE,
+    ) as i8;
+}
+
+fn add_side(command: &mut AgentPlayerAction, value: i32) {
+    command.side_move = clamp_i32(
+        command.side_move as i32 + value,
+        -MAX_TIC_MOVE,
+        MAX_TIC_MOVE,
+    ) as i8;
+}
+
+fn add_turn(command: &mut AgentPlayerAction, value: i32) {
+    command.angle_turn = clamp_i32(
+        command.angle_turn as i32 + value,
+        -MAX_TIC_TURN,
+        MAX_TIC_TURN,
+    ) as i16;
+}
+
+fn clamp_i32(value: i32, min: i32, max: i32) -> i32 {
+    value.max(min).min(max)
+}
+
+fn state_from_snapshot(snapshot: &AgentGameStateSnapshot) -> GameState {
+    let enemy_count = (snapshot.enemy_count as usize).min(AGENT_MAX_ENEMIES);
+    let object_count = (snapshot.object_count as usize).min(AGENT_MAX_OBJECTS);
+
+    GameState {
+        tick: snapshot.tick,
+        player: Some(player_from_snapshot(
+            &snapshot.player,
+            snapshot.player_active != 0,
+        )),
+        enemies: snapshot.enemies[..enemy_count]
+            .iter()
+            .map(enemy_from_snapshot)
+            .collect(),
+        objects: snapshot.objects[..object_count]
+            .iter()
+            .map(object_from_snapshot)
+            .collect(),
+        level: Some(LevelInfo {
+            episode: snapshot.episode,
+            map: snapshot.map,
+            skill: snapshot.skill,
+            level_time: snapshot.level_time,
+            total_kills: snapshot.total_kills,
+            total_items: snapshot.total_items,
+            total_secrets: snapshot.total_secrets,
+            gamestate: snapshot.gamestate,
+        }),
+        delta_state: Vec::new(),
+        has_delta_state: false,
+    }
+}
+
+fn player_from_snapshot(snapshot: &AgentPlayerState, active: bool) -> PlayerState {
+    PlayerState {
+        object: Some(object_from_snapshot(&snapshot.object)),
+        health: snapshot.health,
+        armor: snapshot.armor,
+        kills: snapshot.kills,
+        items: snapshot.items,
+        secrets: snapshot.secrets,
+        ready_weapon: snapshot.ready_weapon,
+        owned_weapons: snapshot.owned_weapons,
+        ammo: Some(Ammo {
+            bullets: snapshot.ammo_bullets,
+            shells: snapshot.ammo_shells,
+            cells: snapshot.ammo_cells,
+            rockets: snapshot.ammo_rockets,
+        }),
+        key_cards: snapshot.key_cards,
+        cheat_flags: snapshot.cheat_flags,
+        last_attacked_by: snapshot.last_attacked_by,
+        active,
+    }
+}
+
+fn enemy_from_snapshot(snapshot: &AgentMobjState) -> EnemyInfo {
+    EnemyInfo {
+        object: Some(object_from_snapshot(snapshot)),
+        line_of_sight: snapshot.line_of_sight != 0,
+        target_id: snapshot.attacking_id,
+    }
+}
+
+fn object_from_snapshot(snapshot: &AgentMobjState) -> MapObjectState {
+    MapObjectState {
+        id: snapshot.id,
+        position: Some(Vec3Fixed {
+            x_fp: snapshot.x_fp,
+            y_fp: snapshot.y_fp,
+            z_fp: snapshot.z_fp,
+        }),
+        angle_degrees: snapshot.angle_degrees,
+        height_fp: snapshot.height_fp,
+        health: snapshot.health,
+        type_id: snapshot.type_id,
+        internal_type: snapshot.internal_type,
+        flags: snapshot.flags,
+        attacking_id: snapshot.attacking_id,
+        distance_fp: snapshot.distance_fp,
+    }
+}
+
+/// Initializes the gRPC bridge.
+///
+/// # Safety
+///
+/// This function is safe to call from C. It must be called at most once by the
+/// embedding process. Later calls return success without replacing the runtime.
+#[no_mangle]
+pub extern "C" fn restfuldoom_agent_init(port: u16) -> i32 {
+    if BRIDGE.get().is_some() {
+        return 0;
+    }
+
+    let (state_tx, _state_rx) = watch::channel(GameState::default());
+    let (action_tx, action_rx) = mpsc::channel(ACTION_QUEUE_CAPACITY);
+    let bridge = Bridge {
+        latest_state: state_tx.clone(),
+        action_rx: Mutex::new(action_rx),
+    };
+
+    if BRIDGE.set(bridge).is_err() {
+        return 0;
+    }
+
+    let bind_port = if port == 0 { DEFAULT_GRPC_PORT } else { port };
+    let runtime = AgentRuntime {
+        latest_state: state_tx,
+        action_tx,
+    };
+
+    thread::Builder::new()
+        .name("restfuldoom-grpc".to_string())
+        .spawn(move || run_server(runtime, bind_port))
+        .map_or(-1, |_| 0)
+}
+
+fn run_server(runtime: AgentRuntime, port: u16) {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    event!(
+        name: "restfuldoom.grpc.start",
+        Level::INFO,
+        server.address = %addr,
+        "starting Doom agent gRPC server on {{server.address}}",
+    );
+
+    let rt = match Builder::new_multi_thread().enable_all().build() {
+        Ok(rt) => rt,
+        Err(error) => {
+            event!(
+                name: "restfuldoom.grpc.runtime_error",
+                Level::ERROR,
+                error.message = %error,
+                "failed to start Tokio runtime: {{error.message}}",
+            );
+            return;
+        }
+    };
+
+    rt.block_on(async move {
+        if let Err(error) = tonic::transport::Server::builder()
+            .add_service(DoomAgentServer::new(runtime))
+            .serve(addr)
+            .await
+        {
+            event!(
+                name: "restfuldoom.grpc.server_error",
+                Level::ERROR,
+                error.message = %error,
+                "Doom agent gRPC server stopped: {{error.message}}",
+            );
+        }
+    });
+}
+
+/// Publishes a copied game-state snapshot from Doom.
+///
+/// # Safety
+///
+/// `snapshot` must point to an initialized `AgentGameStateSnapshot` for the
+/// duration of this call. The function copies every value before returning.
+#[no_mangle]
+pub unsafe extern "C" fn restfuldoom_agent_publish_state(snapshot: *const AgentGameStateSnapshot) {
+    let Some(bridge) = BRIDGE.get() else {
+        return;
+    };
+    if snapshot.is_null() {
+        return;
+    }
+
+    // SAFETY: The C caller promises `snapshot` points to an initialized value
+    // for this call. We copy it immediately and never retain the pointer.
+    let snapshot = unsafe { &*snapshot };
+    let state = state_from_snapshot(snapshot);
+    _ = bridge.latest_state.send(state);
+}
+
+/// Takes one queued action for the Doom game thread.
+///
+/// Returns `1` when an action was written and `0` otherwise.
+///
+/// # Safety
+///
+/// `out_action` must be either null or a valid writable pointer to an
+/// `AgentPlayerAction`.
+#[no_mangle]
+pub unsafe extern "C" fn restfuldoom_agent_take_action(out_action: *mut AgentPlayerAction) -> i32 {
+    let Some(bridge) = BRIDGE.get() else {
+        return 0;
+    };
+    if out_action.is_null() {
+        return 0;
+    }
+
+    let Ok(mut rx) = bridge.action_rx.lock() else {
+        return 0;
+    };
+    match rx.try_recv() {
+        Ok(action) => {
+            // SAFETY: The C caller provides a valid writable `out_action`.
+            unsafe {
+                *out_action = action;
+            }
+            1
+        }
+        Err(_) => 0,
+    }
+}
+
+/// Fixed-size action returned to Doom's game thread.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AgentPlayerAction {
+    pub tick: u64,
+    pub forward_move: i8,
+    pub side_move: i8,
+    pub angle_turn: i16,
+    pub buttons: u8,
+    pub _reserved: [u8; 3],
+}
+
+/// Fixed-point map object copied from Doom.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AgentMobjState {
+    pub id: i32,
+    pub x_fp: i32,
+    pub y_fp: i32,
+    pub z_fp: i32,
+    pub angle_degrees: u32,
+    pub height_fp: i32,
+    pub health: i32,
+    pub type_id: i32,
+    pub internal_type: i32,
+    pub flags: u32,
+    pub attacking_id: i32,
+    pub distance_fp: i32,
+    pub line_of_sight: u32,
+}
+
+/// Fixed-size player state copied from Doom.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AgentPlayerState {
+    pub object: AgentMobjState,
+    pub health: i32,
+    pub armor: i32,
+    pub kills: i32,
+    pub items: i32,
+    pub secrets: i32,
+    pub ready_weapon: i32,
+    pub owned_weapons: u32,
+    pub ammo_bullets: i32,
+    pub ammo_shells: i32,
+    pub ammo_cells: i32,
+    pub ammo_rockets: i32,
+    pub key_cards: u32,
+    pub cheat_flags: u32,
+    pub last_attacked_by: i32,
+}
+
+/// Maximum enemies copied per tic.
+pub const AGENT_MAX_ENEMIES: usize = 128;
+
+/// Maximum useful objects copied per tic.
+pub const AGENT_MAX_OBJECTS: usize = 256;
+
+/// Fixed-size game-state snapshot copied from Doom.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AgentGameStateSnapshot {
+    pub tick: u64,
+    pub episode: i32,
+    pub map: i32,
+    pub skill: i32,
+    pub level_time: i32,
+    pub total_kills: i32,
+    pub total_items: i32,
+    pub total_secrets: i32,
+    pub gamestate: i32,
+    pub player_active: u32,
+    pub player: AgentPlayerState,
+    pub enemy_count: u32,
+    pub object_count: u32,
+    pub enemies: [AgentMobjState; AGENT_MAX_ENEMIES],
+    pub objects: [AgentMobjState; AGENT_MAX_OBJECTS],
+}
+
+impl Default for AgentGameStateSnapshot {
+    fn default() -> Self {
+        Self {
+            tick: 0,
+            episode: 0,
+            map: 0,
+            skill: 0,
+            level_time: 0,
+            total_kills: 0,
+            total_items: 0,
+            total_secrets: 0,
+            gamestate: 0,
+            player_active: 0,
+            player: AgentPlayerState::default(),
+            enemy_count: 0,
+            object_count: 0,
+            enemies: [AgentMobjState::default(); AGENT_MAX_ENEMIES],
+            objects: [AgentMobjState::default(); AGENT_MAX_OBJECTS],
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proto::doom_agent_client::DoomAgentClient;
+    use tokio::time::{sleep, timeout, Duration};
+
+    #[test]
+    fn semantic_forward_uses_duration() {
+        let commands = player_action_to_commands(&PlayerAction {
+            action: PlayerActionType::ActionForward.into(),
+            amount: 25,
+            duration_tics: 3,
+            ..PlayerAction::default()
+        });
+
+        assert_eq!(commands.len(), 3);
+        assert!(commands.iter().all(|command| command.forward_move == 25));
+    }
+
+    #[test]
+    fn switch_weapon_maps_to_doom_button_bits() {
+        let command = player_action_to_commands(&PlayerAction {
+            action: PlayerActionType::ActionSwitchWeapon.into(),
+            amount: 3,
+            ..PlayerAction::default()
+        })
+        .pop_front()
+        .expect("command should exist");
+
+        assert_eq!(command.buttons, BT_CHANGE | (2 << BT_WEAPONSHIFT) as u8);
+    }
+
+    #[test]
+    fn snapshot_conversion_bounds_enemies() {
+        let mut snapshot = AgentGameStateSnapshot {
+            tick: 42,
+            episode: 1,
+            map: 1,
+            enemy_count: 1,
+            ..AgentGameStateSnapshot::default()
+        };
+        snapshot.enemies[0].id = 7;
+        snapshot.enemies[0].health = 20;
+
+        let state = state_from_snapshot(&snapshot);
+
+        assert_eq!(state.tick, 42);
+        assert_eq!(state.enemies.len(), 1);
+        assert_eq!(
+            state.enemies[0].object.as_ref().map(|object| object.id),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn delta_reports_removed_enemy() {
+        let mut previous = GameState {
+            tick: 1,
+            enemies: vec![EnemyInfo {
+                object: Some(MapObjectState {
+                    id: 9,
+                    ..MapObjectState::default()
+                }),
+                ..EnemyInfo::default()
+            }],
+            ..GameState::default()
+        };
+        previous.player = Some(PlayerState::default());
+
+        let current = GameState {
+            tick: 2,
+            player: Some(PlayerState::default()),
+            ..GameState::default()
+        };
+
+        let encoded = encode_delta(&previous, &current);
+        let decoded = StateDelta::decode(encoded.as_slice()).expect("delta decodes");
+
+        assert_eq!(decoded.removed_enemy_ids, vec![9]);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn grpc_session_roundtrip() {
+        let port = 50_071;
+        assert_eq!(restfuldoom_agent_init(port), 0);
+        sleep(Duration::from_millis(200)).await;
+
+        let mut client = DoomAgentClient::connect(format!("http://127.0.0.1:{port}"))
+            .await
+            .expect("client connects");
+        let (tx, rx) = mpsc::channel(4);
+        let mut stream = client
+            .game_session(ReceiverStream::new(rx))
+            .await
+            .expect("session starts")
+            .into_inner();
+
+        let mut snapshot = AgentGameStateSnapshot {
+            tick: 99,
+            episode: 1,
+            map: 1,
+            player_active: 1,
+            ..AgentGameStateSnapshot::default()
+        };
+        snapshot.player.health = 100;
+
+        // SAFETY: The pointer references an initialized stack snapshot for the
+        // duration of the call.
+        unsafe {
+            restfuldoom_agent_publish_state(&snapshot);
+        }
+
+        let observed = timeout(Duration::from_secs(2), stream.message())
+            .await
+            .expect("state arrives")
+            .expect("stream is healthy")
+            .expect("state exists");
+        assert_eq!(observed.tick, 99);
+
+        tx.send(PlayerAction {
+            tick: 100,
+            action: PlayerActionType::ActionForward.into(),
+            amount: 25,
+            ..PlayerAction::default()
+        })
+        .await
+        .expect("action sends");
+
+        let mut action = AgentPlayerAction::default();
+        for _ in 0..20 {
+            // SAFETY: The output pointer references a valid stack variable.
+            if unsafe { restfuldoom_agent_take_action(&mut action) } == 1 {
+                break;
+            }
+            sleep(Duration::from_millis(25)).await;
+        }
+
+        assert_eq!(action.tick, 100);
+        assert_eq!(action.forward_move, 25);
+    }
+}

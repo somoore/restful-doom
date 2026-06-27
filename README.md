@@ -43,6 +43,69 @@ To run restful-doom on port 6666:
 src/restful-doom -iwad <path/to/doom1.wad> -apiport 6666 ...
 ```
 
+## gRPC Agent Mode
+
+RESTful-DOOM also includes a high-performance protobuf + gRPC bridge for AI agents. The
+bridge runs inside the Doom process, publishes structured state after every simulated tic, and
+accepts player actions over a bidirectional stream.
+
+The shared schema lives at:
+
+```
+proto/restfuldoom/v1/agent.proto
+```
+
+Run Doom with the agent bridge on the default gRPC port:
+
+```
+src/restful-doom -iwad <path/to/doom1.wad> -warp 1 1 -skill 3 -agent
+```
+
+Or choose a port explicitly:
+
+```
+src/restful-doom -iwad <path/to/doom1.wad> -warp 1 1 -skill 3 -agentport 50051
+```
+
+The stream service is:
+
+```
+restfuldoom.v1.DoomAgent/GameSession
+```
+
+It returns `GameState` messages containing player state, enemy state, useful map objects,
+level progress, and optional per-client `StateDelta` payloads. Actions can be high-level
+semantic commands such as `ACTION_FORWARD` and `ACTION_SHOOT`, or exact raw `ticcmd` overlays
+for low-level policies.
+
+### Python Agent
+
+Generate Python protobuf stubs and run the deterministic smoke agent:
+
+```
+cd agent
+python -m pip install -r requirements.txt
+PYTHONPATH=. python -m restfuldoom_agent.generate_stubs
+PYTHONPATH=. python -m restfuldoom_agent.smoke_agent --endpoint 127.0.0.1:50051
+```
+
+Add `--trajectory-jsonl trajectories/run.jsonl` to the smoke agent to persist
+state/action/reward records for replay or training analysis.
+
+The Python package includes:
+
+- async gRPC client helpers
+- a deterministic smoke policy
+- goal/reward scoring
+- optional AWS Bedrock text-reasoning policy
+- JSONL trajectory logging
+
+### Hellbox Capsule
+
+The `capsule/` directory contains a Hellbox-style headless capsule that builds this repo,
+starts Doom in agent mode, exposes gRPC on `50051`, and uses the MicroVM ready hook on `9000`.
+See `docs/hellbox/agent-capsule.md`.
+
 ## Thanks!
 [chocolate-doom](https://github.com/chocolate-doom/chocolate-doom) team  
 [cJSON](https://github.com/DaveGamble/cJSON) - JSON parsing / generation  

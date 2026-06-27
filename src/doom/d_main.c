@@ -66,6 +66,7 @@
 #include "wi_stuff.h"
 #include "st_stuff.h"
 #include "am_map.h"
+#include "agent_bridge.h"
 #include "net_client.h"
 #include "net_dedicated.h"
 #include "net_query.h"
@@ -1873,6 +1874,19 @@ void D_DoomMain (void)
         printf ("API_Init: Init RESTful API daemon.\n");
         API_Init(port);
     }
+
+    p = M_CheckParmWithArgs("-agentport", 1);
+    if (p)
+    {
+        int port = atoi(myargv[p+1]);
+        printf ("AgentBridge_Init: Init gRPC agent daemon.\n");
+        AgentBridge_Init(port);
+    }
+    else if (M_CheckParm("-agent") > 0)
+    {
+        printf ("AgentBridge_Init: Init gRPC agent daemon.\n");
+        AgentBridge_Init(50051);
+    }
 	
     if (startloadgame >= 0)
     {
@@ -1890,4 +1904,3 @@ void D_DoomMain (void)
 
     D_DoomLoop ();  // never returns
 }
-

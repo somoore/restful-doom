@@ -31,6 +31,7 @@
 #include "g_game.h"
 #include "doomdef.h"
 #include "doomstat.h"
+#include "agent_bridge.h"
 #include "w_checksum.h"
 #include "w_wad.h"
 
@@ -92,6 +93,7 @@ static void RunTic(ticcmd_t *cmds, boolean *ingame)
         D_DoAdvanceDemo ();
 
     G_Ticker ();
+    AgentBridge_AfterTic(gametic);
 }
 
 static loop_interface_t doom_loop_interface = {
@@ -275,4 +277,3 @@ void D_CheckNetGame (void)
         }
     }
 }
-

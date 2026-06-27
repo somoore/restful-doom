@@ -1,0 +1,206 @@
+syntax = "proto3";
+
+package restfuldoom.v1;
+
+// DoomAgent streams game state and receives player commands.
+service DoomAgent {
+  // Runs a bidirectional observe-act loop.
+  rpc GameSession(stream PlayerAction) returns (stream GameState);
+
+  // Streams observations without sending actions.
+  rpc Observe(ObserveRequest) returns (stream GameState);
+}
+
+// Configures an observation-only stream.
+message ObserveRequest {
+  // When true, each state includes a prost-encoded StateDelta payload.
+  bool include_delta_state = 1;
+}
+
+// A full game-state observation optimized for AI agents.
+message GameState {
+  // Doom simulation tic that produced this observation.
+  uint64 tick = 1;
+
+  // Console player state.
+  PlayerState player = 2;
+
+  // Living enemies, bounded and ordered by internal thinker traversal.
+  repeated EnemyInfo enemies = 3;
+
+  // Useful non-player objects such as pickups, missiles, and shootable actors.
+  repeated MapObjectState objects = 4;
+
+  // Level metadata and progress counters.
+  LevelInfo level = 5;
+
+  // Prost-encoded StateDelta from the prior message on this stream.
+  bytes delta_state = 6;
+
+  // True when delta_state was computed against the prior streamed state.
+  bool has_delta_state = 7;
+}
+
+// A compact delta from one streamed state to the next.
+message StateDelta {
+  uint64 base_tick = 1;
+  uint64 tick = 2;
+  bool player_changed = 3;
+  PlayerState player = 4;
+  repeated EnemyInfo changed_enemies = 5;
+  repeated int32 removed_enemy_ids = 6;
+  repeated MapObjectState changed_objects = 7;
+  repeated int32 removed_object_ids = 8;
+  LevelInfo level = 9;
+  bool level_changed = 10;
+}
+
+// Player statistics and inventory.
+message PlayerState {
+  MapObjectState object = 1;
+  int32 health = 2;
+  int32 armor = 3;
+  int32 kills = 4;
+  int32 items = 5;
+  int32 secrets = 6;
+  Weapon ready_weapon = 7;
+  uint32 owned_weapons = 8;
+  Ammo ammo = 9;
+  uint32 key_cards = 10;
+  uint32 cheat_flags = 11;
+  int32 last_attacked_by = 12;
+  bool active = 13;
+}
+
+// Ammunition counts.
+message Ammo {
+  int32 bullets = 1;
+  int32 shells = 2;
+  int32 cells = 3;
+  int32 rockets = 4;
+}
+
+// Weapon identifiers follow Doom's internal weapon order.
+enum Weapon {
+  WEAPON_FIST = 0;
+  WEAPON_PISTOL = 1;
+  WEAPON_SHOTGUN = 2;
+  WEAPON_CHAINGUN = 3;
+  WEAPON_ROCKET = 4;
+  WEAPON_PLASMA = 5;
+  WEAPON_BFG = 6;
+  WEAPON_CHAINSAW = 7;
+  WEAPON_SUPER_SHOTGUN = 8;
+}
+
+// Generic map object state.
+message MapObjectState {
+  int32 id = 1;
+  Vec3Fixed position = 2;
+  uint32 angle_degrees = 3;
+  sfixed32 height_fp = 4;
+  int32 health = 5;
+  int32 type_id = 6;
+  int32 internal_type = 7;
+  uint32 flags = 8;
+  int32 attacking_id = 9;
+  sfixed32 distance_fp = 10;
+}
+
+// Enemy state extends map object state with agent-relevant threat data.
+message EnemyInfo {
+  MapObjectState object = 1;
+  bool line_of_sight = 2;
+  int32 target_id = 3;
+}
+
+// Level metadata and progress counters.
+message LevelInfo {
+  int32 episode = 1;
+  int32 map = 2;
+  int32 skill = 3;
+  int32 level_time = 4;
+  int32 total_kills = 5;
+  int32 total_items = 6;
+  int32 total_secrets = 7;
+  int32 gamestate = 8;
+}
+
+// Fixed-point Doom world position.
+message Vec3Fixed {
+  sfixed32 x_fp = 1;
+  sfixed32 y_fp = 2;
+  sfixed32 z_fp = 3;
+}
+
+// A command from an agent to Doom.
+message PlayerAction {
+  // Optional target tic for analysis and replay.
+  uint64 tick = 1;
+
+  // High-level action for simple agents.
+  PlayerActionType action = 2;
+
+  // Action-specific amount. Defaults to 10 for movement and turning.
+  uint32 amount = 3;
+
+  // Optional duration; bounded by the server.
+  uint32 duration_tics = 4;
+
+  // Low-level ticcmd overlay for precise policy control.
+  RawTiccmd raw = 5;
+
+  // Optional key-style controls that compose into the raw ticcmd.
+  repeated KeyPress keys = 6;
+
+  // Optional mouse-style input that composes into angle and forward movement.
+  MouseInput mouse = 7;
+}
+
+// High-level action names match the REST API vocabulary.
+enum PlayerActionType {
+  ACTION_UNSPECIFIED = 0;
+  ACTION_FORWARD = 1;
+  ACTION_BACKWARD = 2;
+  ACTION_TURN_LEFT = 3;
+  ACTION_TURN_RIGHT = 4;
+  ACTION_STRAFE_LEFT = 5;
+  ACTION_STRAFE_RIGHT = 6;
+  ACTION_SHOOT = 7;
+  ACTION_USE = 8;
+  ACTION_SWITCH_WEAPON = 9;
+}
+
+// Key controls for simple command construction.
+message KeyPress {
+  DoomKey key = 1;
+  bool pressed = 2;
+}
+
+// Agent-facing keys independent of host keyboard layout.
+enum DoomKey {
+  DOOM_KEY_UNSPECIFIED = 0;
+  DOOM_KEY_FORWARD = 1;
+  DOOM_KEY_BACKWARD = 2;
+  DOOM_KEY_TURN_LEFT = 3;
+  DOOM_KEY_TURN_RIGHT = 4;
+  DOOM_KEY_STRAFE_LEFT = 5;
+  DOOM_KEY_STRAFE_RIGHT = 6;
+  DOOM_KEY_SHOOT = 7;
+  DOOM_KEY_USE = 8;
+}
+
+// Mouse-style input values.
+message MouseInput {
+  sint32 turn = 1;
+  sint32 forward = 2;
+  uint32 buttons = 3;
+}
+
+// Raw ticcmd overlay.
+message RawTiccmd {
+  sint32 forward_move = 1;
+  sint32 side_move = 2;
+  sint32 angle_turn = 3;
+  uint32 buttons = 4;
+}

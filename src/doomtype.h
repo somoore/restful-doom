@@ -72,20 +72,14 @@
 
 #include <inttypes.h>
 
-#if defined(__cplusplus) || defined(__bool_true_false_are_defined)
+// Doom code uses boolean as an integer in a few legacy sentinel tables.
+// Keep the type integer-sized, even when true/false are language keywords.
+typedef int boolean;
 
-// Use builtin bool type with C++.
-
-typedef bool boolean;
-
-#else
-
-typedef enum 
-{
-    false, 
-    true
-} boolean;
-
+#if !defined(__cplusplus) && !defined(__bool_true_false_are_defined) \
+ && (!defined(__STDC_VERSION__) || __STDC_VERSION__ < 202311L)
+#define false 0
+#define true 1
 #endif
 
 typedef uint8_t byte;
@@ -109,4 +103,3 @@ typedef uint8_t byte;
 #define arrlen(array) (sizeof(array) / sizeof(*array))
 
 #endif
-
