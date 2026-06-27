@@ -334,6 +334,19 @@ fresh-spawn route reliably produce the first valid combat affordance. The next
 two credible fixes are true progressed-state snapshot restore or a compact
 topology observation that remembers map structure beyond the current waypoint.
 
+The environment now also supports a first-contact curriculum:
+
+- `first_visible_bonus` rewards the first line-of-sight enemy contact in an
+  episode.
+- `first_shootable_bonus` rewards the first shootable enemy target in an
+  episode.
+- `terminate_on_first_visible` and `terminate_on_first_shootable` can end that
+  curriculum episode as soon as the contact objective is reached.
+
+This does not change promotion. A first-contact checkpoint is useful only as a
+navigation curriculum artifact; promotion still requires level completion and
+kills against the deterministic baseline.
+
 The next observation upgrades should be staged rather than speculative:
 
 1. Evaluate the bounded temporal window in live spawn-to-contact PPO, then
@@ -479,6 +492,18 @@ Recent PPO evidence:
   had zero shootable-target steps, zero damage, and zero kills. This confirms
   the current bottleneck is route-to-contact observation/curriculum, not the
   combat-start PPO controller.
+- `ppo-temporal-spawn-trend`: repeated the six-update true-spawn transfer with
+  the 80-feature temporal observation. Temporal trend features were nonzero in
+  the buffers, and route progress stayed positive, but visible/shootable
+  contact remained zero. This motivated the explicit first-contact curriculum
+  reward/termination path.
+- `ppo-first-contact-smoke`: resumed the independent combat checkpoint from
+  true spawn with `first_visible_bonus=10` and
+  `terminate_on_first_visible=true`. It reached first line-of-sight enemy
+  contact at rollout record 243, ended that episode with
+  `done_reason=first_visible_enemy`, and recorded `first_visible_contacts=1`
+  plus `contact_reward=10.0`. It still had zero shootable-target steps, zero
+  damage, and zero kills.
 
 ## Next Architecture Work
 
@@ -487,6 +512,9 @@ The next useful changes are:
 - Evaluate bounded temporal-context features from true spawn and add a
   recurrent policy only if the feed-forward actor still cannot bridge to first
   contact.
+- Train first-shootable/contact-to-combat curriculum from true spawn, then
+  resume full combat/exit training from the improved route-to-contact
+  checkpoint.
 - Add true save-state or Hellbox/Shrink snapshot restore so PPO can train from
   progressed map states, not only fresh-reset teleport starts.
 - Promote combat affordances from binary target presence to richer target

@@ -107,6 +107,10 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     "level_complete_bonus": args.level_complete_bonus,
                     "kill_goal_bonus": args.kill_goal_bonus,
                     "required_kills": args.required_kills,
+                    "first_visible_bonus": args.first_visible_bonus,
+                    "first_shootable_bonus": args.first_shootable_bonus,
+                    "terminate_on_first_visible": args.terminate_on_first_visible,
+                    "terminate_on_first_shootable": args.terminate_on_first_shootable,
                 },
                 extra={
                     "buffer_path": str(buffer_path),
@@ -137,6 +141,10 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                         "level_complete_bonus": args.level_complete_bonus,
                         "kill_goal_bonus": args.kill_goal_bonus,
                         "required_kills": args.required_kills,
+                        "first_visible_bonus": args.first_visible_bonus,
+                        "first_shootable_bonus": args.first_shootable_bonus,
+                        "terminate_on_first_visible": args.terminate_on_first_visible,
+                        "terminate_on_first_shootable": args.terminate_on_first_shootable,
                     },
                     metrics=metrics,
                     rollout_summary=rollout_summary,
@@ -206,6 +214,10 @@ async def evaluate(args: argparse.Namespace) -> dict[str, object]:
         reset_warmup_max_tics=args.reset_warmup_max_tics,
         reset_warmup_until_visible=args.reset_warmup_until_visible,
         reset_warmup_until_shootable=args.reset_warmup_until_shootable,
+        first_visible_bonus=args.first_visible_bonus,
+        first_shootable_bonus=args.first_shootable_bonus,
+        terminate_on_first_visible=args.terminate_on_first_visible,
+        terminate_on_first_shootable=args.terminate_on_first_shootable,
     )
     candidate = await evaluate_checkpoint(
         str(args.eval_checkpoint),
@@ -289,6 +301,10 @@ def _env_config_for_start(
         reset_warmup_max_tics=args.reset_warmup_max_tics,
         reset_warmup_until_visible=args.reset_warmup_until_visible,
         reset_warmup_until_shootable=args.reset_warmup_until_shootable,
+        first_visible_bonus=args.first_visible_bonus,
+        first_shootable_bonus=args.first_shootable_bonus,
+        terminate_on_first_visible=args.terminate_on_first_visible,
+        terminate_on_first_shootable=args.terminate_on_first_shootable,
     )
 
 
@@ -546,6 +562,23 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         "shootable_target_steps": sum(
             1 for record in records if record.info.get("had_shootable_target")
         ),
+        "visible_enemy_steps": sum(
+            1 for record in records if record.info.get("had_visible_enemy")
+        ),
+        "first_visible_contacts": sum(
+            1 for record in records if record.info.get("first_visible_contact")
+        ),
+        "first_shootable_contacts": sum(
+            1 for record in records if record.info.get("first_shootable_contact")
+        ),
+        "contact_reward": round(
+            sum(
+                float(record.info.get("contact_reward", 0.0))
+                for record in records
+                if isinstance(record.info, dict)
+            ),
+            4,
+        ),
         "route_attempt_steps": sum(1 for outcome in route_outcomes if outcome.get("attempted")),
         "route_reached_steps": sum(1 for outcome in route_outcomes if outcome.get("reached")),
         "route_failed_steps": sum(1 for outcome in route_outcomes if outcome.get("failed")),
@@ -629,6 +662,10 @@ def main() -> None:
     parser.add_argument("--reset-warmup-max-tics", type=int, default=0)
     parser.add_argument("--reset-warmup-until-visible", action="store_true")
     parser.add_argument("--reset-warmup-until-shootable", action="store_true")
+    parser.add_argument("--first-visible-bonus", type=float, default=0.0)
+    parser.add_argument("--first-shootable-bonus", type=float, default=0.0)
+    parser.add_argument("--terminate-on-first-visible", action="store_true")
+    parser.add_argument("--terminate-on-first-shootable", action="store_true")
     parser.add_argument("--updates", type=int, default=1)
     parser.add_argument("--rollout-steps", type=int, default=512)
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("agent_models/ppo"))

@@ -78,6 +78,10 @@ class DoomEnvConfig:
     route_progress_reward: float = 0.01
     route_reached_reward: float = 0.25
     route_failure_penalty: float = 0.03
+    first_visible_bonus: float = 0.0
+    first_shootable_bonus: float = 0.0
+    terminate_on_first_visible: bool = False
+    terminate_on_first_shootable: bool = False
 
     def reward_goal(self) -> Goal:
         """Returns the reward goal for the configured preset."""
@@ -537,6 +541,8 @@ class DoomAgentEnv:
         self._steps = 0
         self._episode_index = 0
         self._last_reset_warmup: dict[str, Any] = {}
+        self._episode_seen_visible_enemy = False
+        self._episode_seen_shootable_enemy = False
 
     async def close(self) -> None:
         """Closes stream and channel resources."""
@@ -574,6 +580,8 @@ class DoomAgentEnv:
         self._current_state = state
         self._start_level = (state.level.episode, state.level.map)
         self._start_kills = state.player.kills
+        self._episode_seen_visible_enemy = _has_visible_enemy(state)
+        self._episode_seen_shootable_enemy = _has_shootable_enemy(state)
         return self.controller.observation(state)
 
     async def _reset_with_retries(self, reset_seed: int) -> Any:
@@ -640,17 +648,32 @@ class DoomAgentEnv:
         done = False
         reason = None
         had_shootable_target = _has_shootable_enemy(previous)
+        had_visible_enemy = _has_visible_enemy(previous)
+        first_visible_contact = False
+        first_shootable_contact = False
+        contact_reward = 0.0
         transition_summaries: list[dict[str, Any]] = []
         for _ in range(action_tics):
             tick_previous = current
             current = await self._state_stream.__anext__()
             had_shootable_target = had_shootable_target or _has_shootable_enemy(current)
+            had_visible_enemy = had_visible_enemy or _has_visible_enemy(current)
             self._steps += 1
             transition = self._reward_engine.score(tick_previous, current)
             done, reason, reward = self._terminal_reward(tick_previous, current, transition)
             total_reward += reward
             transition_summaries.append(_transition_summary(transition))
             if done:
+                break
+            contact = self._contact_reward(current)
+            if contact["reward"]:
+                contact_reward += float(contact["reward"])
+                total_reward += float(contact["reward"])
+            first_visible_contact = first_visible_contact or bool(contact["first_visible"])
+            first_shootable_contact = first_shootable_contact or bool(contact["first_shootable"])
+            if contact["done"]:
+                done = True
+                reason = str(contact["reason"])
                 break
         skill = SKILL_ACTIONS[action_index]
         route_outcome = _route_outcome(skill, previous, current)
@@ -687,8 +710,12 @@ class DoomAgentEnv:
                 "action_reward": action_reward,
                 "combat_action_reward": combat_action_reward,
                 "route_action_reward": route_action_reward,
+                "contact_reward": contact_reward,
+                "had_visible_enemy": had_visible_enemy,
                 "route_outcome": route_outcome,
                 "had_shootable_target": had_shootable_target,
+                "first_visible_contact": first_visible_contact,
+                "first_shootable_contact": first_shootable_contact,
                 "reset_warmup": dict(self._last_reset_warmup),
                 "state": summarize_state(current),
                 "done_reason": reason,
@@ -722,6 +749,34 @@ class DoomAgentEnv:
         if route_outcome.get("failed"):
             reward -= self.config.route_failure_penalty
         return reward
+
+    def _contact_reward(self, current: Any) -> dict[str, Any]:
+        visible_now = _has_visible_enemy(current)
+        shootable_now = _has_shootable_enemy(current)
+        first_visible = visible_now and not self._episode_seen_visible_enemy
+        first_shootable = shootable_now and not self._episode_seen_shootable_enemy
+        reward = 0.0
+        done = False
+        reason = None
+        if first_visible:
+            reward += self.config.first_visible_bonus
+            self._episode_seen_visible_enemy = True
+            if self.config.terminate_on_first_visible:
+                done = True
+                reason = "first_visible_enemy"
+        if first_shootable:
+            reward += self.config.first_shootable_bonus
+            self._episode_seen_shootable_enemy = True
+            if self.config.terminate_on_first_shootable:
+                done = True
+                reason = "first_shootable_target"
+        return {
+            "reward": reward,
+            "done": done,
+            "reason": reason,
+            "first_visible": first_visible,
+            "first_shootable": first_shootable,
+        }
 
     async def _ensure_stream(self) -> None:
         if self.client is None:

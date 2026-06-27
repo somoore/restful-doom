@@ -293,6 +293,11 @@ The training API is:
 - PPO observations also include bounded temporal context: recent movement
   delta, enemy-distance trend, route-distance trend, same-cell streak, recent
   visible/shootable contact, and rolling route failure/progress signals.
+- `--first-visible-bonus`, `--first-shootable-bonus`,
+  `--terminate-on-first-visible`, and `--terminate-on-first-shootable` enable
+  a first-contact curriculum for true-spawn training. This trains route-to-first
+  combat separately without weakening the promotion gate for full-level
+  completion and kills.
 - Checkpoints and rollout buffers carry `restfuldoom.observation.v1` and
   `restfuldoom.skill_action.v1`, including feature descriptors and
   machine-readable definitions for each PPO skill.
@@ -399,7 +404,8 @@ PPO rollout summaries include route diagnostics for spawn-to-contact work:
 `route_attempt_steps`, `route_reached_steps`, `route_failed_steps`,
 `route_progress_units`, and `route_action_reward`. These are the first numbers
 to inspect when a run moves through E1M1 but still never reaches a shootable
-target.
+target. First-contact curriculum runs also report `visible_enemy_steps`,
+`first_visible_contacts`, `first_shootable_contacts`, and `contact_reward`.
 
 The checkpoint schema is `restfuldoom.ppo_checkpoint.v1`. Each checkpoint
 stores model weights, optimizer state, PPO config, observation/action schemas,

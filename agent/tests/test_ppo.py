@@ -389,6 +389,56 @@ def test_rollout_summary_counts_route_outcomes():
     assert summary["route_action_reward"] == 1.5
 
 
+def test_rollout_summary_counts_first_contact_events():
+    buffer = RolloutBuffer()
+    buffer.add(
+        obs=[0.0, 1.0],
+        action_mask=[True, False],
+        action=0,
+        reward=3.0,
+        done=True,
+        value=0.0,
+        logprob=0.0,
+        info={
+            "skill": "route_progression",
+            "had_visible_enemy": True,
+            "had_shootable_target": False,
+            "first_visible_contact": True,
+            "first_shootable_contact": False,
+            "contact_reward": 3.0,
+            "transition": {},
+            "state": {"health": 100, "kills": 0},
+        },
+    )
+    buffer.add(
+        obs=[0.0, 1.0],
+        action_mask=[True, False],
+        action=0,
+        reward=5.0,
+        done=True,
+        value=0.0,
+        logprob=0.0,
+        info={
+            "skill": "engage",
+            "had_visible_enemy": True,
+            "had_shootable_target": True,
+            "first_visible_contact": False,
+            "first_shootable_contact": True,
+            "contact_reward": 5.0,
+            "transition": {},
+            "state": {"health": 100, "kills": 0},
+        },
+    )
+
+    summary = _summarize_buffer(buffer)
+
+    assert summary["visible_enemy_steps"] == 2
+    assert summary["shootable_target_steps"] == 1
+    assert summary["first_visible_contacts"] == 1
+    assert summary["first_shootable_contacts"] == 1
+    assert summary["contact_reward"] == 8.0
+
+
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")
 def test_ppo_actor_respects_action_mask():
     trainer = PPOTrainer(

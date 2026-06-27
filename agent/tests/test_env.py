@@ -275,6 +275,71 @@ def test_doom_agent_env_penalizes_missed_shootable_target():
     assert step.reward == pytest.approx(-0.05)
 
 
+def test_doom_agent_env_rewards_and_terminates_on_first_visible_enemy():
+    first = _state(tick=1, enemy=False, combat=False)
+    second = _state(tick=2, enemy=True, combat=False)
+    client = _DurationAwareFakeClient([first, second])
+    env = DoomAgentEnv(
+        DoomEnvConfig(
+            max_steps=10,
+            goal_preset="navigation",
+            first_visible_bonus=3.0,
+            terminate_on_first_visible=True,
+        ),
+        client=client,
+        controller=_FixedDurationController(duration_tics=1),
+    )
+
+    async def run():
+        await env.reset(seed=5)
+        step = await env.step(0)
+        await env.close()
+        return step
+
+    step = asyncio.run(run())
+
+    assert step.done
+    assert step.info["done_reason"] == "first_visible_enemy"
+    assert step.info["had_visible_enemy"]
+    assert step.info["first_visible_contact"]
+    assert not step.info["first_shootable_contact"]
+    assert step.info["contact_reward"] == pytest.approx(3.0)
+    assert step.reward == pytest.approx(3.0)
+
+
+def test_doom_agent_env_rewards_and_terminates_on_first_shootable_target():
+    first = _state(tick=1, enemy=True, combat=False)
+    second = _state(tick=2, enemy=True, combat=True)
+    client = _DurationAwareFakeClient([first, second])
+    env = DoomAgentEnv(
+        DoomEnvConfig(
+            max_steps=10,
+            goal_preset="combat",
+            first_shootable_bonus=5.0,
+            terminate_on_first_shootable=True,
+        ),
+        client=client,
+        controller=_FixedDurationController(duration_tics=1),
+    )
+
+    async def run():
+        await env.reset(seed=5)
+        step = await env.step(0)
+        await env.close()
+        return step
+
+    step = asyncio.run(run())
+
+    assert step.done
+    assert step.info["done_reason"] == "first_shootable_target"
+    assert step.info["had_visible_enemy"]
+    assert step.info["had_shootable_target"]
+    assert not step.info["first_visible_contact"]
+    assert step.info["first_shootable_contact"]
+    assert step.info["contact_reward"] == pytest.approx(5.0)
+    assert step.reward == pytest.approx(5.0 - 0.05)
+
+
 def test_doom_agent_env_records_route_outcome_and_reward():
     first = _state(tick=1, route=True, x_units=0)
     second = _state(tick=2, route=True, x_units=128)
