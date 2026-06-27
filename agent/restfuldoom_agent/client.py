@@ -7,12 +7,17 @@ import inspect
 import json
 import os
 import sys
+import time
 from dataclasses import dataclass
 from collections.abc import AsyncIterator, Iterable
 from pathlib import Path
 from typing import Any
 
 import grpc
+
+DEFAULT_AGENT_PORT = 50051
+AUTH_METADATA_KEY = "x-aws-proxy-auth"
+PORT_METADATA_KEY = "x-aws-proxy-port"
 
 
 def _generated_root() -> Path:
@@ -78,6 +83,7 @@ class RolloutStep:
     action_summary: dict[str, Any] | None
     last_seen_tick: int
     reconnect_attempts: int
+    metadata: dict[str, Any]
 
 
 class DoomAgentStreamError(RuntimeError):
@@ -107,9 +113,26 @@ def semantic_action(
 class DoomAgentClient:
     """Maintains an async gRPC connection to Doom."""
 
-    def __init__(self, endpoint: str = "127.0.0.1:50051") -> None:
+    def __init__(
+        self,
+        endpoint: str = "127.0.0.1:50051",
+        *,
+        token: str | None = None,
+        agent_port: int | None = None,
+        tls: bool = False,
+        authority: str | None = None,
+    ) -> None:
         self.endpoint = endpoint
-        self.channel = grpc.aio.insecure_channel(endpoint)
+        self.metadata = _client_metadata(token=token, agent_port=agent_port)
+        options = _channel_options(authority)
+        if tls:
+            self.channel = grpc.aio.secure_channel(
+                endpoint,
+                grpc.ssl_channel_credentials(),
+                options=options,
+            )
+        else:
+            self.channel = grpc.aio.insecure_channel(endpoint, options=options)
         self.stub = agent_pb2_grpc.DoomAgentStub(self.channel)
         self.last_seen_tick: int | None = None
 
@@ -120,7 +143,7 @@ class DoomAgentClient:
     async def observe(self, *, include_delta_state: bool = True) -> AsyncIterator[Any]:
         """Streams observations without sending actions."""
         request = agent_pb2.ObserveRequest(include_delta_state=include_delta_state)
-        async for state in self.stub.Observe(request):
+        async for state in self.stub.Observe(request, metadata=self.metadata):
             self.last_seen_tick = state.tick
             yield state
 
@@ -180,7 +203,7 @@ class DoomAgentClient:
 
     async def session(self, actions: AsyncIterator[Any]) -> AsyncIterator[Any]:
         """Runs a bidirectional observe-act stream."""
-        async for state in self.stub.GameSession(actions):
+        async for state in self.stub.GameSession(actions, metadata=self.metadata):
             self.last_seen_tick = state.tick
             yield state
 
@@ -196,15 +219,20 @@ class DoomAgentClient:
         reconnect: bool = True,
         backoff: BackoffConfig | None = None,
         on_reconnect: Any | None = None,
+        rollout_metadata: dict[str, Any] | None = None,
     ) -> AsyncIterator[RolloutStep]:
         """Streams a policy rollout without retaining states in memory."""
         from .reward import RewardEngine
 
         reward_engine = reward_engine or RewardEngine()
         backoff = backoff or BackoffConfig()
+        rollout_metadata = dict(rollout_metadata or {})
         previous_state = None
         index = 0
         reconnect_attempts = 0
+        reconnect_count = 0
+        policy_errors = 0
+        bedrock_fallback_count = 0
         trajectory = _open_trajectory(trajectory_jsonl)
 
         try:
@@ -226,13 +254,26 @@ class DoomAgentClient:
                 try:
                     async for state in self.session(action_iter()):
                         transition = reward_engine.score(previous_state, state)
+                        policy_started = time.perf_counter()
                         action = await policy.next_action(state)
+                        policy_latency_ms = (time.perf_counter() - policy_started) * 1000.0
                         if action is not None:
                             await action_queue.put(action)
 
                         state_summary = summarize_state(state)
                         reward_summary = summarize_reward(transition)
                         action_summary = summarize_action(action)
+                        metadata = _rollout_step_metadata(
+                            rollout_metadata=rollout_metadata,
+                            reconnect_count=reconnect_count,
+                            reconnect_attempts=reconnect_attempts,
+                            policy=policy,
+                            policy_errors=policy_errors,
+                            bedrock_fallback_count=bedrock_fallback_count,
+                            policy_latency_ms=policy_latency_ms,
+                        )
+                        policy_errors = metadata["policy_errors"]
+                        bedrock_fallback_count = metadata["bedrock_fallback_count"]
                         step = RolloutStep(
                             index=index,
                             state=state,
@@ -243,6 +284,7 @@ class DoomAgentClient:
                             action_summary=action_summary,
                             last_seen_tick=state.tick,
                             reconnect_attempts=reconnect_attempts,
+                            metadata=metadata,
                         )
 
                         if trajectory is not None:
@@ -255,6 +297,7 @@ class DoomAgentClient:
                                         "next_action": action_summary,
                                         "last_seen_tick": step.last_seen_tick,
                                         "reconnect_attempts": reconnect_attempts,
+                                        "metadata": metadata,
                                     },
                                     sort_keys=True,
                                 )
@@ -278,6 +321,7 @@ class DoomAgentClient:
                         ) from error
 
                     reconnect_attempts += 1
+                    reconnect_count += 1
                     if reconnect_attempts > backoff.max_attempts:
                         raise DoomAgentStreamError(
                             "game session stream ended after reconnect attempts were exhausted",
@@ -304,6 +348,7 @@ class DoomAgentClient:
                         )
 
                     reconnect_attempts += 1
+                    reconnect_count += 1
                     if reconnect_attempts > backoff.max_attempts:
                         raise DoomAgentStreamError(
                             "game session stream ended after reconnect attempts were exhausted",
@@ -448,3 +493,87 @@ def _stop_action_iter(queue: asyncio.Queue[Any | None]) -> None:
         queue.put_nowait(None)
     except asyncio.QueueFull:
         pass
+
+
+def _rollout_step_metadata(
+    *,
+    rollout_metadata: dict[str, Any],
+    reconnect_count: int,
+    reconnect_attempts: int,
+    policy: Any,
+    policy_errors: int,
+    bedrock_fallback_count: int,
+    policy_latency_ms: float,
+) -> dict[str, Any]:
+    last_policy_error = getattr(policy, "last_error", None)
+    if last_policy_error:
+        policy_errors += 1
+
+    reported_policy_errors = _int_attr(policy, "error_count")
+    if reported_policy_errors is not None:
+        policy_errors = max(policy_errors, reported_policy_errors)
+
+    reported_fallbacks = _int_attr(policy, "fallback_count")
+    if reported_fallbacks is not None:
+        bedrock_fallback_count = max(bedrock_fallback_count, reported_fallbacks)
+
+    llm_latency_ms = _float_attr(policy, "last_llm_latency_ms")
+    return {
+        "rollout": rollout_metadata,
+        "reconnect_count": reconnect_count,
+        "reconnect_attempts": reconnect_attempts,
+        "policy_errors": policy_errors,
+        "bedrock_fallback_count": bedrock_fallback_count,
+        "last_token_usage": _dict_attr(policy, "last_token_usage"),
+        "total_token_usage": _dict_attr(policy, "total_token_usage"),
+        "policy_latency_ms": round(policy_latency_ms, 3),
+        "llm_latency_ms": round(llm_latency_ms, 3) if llm_latency_ms is not None else None,
+        "last_policy_error": last_policy_error,
+    }
+
+
+def _int_attr(obj: Any, name: str) -> int | None:
+    value = getattr(obj, name, None)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_attr(obj: Any, name: str) -> float | None:
+    value = getattr(obj, name, None)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _dict_attr(obj: Any, name: str) -> dict[str, Any]:
+    value = getattr(obj, name, None)
+    if isinstance(value, dict):
+        return dict(value)
+    return {}
+
+
+def _client_metadata(
+    *,
+    token: str | None,
+    agent_port: int | None,
+) -> tuple[tuple[str, str], ...]:
+    metadata: list[tuple[str, str]] = []
+    if token:
+        metadata.append((AUTH_METADATA_KEY, token))
+        metadata.append((PORT_METADATA_KEY, str(agent_port or DEFAULT_AGENT_PORT)))
+    elif agent_port is not None:
+        metadata.append((PORT_METADATA_KEY, str(agent_port)))
+    return tuple(metadata)
+
+
+def _channel_options(authority: str | None) -> tuple[tuple[str, str], ...] | None:
+    if not authority:
+        return None
+    return (("grpc.default_authority", authority),)

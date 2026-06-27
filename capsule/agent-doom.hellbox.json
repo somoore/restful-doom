@@ -1,0 +1,22 @@
+{
+  "name": "agent-doom",
+  "description": "Headless RESTful Doom gRPC agent capsule",
+  "ready": {
+    "port": 9000,
+    "path": "/aws/lambda-microvms/runtime/v1/ready"
+  },
+  "ports": [
+    {
+      "name": "grpc",
+      "port": 50051,
+      "protocol": "grpc",
+      "auth": "short-lived",
+      "env": "DOOM_AGENT_PORT",
+      "discoverable": true
+    }
+  ],
+  "runtime": {
+    "entrypoint": "/opt/capsule/start.sh",
+    "headless": true
+  }
+}

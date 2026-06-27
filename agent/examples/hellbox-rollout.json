@@ -1,0 +1,14 @@
+{
+  "policy": "cycle",
+  "mission": "Navigate toward the target point, stay alive, and keep producing a resumable trajectory.",
+  "goal_preset": "navigation",
+  "agent_port": 50051,
+  "target_x_fp": 12345,
+  "target_y_fp": 67890,
+  "max_states": 500,
+  "trajectory_jsonl": "trajectories/hellbox-run.jsonl",
+  "reconnect": true,
+  "max_reconnects": 20,
+  "backoff_initial": 0.25,
+  "backoff_max": 5.0
+}

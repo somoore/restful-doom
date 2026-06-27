@@ -12,6 +12,7 @@ The agent capsule contract is:
 
 - `capsule/Dockerfile` builds SDL2, SDL2_mixer, SDL2_net, this RESTful Doom tree, and the Rust gRPC static library.
 - `capsule/rootfs/opt/capsule/start.sh` starts `restful-doom` with `-agentport 50051`.
+- `capsule/agent-doom.hellbox.json` names the capsule `agent-doom` and marks gRPC port `50051` as discoverable.
 - `:9000` is the internal MicroVM ready hook.
 - `:50051` is the external gRPC agent port to include in the MicroVM auth token.
 
@@ -27,11 +28,46 @@ restful-doom -iwad /home/app/app/DOOM1.WAD -warp 1 1 -skill 3 -nosound -nomusic 
 Hellbox should forward or authorize port `50051` for the Python agent. The legacy REST API can
 still be exposed on `6666` for debugging.
 
+## External Capsule Install Path
+
+From this repo, build and launch the capsule as an external Hellbox/Shrink
+capsule:
+
+```bash
+RESTFUL_DOOM_CAPSULE_DIR="$PWD/capsule" shrink build --name agent-doom
+shrink up agent-doom
+shrink token agent-doom --port 50051 --minutes 60 > trajectories/agent-doom-token.json
+```
+
+The token JSON includes the external TLS endpoint, auth token, auth header name,
+port header name, and internal gRPC port. The Python agent sends
+`X-aws-proxy-auth` plus `X-aws-proxy-port: 50051` as gRPC metadata.
+
+```bash
+scripts/hellbox-agent-demo.sh run
+```
+
+`scripts/hellbox-agent-demo.sh` also exposes the lifecycle commands:
+
+```bash
+scripts/hellbox-agent-demo.sh build
+scripts/hellbox-agent-demo.sh up
+scripts/hellbox-agent-demo.sh token
+scripts/hellbox-agent-demo.sh run
+scripts/hellbox-agent-demo.sh suspend   # freeze
+scripts/hellbox-agent-demo.sh resume    # thaw
+scripts/hellbox-agent-demo.sh production-demo
+```
+
+The rollout JSON used by the script lives at
+`agent/examples/hellbox-rollout.json`. CLI flags still override that JSON, so a
+fresh demo can point at a newly minted endpoint without editing the file.
+
 ## Polished Demo Loop
 
 1. Launch the headless RESTful-DOOM capsule in a Hellbox MicroVM.
 2. Mint short-lived access for gRPC port `50051`.
-3. Run `python -m restfuldoom_agent.smoke_agent --endpoint <host>:50051 --goal-preset survival --trajectory-jsonl trajectories/run.jsonl`.
+3. Run `python -m restfuldoom_agent.smoke_agent --config agent/examples/hellbox-rollout.json --endpoint <host>:443 --token <token> --agent-port 50051 --tls`.
 4. Confirm the trajectory log is receiving state/action/reward records.
 5. Freeze the MicroVM mid-run.
 6. Thaw the MicroVM.
@@ -50,13 +86,18 @@ not only a human-playable game stream.
 
   ```bash
   python -m restfuldoom_agent.smoke_agent \
-      --endpoint <host>:50051 \
-      --goal-preset survival \
+      --config agent/examples/hellbox-rollout.json \
+      --endpoint <host>:443 \
+      --token <token> \
+      --agent-port 50051 \
+      --tls \
       --trajectory-jsonl trajectories/hellbox-run.jsonl
   ```
 
 - Watch stderr for reconnect notices. Each notice includes the gRPC status, delay, and last observed Doom tick.
-- Confirm the trajectory file grows with `state`, `reward`, `next_action`, `last_seen_tick`, and `reconnect_attempts` fields.
+- Confirm the trajectory file grows with `state`, `reward`, `next_action`, `last_seen_tick`, `reconnect_attempts`, and `metadata` fields.
+- Check `metadata.reconnect_count`, `metadata.policy_errors`, `metadata.bedrock_fallback_count`, and `metadata.llm_latency_ms` when debugging a run.
+- Confirm `metadata.rollout.token_present` is true and that no raw token appears in the JSONL.
 - Freeze the MicroVM while the trajectory file is still receiving ticks.
 - Thaw the MicroVM and confirm the next reconnect continues from a later tick instead of starting a fresh process.
 - Save the trajectory, Hellbox VM id, auth lease id, freeze timestamp, and thaw timestamp with the demo notes.
