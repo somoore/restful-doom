@@ -1679,6 +1679,91 @@ def test_exit_routing_selection_score_prefers_fast_exit_over_slow_reward():
     assert fast_components["selection_score"] > slow_components["selection_score"]
 
 
+def test_post_combat_snapshot_selection_score_caps_no_exit_credit():
+    post_combat_stage = {
+        "name": "1420-post-combat_snapshot",
+        "evidence": {
+            "selector": "post-combat",
+            "selectors": ["post-combat"],
+        },
+    }
+    eval_result = _aggregate(
+        "ppo:post-combat-no-exit",
+        [
+            EpisodeEval(
+                seed=7,
+                total_reward=210.0035,
+                level_completed=False,
+                death=False,
+                max_kills=6,
+                min_health=84,
+                steps=1428,
+                steps_to_exit=4000,
+                stuck_events=0,
+                done_reason="max_steps",
+                start_kills=2,
+                kill_delta=4,
+                max_kill_gain=4,
+                reset_source="snapshot_restore",
+            )
+        ],
+    )
+
+    components = _policy_eval_selection_components(
+        eval_result,
+        stage=post_combat_stage,
+    )
+
+    assert components["schema"] == "restfuldoom.ppo_checkpoint_eval_score.v4"
+    assert components["mode"] == "post_combat_exit_routing"
+    assert components["exit_success_rate"] == 0.0
+    assert components["exit_speed_bonus"] == 0.0
+    assert components["reward_tiebreak"] == 20.0
+    assert components["earned_kill_bonus"] == 0.0
+    assert components["selection_score"] == 40.0
+
+
+def test_required_kill_selection_score_takes_priority_over_post_combat_hint():
+    post_combat_stage = {
+        "name": "1420-post-combat_snapshot",
+        "evidence": {
+            "selector": "post-combat-exit-route",
+            "selectors": ["post-combat", "post-combat-exit-route"],
+        },
+    }
+    eval_result = _aggregate(
+        "ppo:post-combat-required-kill",
+        [
+            EpisodeEval(
+                seed=7,
+                total_reward=60.0,
+                level_completed=False,
+                death=False,
+                max_kills=3,
+                min_health=100,
+                steps=120,
+                steps_to_exit=4000,
+                stuck_events=0,
+                done_reason="required_kills",
+                steps_to_required_kills=120,
+                start_kills=2,
+                kill_delta=1,
+                max_kill_gain=1,
+                reset_source="snapshot_restore",
+            )
+        ],
+    )
+
+    components = _policy_eval_selection_components(
+        eval_result,
+        stage=post_combat_stage,
+    )
+
+    assert components["mode"] == "required_kill_speed"
+    assert components["required_kill_success_rate"] == 1.0
+    assert components["earned_kill_bonus"] == 120.0
+
+
 def test_policy_eval_aggregates_earned_kills_not_restored_snapshot_kills():
     inherited = EpisodeEval(
         seed=7,
@@ -1955,7 +2040,7 @@ def test_checkpoint_curriculum_eval_restores_snapshot_stages(monkeypatch, tmp_pa
     )
 
     assert payload["schema"] == "restfuldoom.ppo_checkpoint_curriculum_eval.v1"
-    assert payload["score_schema"] == "restfuldoom.ppo_checkpoint_eval_score.v3"
+    assert payload["score_schema"] == "restfuldoom.ppo_checkpoint_eval_score.v4"
     assert seen_configs
     config = seen_configs[0]
     assert config.reset_mode == "snapshot"
@@ -1964,6 +2049,42 @@ def test_checkpoint_curriculum_eval_restores_snapshot_stages(monkeypatch, tmp_pa
     assert config.curriculum_stage["snapshot_restore"]["slot"] == 3
     assert payload["stages"][0]["selection_score_components"]["mode"] == "standard"
     assert payload["stages"][0]["result"]["result"]["mean_kills"] == 0.0
+
+    post_combat_curriculum = {
+        **curriculum,
+        "stages": [
+            {
+                "index": 0,
+                "name": "1420-post-combat_snapshot",
+                "reset_mode": "snapshot",
+                "expected_state": {"kills": 2},
+                "snapshot": {"id": "slot-5", "slot": 5, "ref": "save_slot:5"},
+                "evidence": {
+                    "selector": "post-combat",
+                    "selectors": ["post-combat"],
+                },
+            }
+        ],
+    }
+    post_combat_payload = asyncio.run(
+        _evaluate_checkpoint_curriculum(
+            tmp_path / "candidate.pt",
+            args,
+            curriculum=post_combat_curriculum,
+            update_index=3,
+        )
+    )
+
+    assert (
+        post_combat_payload["stages"][0]["selection_score_components"]["mode"]
+        == "post_combat_exit_routing"
+    )
+    assert (
+        post_combat_payload["stages"][0]["selection_score_components"][
+            "earned_kill_bonus"
+        ]
+        == 0.0
+    )
 
 
 def test_curriculum_eval_best_replaces_legacy_rollout_best():
@@ -2050,6 +2171,76 @@ def test_curriculum_eval_best_prefers_stronger_eval_protocol():
         score=900.0,
         score_source="checkpoint_curriculum_eval",
         checkpoint_eval=weaker_eval,
+    )
+
+
+def test_curriculum_eval_best_prefers_current_score_schema():
+    stale_eval_best = {
+        "checkpoint_selection_score": 630.0,
+        "checkpoint_selection_source": "checkpoint_curriculum_eval",
+        "checkpoint_eval": {
+            "selection_score": 630.0,
+            "score_schema": "restfuldoom.ppo_checkpoint_eval_score.v3",
+            "stage_count": 1,
+            "episodes_per_stage": 1,
+            "max_steps": 4000,
+            "sample": False,
+        },
+    }
+    current_schema_eval = {
+        "selection_score": 536.0,
+        "score_schema": "restfuldoom.ppo_checkpoint_eval_score.v4",
+        "stage_count": 1,
+        "episodes_per_stage": 1,
+        "max_steps": 4000,
+        "sample": False,
+    }
+    current_schema_regression = {
+        **current_schema_eval,
+        "selection_score": 400.0,
+    }
+
+    assert _should_replace_best_checkpoint(
+        stale_eval_best,
+        score=536.0,
+        score_source="checkpoint_curriculum_eval",
+        checkpoint_eval=current_schema_eval,
+    )
+    assert not _should_replace_best_checkpoint(
+        stale_eval_best,
+        score=400.0,
+        score_source="checkpoint_curriculum_eval",
+        checkpoint_eval=current_schema_regression,
+    )
+
+
+def test_current_score_schema_does_not_outrank_stronger_eval_protocol():
+    stronger_stale_best = {
+        "checkpoint_selection_score": 630.0,
+        "checkpoint_selection_source": "checkpoint_curriculum_eval",
+        "checkpoint_eval": {
+            "selection_score": 630.0,
+            "score_schema": "restfuldoom.ppo_checkpoint_eval_score.v3",
+            "stage_count": 3,
+            "episodes_per_stage": 3,
+            "max_steps": 4000,
+            "sample": False,
+        },
+    }
+    weaker_current_schema_eval = {
+        "selection_score": 620.0,
+        "score_schema": "restfuldoom.ppo_checkpoint_eval_score.v4",
+        "stage_count": 1,
+        "episodes_per_stage": 1,
+        "max_steps": 4000,
+        "sample": False,
+    }
+
+    assert not _should_replace_best_checkpoint(
+        stronger_stale_best,
+        score=620.0,
+        score_source="checkpoint_curriculum_eval",
+        checkpoint_eval=weaker_current_schema_eval,
     )
 
 

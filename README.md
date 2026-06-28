@@ -40,8 +40,9 @@ The punchline is:
   counters inherited from restored slots.
 - Checkpoint curriculum eval restores snapshot stages through the same native
   slot/external restore path and serializes start-vs-earned counters.
-- Post-combat exit-routing snapshot selectors and speed-aware checkpoint scoring
-  are implemented for the next bottleneck gate.
+- Checkpoint scorer schema `restfuldoom.ppo_checkpoint_eval_score.v4` separates
+  required-kill, completed-exit, and post-combat exit-routing objectives, with
+  shaped reward capped as a tiebreaker.
 - Full independent PPO level completion from E1M1 spawn is not proven yet.
 - Next major unlock: capture real Hellbox/Shrink progressed-map snapshots and
   train/evaluate PPO through the promotion gate.
@@ -770,9 +771,13 @@ start/end map, and item/secret deltas so snapshot-stage wins are auditable.
 Eval aggregates also include `mean_item_gain`, `mean_secret_gain`, and
 `reset_source_breakdown`, which separates `snapshot_restore` outcomes from
 fresh-reset outcomes. Checkpoint eval score schema
-`restfuldoom.ppo_checkpoint_eval_score.v3` adds an `exit_routing_speed` mode:
-once a stage reaches `level_complete`, selection favors reliable and faster
-exits with shaped reward capped as a tiebreaker.
+`restfuldoom.ppo_checkpoint_eval_score.v4` scores level-complete stages with
+`exit_routing_speed`: selection favors reliable and faster exits with shaped
+reward capped as a tiebreaker. Post-combat snapshot stages use
+`post_combat_exit_routing` even before completion, so earned kills/items from a
+restored rung cannot make a non-exiting checkpoint look like exit-route
+competence. Episodes that terminate on `required_kills` use
+`required_kill_speed` before the post-combat forced-exit fallback.
 Topology-context runs report `topology_frontier_active_steps`,
 `mean_topology_current_cell_visits_norm`,
 `mean_topology_open_cell_min_visit_norm`, and

@@ -27,7 +27,7 @@ from .schemas import map_expert_skill_to_ppo_action, pad_observation_features
 from .snapshot_curriculum import load_snapshot_curriculum
 from .skill_policy import features_from_record
 
-CHECKPOINT_EVAL_SCORE_SCHEMA = "restfuldoom.ppo_checkpoint_eval_score.v3"
+CHECKPOINT_EVAL_SCORE_SCHEMA = "restfuldoom.ppo_checkpoint_eval_score.v4"
 
 
 async def train(args: argparse.Namespace) -> dict[str, object]:
@@ -980,7 +980,10 @@ async def _evaluate_checkpoint_curriculum(
             deterministic=not args.checkpoint_eval_sample,
             before_reset=before_reset,
         )
-        stage_score_components = _policy_eval_selection_components(result)
+        stage_score_components = _policy_eval_selection_components(
+            result,
+            stage=stage_dict,
+        )
         stage_score = float(stage_score_components["selection_score"])
         stage_records.append(
             {
@@ -1020,23 +1023,41 @@ async def _evaluate_checkpoint_curriculum(
         "score_formula": (
             "0.7 * mean_stage_score + 0.3 * worst_stage_score; "
             "required-kill and exit-routing stage scores use reliability + "
-            "speed with shaped reward capped as a tiebreaker"
+            "speed with shaped reward capped as a tiebreaker; post-combat "
+            "snapshot stages are scored as exit-routing objectives even before "
+            "level completion"
         ),
         "stages": stage_records,
     }
 
 
-def _policy_eval_selection_score(eval_result: object) -> float:
+def _policy_eval_selection_score(
+    eval_result: object,
+    *,
+    stage: object | None = None,
+) -> float:
     """Scores deterministic eval results for resume selection, not promotion."""
-    return float(_policy_eval_selection_components(eval_result)["selection_score"])
+    return float(
+        _policy_eval_selection_components(eval_result, stage=stage)[
+            "selection_score"
+        ]
+    )
 
 
-def _policy_eval_selection_components(eval_result: object) -> dict[str, object]:
+def _policy_eval_selection_components(
+    eval_result: object,
+    *,
+    stage: object | None = None,
+) -> dict[str, object]:
     """Returns deterministic eval score components for resume selection."""
     result = getattr(eval_result, "result", eval_result)
     episodes = getattr(eval_result, "episodes", [])
-    exit_routing_components = _exit_routing_score_components(episodes)
+    force_exit_routing = _stage_prefers_exit_routing_score(stage)
     required_kill_components = _required_kill_score_components(episodes)
+    exit_routing_components = _exit_routing_score_components(
+        episodes,
+        force=force_exit_routing and required_kill_components is None,
+    )
     completion_bonus = float(getattr(result, "level_completion_rate", 0.0)) * 500.0
     survival_bonus = float(getattr(result, "survival_rate", 0.0)) * 20.0
     stuck_penalty = -float(getattr(result, "mean_stuck_events", 0.0)) * 2.0
@@ -1051,7 +1072,11 @@ def _policy_eval_selection_components(eval_result: object) -> dict[str, object]:
         )
         return {
             "schema": CHECKPOINT_EVAL_SCORE_SCHEMA,
-            "mode": "exit_routing_speed",
+            "mode": (
+                "post_combat_exit_routing"
+                if force_exit_routing
+                else "exit_routing_speed"
+            ),
             "selection_score": score,
             "mean_reward": float(getattr(result, "mean_reward", 0.0)),
             "reward_tiebreak": exit_routing_components["reward_tiebreak"],
@@ -1064,6 +1089,12 @@ def _policy_eval_selection_components(eval_result: object) -> dict[str, object]:
             "survival_bonus": round(survival_bonus, 4),
             "stuck_penalty": round(stuck_penalty, 4),
             "reward_tiebreak_cap": 20.0,
+            "earned_kill_bonus": 0.0,
+            "earned_kill_bonus_policy": (
+                "ignored_until_level_completion"
+                if force_exit_routing
+                else "not_used_for_exit_routing"
+            ),
         }
     if required_kill_components is not None:
         score = round(
@@ -1114,7 +1145,11 @@ def _policy_eval_selection_components(eval_result: object) -> dict[str, object]:
     }
 
 
-def _exit_routing_score_components(episodes: object) -> dict[str, object] | None:
+def _exit_routing_score_components(
+    episodes: object,
+    *,
+    force: bool = False,
+) -> dict[str, object] | None:
     """Returns reliability and speed components for level-completion evals."""
     if not isinstance(episodes, list) or not episodes:
         return None
@@ -1124,7 +1159,7 @@ def _exit_routing_score_components(episodes: object) -> dict[str, object] | None
         if getattr(episode, "done_reason", None) == "level_complete"
         or bool(getattr(episode, "level_completed", False))
     ]
-    if not successful:
+    if not successful and not force:
         return None
     max_steps = max(
         1,
@@ -1133,10 +1168,13 @@ def _exit_routing_score_components(episodes: object) -> dict[str, object] | None
             for episode in episodes
         ],
     )
-    mean_steps = sum(
-        int(getattr(episode, "steps_to_exit", 0) or getattr(episode, "steps", 0))
-        for episode in successful
-    ) / len(successful)
+    if successful:
+        mean_steps = sum(
+            int(getattr(episode, "steps_to_exit", 0) or getattr(episode, "steps", 0))
+            for episode in successful
+        ) / len(successful)
+    else:
+        mean_steps = float(max_steps)
     success_rate = len(successful) / len(episodes)
     reference_steps = max(700.0, float(max_steps))
     speed_fraction = success_rate * max(
@@ -1154,6 +1192,30 @@ def _exit_routing_score_components(episodes: object) -> dict[str, object] | None
         "success_bonus": round(success_rate * 200.0, 4),
         "speed_bonus": round(speed_fraction * 160.0, 4),
     }
+
+
+def _stage_prefers_exit_routing_score(stage: object | None) -> bool:
+    """Returns whether a curriculum stage should be scored as exit routing."""
+    if not isinstance(stage, dict):
+        return False
+    labels: set[str] = set()
+    name = stage.get("name")
+    if name is not None:
+        labels.add(str(name).lower())
+    evidence = stage.get("evidence")
+    if isinstance(evidence, dict):
+        selector = evidence.get("selector")
+        if selector is not None:
+            labels.add(str(selector).lower())
+        selectors = evidence.get("selectors")
+        if isinstance(selectors, list):
+            labels.update(str(selector).lower() for selector in selectors)
+    return any(
+        label in {"post-combat", "post-combat-exit-route"}
+        or "post-combat" in label
+        or "post_combat" in label
+        for label in labels
+    )
 
 
 def _required_kill_score_components(episodes: object) -> dict[str, object] | None:
@@ -1287,10 +1349,12 @@ def _best_checkpoint_score(best: dict[str, object]) -> float:
         return -1e12
 
 
-def _checkpoint_eval_protocol_rank(checkpoint_eval: object) -> tuple[int, int, int, int]:
+def _checkpoint_eval_protocol_rank(
+    checkpoint_eval: object,
+) -> tuple[int, int, int, int, int]:
     """Ranks eval protocols so stricter gates supersede weaker resume evidence."""
     if not isinstance(checkpoint_eval, dict):
-        return (0, 0, 0, 0)
+        return (0, 0, 0, 0, 0)
     stages = checkpoint_eval.get("stages")
     stage_count = checkpoint_eval.get("stage_count")
     if stage_count is None and isinstance(stages, list):
@@ -1300,6 +1364,7 @@ def _checkpoint_eval_protocol_rank(checkpoint_eval: object) -> tuple[int, int, i
         _positive_int(stage_count),
         _positive_int(checkpoint_eval.get("episodes_per_stage")),
         _positive_int(checkpoint_eval.get("max_steps")),
+        1 if checkpoint_eval.get("score_schema") == CHECKPOINT_EVAL_SCORE_SCHEMA else 0,
     )
 
 

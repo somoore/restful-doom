@@ -512,6 +512,12 @@ fixed-stage run improves while `combat_start` or another visible-contact stage
 regresses. Because rollout-only and curriculum-eval scores are not comparable,
 the first eval-scored checkpoint supersedes older rollout-only bests; later
 eval-scored checkpoints compare against each other by the eval score.
+The current score schema is `restfuldoom.ppo_checkpoint_eval_score.v4`:
+required-kill episodes score by required-kill reliability/speed, completed exit
+stages score by exit reliability/speed, and post-combat snapshot stages force
+exit-routing scoring even before level completion. Required-kill and
+exit-routing modes cap shaped reward as a tiebreaker so longer reward-farming
+rollouts do not dominate the gate.
 
 ## Reset Curriculum
 
