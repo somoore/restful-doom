@@ -2128,10 +2128,14 @@ class BrainPolicy:
         special = int(line.get("special", 0))
         start_kills = self._start_kills if self._start_kills is not None else features.kills
         kill_delta = features.kills - start_kills
-        if (
-            special in WALK_TRIGGER_LINE_SPECIALS
-            and float(line.get("distance", 999999)) > 1200.0
-        ):
+        if special in WALK_TRIGGER_LINE_SPECIALS:
+            ready_distance = (
+                POST_COMBAT_ROUTE_WAYPOINT_FINISH_DISTANCE_UNITS
+                if special == 36
+                else 1200.0
+            )
+            if float(line.get("distance", 999999)) <= ready_distance:
+                return True
             return kill_delta >= 5
         if special not in EXIT_LINE_SPECIALS:
             return True
@@ -3189,18 +3193,12 @@ class BrainPolicy:
         ):
             return True
 
-        key = self._line_key(features.cell, line)
+        key = self._line_attempt_key(features, line)
         blocked_until = self._blocked_use_lines.get(key)
         if blocked_until is not None and blocked_until > features.tick:
             return False
 
-        signature = {
-            "cell": features.cell,
-            "episode": features.episode,
-            "map": features.map,
-            "items": features.items,
-            "kills": features.kills,
-        }
+        signature = self._line_attempt_signature(features, line)
         previous = self._line_attempts.get(key)
         if previous is None or previous.get("signature") != signature:
             self._line_attempts[key] = {
@@ -3258,14 +3256,58 @@ class BrainPolicy:
         features: TacticalFeatures,
         line: dict[str, Any],
     ) -> bool:
-        key = self._line_key(features.cell, line)
-        blocked_until = self._blocked_use_lines.get(key)
-        if blocked_until is None:
-            return False
-        if blocked_until <= features.tick:
-            del self._blocked_use_lines[key]
-            return False
-        return True
+        for key in self._line_block_keys(features, line):
+            blocked_until = self._blocked_use_lines.get(key)
+            if blocked_until is None:
+                continue
+            if blocked_until <= features.tick:
+                del self._blocked_use_lines[key]
+                continue
+            return True
+        return False
+
+    def _line_attempt_key(self, features: TacticalFeatures, line: dict[str, Any]) -> str:
+        if (
+            int(line.get("special", 0)) in WALK_TRIGGER_LINE_SPECIALS
+            and self._has_episode_kill(features)
+        ):
+            return self._route_line_key(features, line)
+        return self._line_key(features.cell, line)
+
+    def _line_attempt_signature(
+        self,
+        features: TacticalFeatures,
+        line: dict[str, Any],
+    ) -> dict[str, Any]:
+        signature = {
+            "episode": features.episode,
+            "map": features.map,
+            "items": features.items,
+            "kills": features.kills,
+        }
+        if (
+            int(line.get("special", 0)) not in WALK_TRIGGER_LINE_SPECIALS
+            or not self._has_episode_kill(features)
+        ):
+            signature["cell"] = features.cell
+        return signature
+
+    def _line_block_keys(
+        self,
+        features: TacticalFeatures,
+        line: dict[str, Any],
+    ) -> list[str]:
+        keys = [self._line_key(features.cell, line)]
+        if (
+            int(line.get("special", 0)) in WALK_TRIGGER_LINE_SPECIALS
+            and self._has_episode_kill(features)
+        ):
+            keys.append(self._route_line_key(features, line))
+        return keys
+
+    @staticmethod
+    def _route_line_key(features: TacticalFeatures, line: dict[str, Any]) -> str:
+        return f"route:{int(features.episode)}:{int(features.map)}:{int(line['line_id'])}"
 
     @staticmethod
     def _line_key(cell: str, line: dict[str, Any]) -> str:

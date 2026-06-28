@@ -1240,6 +1240,117 @@ def test_stalled_nearby_walk_route_yields_to_visible_far_exit(tmp_path):
     assert selected_after_stall["line_id"] == 330
 
 
+def test_walk_route_stall_across_cells_yields_to_visible_far_exit(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+
+    route_line = SimpleNamespace(
+        line_id=195,
+        midpoint=SimpleNamespace(x_fp=560 * 65536, y_fp=0, z_fp=0),
+        nearest_point=SimpleNamespace(x_fp=560 * 65536, y_fp=0, z_fp=0),
+        special=88,
+        tag=2,
+        distance_fp=560 * 65536,
+        nearest_distance_fp=560 * 65536,
+    )
+    exit_line = SimpleNamespace(
+        line_id=330,
+        midpoint=SimpleNamespace(x_fp=2250 * 65536, y_fp=0, z_fp=0),
+        nearest_point=SimpleNamespace(x_fp=2250 * 65536, y_fp=0, z_fp=0),
+        special=11,
+        tag=0,
+        distance_fp=2250 * 65536,
+        nearest_distance_fp=2250 * 65536,
+    )
+
+    first_state = state(tick=40, x=0, y=0)
+    first_state.player.kills = 5
+    first_state.navigation.use_lines = [route_line, exit_line]
+    first_state.navigation.route_waypoint = SimpleNamespace(
+        line=route_line,
+        priority=0,
+        exit=False,
+        walk_trigger=True,
+    )
+    policy._start_kills = 5
+    first_features = extract_features(first_state, policy.memory, policy.params)
+    selected = policy._select_progression_line(first_features)
+
+    assert selected["line_id"] == 195
+    assert policy._record_line_attempt(first_features, selected) is True
+
+    stalled_state = state(tick=40 + LINE_ATTEMPT_STALL_TICS + 1, x=0, y=128)
+    stalled_state.player.kills = 5
+    stalled_state.navigation.use_lines = [route_line, exit_line]
+    stalled_state.navigation.route_waypoint = SimpleNamespace(
+        line=route_line,
+        priority=0,
+        exit=False,
+        walk_trigger=True,
+    )
+    stalled_features = extract_features(stalled_state, policy.memory, policy.params)
+    stalled_selection = policy._select_progression_line(stalled_features)
+
+    assert stalled_features.cell != first_features.cell
+    assert stalled_selection["line_id"] == 195
+    assert policy._record_line_attempt(stalled_features, stalled_selection) is False
+
+    selected_after_stall = policy._select_progression_line(stalled_features)
+
+    assert selected_after_stall["line_id"] == 330
+
+
+def test_walk_route_stall_before_kill_remains_cell_scoped(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+
+    route_line = SimpleNamespace(
+        line_id=195,
+        midpoint=SimpleNamespace(x_fp=560 * 65536, y_fp=0, z_fp=0),
+        nearest_point=SimpleNamespace(x_fp=560 * 65536, y_fp=0, z_fp=0),
+        special=88,
+        tag=2,
+        distance_fp=560 * 65536,
+        nearest_distance_fp=560 * 65536,
+    )
+
+    first_state = state(tick=40, x=0, y=0)
+    first_state.navigation.use_lines = [route_line]
+    first_state.navigation.route_waypoint = SimpleNamespace(
+        line=route_line,
+        priority=0,
+        exit=False,
+        walk_trigger=True,
+    )
+    first_features = extract_features(first_state, policy.memory, policy.params)
+    first_line = first_features.navigation["route_waypoint"]["line"]
+
+    assert policy._record_line_attempt(first_features, first_line) is True
+
+    stalled_state = state(tick=40 + LINE_ATTEMPT_STALL_TICS + 1, x=0, y=128)
+    stalled_state.navigation.use_lines = [route_line]
+    stalled_state.navigation.route_waypoint = SimpleNamespace(
+        line=route_line,
+        priority=0,
+        exit=False,
+        walk_trigger=True,
+    )
+    stalled_features = extract_features(stalled_state, policy.memory, policy.params)
+    stalled_line = stalled_features.navigation["route_waypoint"]["line"]
+
+    assert stalled_features.cell != first_features.cell
+    assert policy._record_line_attempt(stalled_features, stalled_line) is True
+    assert not policy._is_line_blocked(stalled_features, stalled_line)
+
+
 def test_reached_walk_route_waypoint_yields_to_visible_far_exit(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
@@ -1465,6 +1576,40 @@ def test_post_kill_policy_delays_far_walk_trigger_to_hunt_remaining_enemy(tmp_pa
 
     assert policy.last_decision["skill"] == "seek_known_enemy"
     assert action.action == 1
+
+
+def test_midrange_walk_trigger_waits_until_post_combat_kill_count(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    policy._start_kills = 0
+
+    game_state = state(tick=40)
+    game_state.player.kills = 4
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=308,
+            midpoint=SimpleNamespace(x_fp=1100 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=1100 * 65536, y_fp=0, z_fp=0),
+            special=36,
+            tag=1,
+            distance_fp=1100 * 65536,
+            nearest_distance_fp=1100 * 65536,
+        )
+    ]
+    features = extract_features(game_state, policy.memory, policy.params)
+
+    assert policy._select_progression_line(features) is None
+
+    game_state.player.kills = 5
+    ready_features = extract_features(game_state, policy.memory, policy.params)
+    selected = policy._select_progression_line(ready_features)
+
+    assert selected is not None
+    assert selected["line_id"] == 308
 
 
 def test_post_kill_progression_routes_on_open_ray_when_forward_blocked(tmp_path):
