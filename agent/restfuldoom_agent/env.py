@@ -1508,6 +1508,8 @@ class DoomAgentEnv:
             raise RuntimeError("environment stream is not open")
 
         previous = self._current_state
+        requested_action_index = action_index
+        action_index, mask_info = self._resolve_step_action_index(action_index)
         action, decision = self.controller.action_for(action_index, previous)
         await self._action_queue.put(action)
         action_tics = max(
@@ -1559,6 +1561,11 @@ class DoomAgentEnv:
                 reason = str(contact["reason"])
                 break
         skill = SKILL_ACTIONS[action_index]
+        requested_skill = (
+            SKILL_ACTIONS[requested_action_index]
+            if 0 <= requested_action_index < len(SKILL_ACTIONS)
+            else None
+        )
         route_outcome = _route_outcome(skill, previous, current, decision=decision)
         combat_action_reward = self._combat_action_reward(skill, had_shootable_target)
         route_action_reward = self._route_action_reward(route_outcome)
@@ -1574,6 +1581,14 @@ class DoomAgentEnv:
         info = {
             "skill": skill,
             "action_index": action_index,
+            "requested_skill": requested_skill,
+            "requested_action_index": requested_action_index,
+            "action_mask_enforced": bool(mask_info.get("enforced")),
+            "action_mask_requested_allowed": bool(mask_info.get("requested_allowed")),
+            "action_mask_fallback_applied": bool(mask_info.get("fallback_applied")),
+            "action_mask_fallback_reason": mask_info.get("fallback_reason"),
+            "action_mask_fallback_skill": mask_info.get("fallback_skill"),
+            "action_mask_fallback_action_index": mask_info.get("fallback_action_index"),
             "decision_cycle": {
                 "schema": DECISION_CYCLE_SCHEMA["schema"],
                 "observation_schema": OBSERVATION_SCHEMA["schema"],
@@ -1613,6 +1628,46 @@ class DoomAgentEnv:
             done=done,
             info=info,
         )
+
+    def _resolve_step_action_index(self, action_index: int) -> tuple[int, dict[str, Any]]:
+        """Returns the executable action index after enforcing the current mask."""
+        if action_index < 0 or action_index >= len(SKILL_ACTIONS):
+            raise ValueError(f"action_index must be in [0, {len(SKILL_ACTIONS) - 1}]")
+        mask = self.action_mask()
+        requested_allowed = bool(mask[action_index]) if action_index < len(mask) else False
+        info: dict[str, Any] = {
+            "enforced": True,
+            "requested_allowed": requested_allowed,
+            "fallback_applied": False,
+            "fallback_reason": None,
+            "fallback_skill": None,
+            "fallback_action_index": None,
+        }
+        if requested_allowed:
+            return action_index, info
+
+        fallback_index = self._step_action_fallback_index(mask)
+        if fallback_index is None:
+            raise RuntimeError("action mask has no executable actions")
+        info["fallback_applied"] = True
+        info["fallback_reason"] = "requested_action_masked"
+        info["fallback_skill"] = SKILL_ACTIONS[fallback_index]
+        info["fallback_action_index"] = fallback_index
+        return fallback_index, info
+
+    def _step_action_fallback_index(self, mask: list[bool]) -> int | None:
+        """Chooses a deterministic legal fallback from an already-filtered mask."""
+        if self._current_state is not None and hasattr(self.controller, "heuristic_action_index"):
+            try:
+                heuristic_index = int(self.controller.heuristic_action_index(self._current_state))
+            except Exception:
+                heuristic_index = -1
+            if 0 <= heuristic_index < len(mask) and bool(mask[heuristic_index]):
+                return heuristic_index
+        for index, allowed in enumerate(mask):
+            if allowed:
+                return index
+        return None
 
     def action_mask(self) -> list[bool]:
         """Returns feasible PPO actions for the current state."""

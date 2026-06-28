@@ -39,7 +39,7 @@ def test_skill_controller_encodes_observation_and_executes_each_skill(tmp_path):
 
 
 def test_doom_agent_env_reset_step_with_fake_client():
-    first = _state(tick=1, kills=0)
+    first = _state(tick=1, kills=0, enemy=True, combat=True)
     second = _state(tick=2, kills=1)
     client = _FakeClient([first, second])
     env = DoomAgentEnv(
@@ -75,7 +75,7 @@ def test_doom_agent_env_reset_step_with_fake_client():
 
 
 def test_doom_agent_env_terminates_on_required_kills_after_reset():
-    first = _state(tick=1, kills=0)
+    first = _state(tick=1, kills=0, enemy=True, combat=True)
     second = _state(tick=2, kills=1)
     client = _FakeClient([first, second])
     env = DoomAgentEnv(
@@ -102,6 +102,35 @@ def test_doom_agent_env_terminates_on_required_kills_after_reset():
     assert step.info["done_reason"] == "required_kills"
     assert step.info["transition"]["kill_delta"] == 1
     assert step.reward >= 10.0
+
+
+def test_doom_agent_env_step_enforces_action_mask_for_disallowed_skill():
+    first = _state(tick=1, enemy=True, combat=False)
+    second = _state(tick=2, enemy=True, combat=False, enemy_distance=220)
+    client = _DurationAwareFakeClient([first, second])
+    env = DoomAgentEnv(
+        DoomEnvConfig(max_steps=10, goal_preset="combat", max_action_tics=1),
+        client=client,
+        controller=SkillController(),
+    )
+
+    async def run():
+        await env.reset(seed=99)
+        step = await env.step(SKILL_ACTIONS.index("fire"))
+        await env.close()
+        return step
+
+    step = asyncio.run(run())
+
+    assert step.info["requested_skill"] == "fire"
+    assert step.info["skill"] == "close_visible_contact"
+    assert step.info["action_mask_enforced"]
+    assert not step.info["action_mask_requested_allowed"]
+    assert step.info["action_mask_fallback_applied"]
+    assert step.info["action_mask_fallback_reason"] == "requested_action_masked"
+    assert step.info["action_mask_fallback_skill"] == "close_visible_contact"
+    assert step.info["action_index"] == SKILL_ACTIONS.index("close_visible_contact")
+    assert step.info["requested_action_index"] == SKILL_ACTIONS.index("fire")
 
 
 def test_skill_controller_observation_includes_previous_action_history():
