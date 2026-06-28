@@ -2026,8 +2026,9 @@ def _route_outcome(
     """Summarizes whether a route-progression macro-step helped."""
     route, line = _route_target_for_outcome(previous, decision)
     line_id = int(_line_value(line, "line_id", 0)) if line is not None else 0
+    attempted = _route_attempted_for_outcome(skill, route, line, decision)
     outcome: dict[str, Any] = {
-        "attempted": skill == "route_progression" and line is not None,
+        "attempted": attempted,
         "line_id": line_id,
         "previous_distance_units": 0.0,
         "current_distance_units": 0.0,
@@ -2078,6 +2079,33 @@ def _route_outcome(
         }
     )
     return outcome
+
+
+def _route_attempted_for_outcome(
+    skill: str,
+    route: Any | None,
+    line: Any | None,
+    decision: dict[str, Any] | None,
+) -> bool:
+    if line is None:
+        return False
+    if skill == "route_progression":
+        return True
+    if skill not in {"recover_stuck", "press_exit"}:
+        return False
+    if not bool(_line_value(route, "exit", False)):
+        return False
+    if not isinstance(decision, dict):
+        return False
+    decision_skill = str(decision.get("skill", ""))
+    return decision_skill in {
+        "unstick_route_to_exit_line",
+        "unstick_turn_to_exit_line",
+        "unstick_approach_exit_line",
+        "turn_to_exit_switch",
+        "push_exit_switch",
+        "press_exit_switch",
+    }
 
 
 def _route_target_for_outcome(

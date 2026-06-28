@@ -990,6 +990,48 @@ def test_post_combat_policy_prefers_visible_far_exit_when_combat_is_quiet(tmp_pa
     assert action.raw.forward_move > 0
 
 
+def test_post_combat_snapshot_prefers_visible_exit_with_inherited_kills(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+
+    game_state = state(tick=40)
+    game_state.player.kills = 2
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=195,
+            midpoint=SimpleNamespace(x_fp=1600 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=1600 * 65536, y_fp=0, z_fp=0),
+            special=88,
+            tag=2,
+            distance_fp=1600 * 65536,
+            nearest_distance_fp=1600 * 65536,
+        ),
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=2944 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=2944 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=2944 * 65536,
+            nearest_distance_fp=2944 * 65536,
+        ),
+    ]
+    features = extract_features(game_state, policy.memory, policy.params)
+    policy._start_kills = 2
+
+    selected = policy._select_progression_line(features)
+    action, decision = policy._advance_progression_line(features, selected, stuck=False)
+
+    assert selected["line_id"] == 330
+    assert decision["use_line"]["line_id"] == 330
+    assert decision["skill"] == "approach_progression_line"
+    assert action.raw.forward_move > 0
+
+
 def test_far_exit_preference_does_not_preempt_visible_combat(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
@@ -1239,6 +1281,58 @@ def test_stuck_recovery_routes_toward_visible_exit_line(tmp_path):
     assert action.raw.side_move != 0
 
 
+def test_post_combat_snapshot_recovery_routes_toward_far_visible_exit(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+
+    game_state = state(tick=40)
+    game_state.player.kills = 2
+    game_state.navigation.forward_open = False
+    game_state.navigation.direction_probes = [
+        SimpleNamespace(
+            angle_offset_degrees=30,
+            open=True,
+            block_distance_fp=128 * 65536,
+            blocking_line_special=0,
+            use_line_ahead=False,
+        )
+    ]
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=195,
+            midpoint=SimpleNamespace(x_fp=1600 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=1600 * 65536, y_fp=0, z_fp=0),
+            special=88,
+            tag=2,
+            distance_fp=1600 * 65536,
+            nearest_distance_fp=1600 * 65536,
+        ),
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=2944 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=2944 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=2944 * 65536,
+            nearest_distance_fp=2944 * 65536,
+        ),
+    ]
+    features = extract_features(game_state, policy.memory, policy.params)
+    policy._start_kills = 2
+
+    action, decision = policy._recover_from_stuck(features)
+
+    assert decision["skill"] == "unstick_route_to_exit_line"
+    assert decision["use_line"]["line_id"] == 330
+    assert decision["direction_probe"]["angle_offset_degrees"] == 30
+    assert action.raw.forward_move > 0
+    assert action.raw.side_move != 0
+
+
 def test_stuck_recovery_does_not_route_exit_during_visible_contact(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
@@ -1341,7 +1435,10 @@ def test_post_combat_exit_memory_suppresses_stale_walk_trigger_while_exit_visibl
     ]
     stale_features = extract_features(stale_state, policy.memory, policy.params)
 
-    assert policy._select_progression_line(stale_features) is None
+    selected_while_exit_visible = policy._select_progression_line(stale_features)
+
+    assert selected_while_exit_visible is not None
+    assert selected_while_exit_visible["line_id"] == 330
 
     exit_gone_state = state(tick=90)
     exit_gone_state.player.kills = 2

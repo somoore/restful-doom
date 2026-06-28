@@ -37,6 +37,8 @@ EXIT_ASSIST_DOOR_USE_DISTANCE_UNITS = 384.0
 EXIT_ASSIST_DOOR_EXIT_DISTANCE_UNITS = 420.0
 EXIT_ASSIST_DOOR_CLOSE_USE_DISTANCE_UNITS = 96.0
 EXIT_ASSIST_DOOR_CLOSE_USE_ANGLE_DEGREES = 48.0
+POST_COMBAT_EXIT_KILLS = 2
+POST_COMBAT_EXIT_ROUTE_DISTANCE_UNITS = 3200.0
 LINE_ATTEMPT_STALL_TICS = 45
 LINE_ATTEMPT_BLOCK_TICS = 1200
 # Manual door/switch specials handled by Doom's P_UseSpecialLine path.
@@ -849,7 +851,8 @@ class BrainPolicy:
             line
             for line in features.navigation.get("use_lines", [])
             if int(line.get("special", 0)) in EXIT_LINE_SPECIALS
-            and float(line.get("distance", 999999.0)) <= 2600.0
+            and float(line.get("distance", 999999.0))
+            <= POST_COMBAT_EXIT_ROUTE_DISTANCE_UNITS
             and abs(float(line.get("angle_delta", 999.0))) <= 170.0
             and self._is_progression_line_ready(features, line)
         ]
@@ -1729,7 +1732,12 @@ class BrainPolicy:
             line
             for line in features.navigation.get("use_lines", [])
             if int(line.get("special", 0)) in PROGRESSION_LINE_PRIORITIES
-            and float(line.get("distance", 999999)) <= max_distance
+            and float(line.get("distance", 999999))
+            <= (
+                POST_COMBAT_EXIT_ROUTE_DISTANCE_UNITS
+                if int(line.get("special", 0)) in EXIT_LINE_SPECIALS
+                else max_distance
+            )
             and abs(float(line.get("angle_delta", 999))) <= 150
             and self._is_progression_line_ready(features, line)
             and not self._is_line_blocked(features, line)
@@ -1761,8 +1769,7 @@ class BrainPolicy:
     ) -> dict[str, Any] | None:
         if features.visible_enemies or self._shootable_enemy(features) is not None:
             return None
-        start_kills = self._start_kills if self._start_kills is not None else features.kills
-        if features.kills - start_kills < 1:
+        if not self._has_episode_kill(features):
             return None
         exit_candidates = [
             line
@@ -1827,8 +1834,7 @@ class BrainPolicy:
         if float(line.get("distance", 999999)) <= EXIT_ASSIST_DISTANCE_UNITS:
             return True
         if (
-            features.kills >= 2
-            and kill_delta >= 1
+            features.kills >= POST_COMBAT_EXIT_KILLS
             and not features.visible_enemies
             and self._shootable_enemy(features) is None
         ):
@@ -2377,7 +2383,10 @@ class BrainPolicy:
 
     def _has_episode_kill(self, features: TacticalFeatures) -> bool:
         start_kills = self._start_kills if self._start_kills is not None else features.kills
-        return features.kills > start_kills
+        return (
+            features.kills > start_kills
+            or features.kills >= POST_COMBAT_EXIT_KILLS
+        )
 
     def _line_record(self, line: dict[str, Any]) -> dict[str, Any]:
         record = {

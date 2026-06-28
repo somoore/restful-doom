@@ -1788,6 +1788,71 @@ def test_route_outcome_marks_unmatched_exit_special_as_decision_line():
     assert outcome["target_source"] == "decision_line"
 
 
+def test_route_outcome_counts_exit_recovery_decision_line():
+    previous = _state(tick=1, route=True, route_exit=False, x_units=0)
+    current = _state(tick=2, route=True, route_exit=False, x_units=128)
+    exit_line = SimpleNamespace(
+        line_id=330,
+        midpoint=SimpleNamespace(x_fp=512 * 65536, y_fp=0, z_fp=0),
+        start=SimpleNamespace(x_fp=512 * 65536, y_fp=-64 * 65536, z_fp=0),
+        end=SimpleNamespace(x_fp=512 * 65536, y_fp=64 * 65536, z_fp=0),
+        nearest_point=SimpleNamespace(x_fp=512 * 65536, y_fp=0, z_fp=0),
+        special=11,
+        tag=0,
+        distance_fp=512 * 65536,
+        nearest_distance_fp=512 * 65536,
+    )
+    previous.navigation.use_lines.append(exit_line)
+
+    outcome = _route_outcome(
+        "recover_stuck",
+        previous,
+        current,
+        decision={
+            "skill": "unstick_route_to_exit_line",
+            "use_line": {
+                "line_id": 330,
+                "special": 11,
+                "distance": 512.0,
+                "angle_delta": 0.0,
+            },
+        },
+    )
+
+    assert outcome["attempted"]
+    assert outcome["line_id"] == 330
+    assert outcome["exit"] is True
+    assert outcome["target_source"] == "decision_line"
+    assert outcome["progress_units"] == pytest.approx(128.0)
+
+
+def test_route_outcome_does_not_count_non_exit_recovery_decision_line():
+    previous = _state(tick=1, route=True, route_exit=False, x_units=0)
+    current = _state(tick=2, route=True, route_exit=False, x_units=128)
+    manual_line = previous.navigation.route_waypoint.line
+    manual_line.line_id = 151
+    manual_line.special = 1
+
+    outcome = _route_outcome(
+        "recover_stuck",
+        previous,
+        current,
+        decision={
+            "skill": "unstick_route_to_exit_line",
+            "use_line": {
+                "line_id": 151,
+                "special": 1,
+                "distance": 512.0,
+                "angle_delta": 0.0,
+            },
+        },
+    )
+
+    assert not outcome["attempted"]
+    assert outcome["line_id"] == 151
+    assert outcome["exit"] is False
+
+
 def test_doom_agent_env_reset_can_warmup_until_shootable_target():
     first = _state(tick=1, enemy=True, combat=False)
     second = _state(tick=2, enemy=True, combat=True)
