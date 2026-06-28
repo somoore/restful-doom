@@ -903,8 +903,7 @@ PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
 PYTHONPATH=agent python -m restfuldoom_agent.true_spawn_e2e_gate \
     trajectories/ppo/true-spawn-e2e-smoke-eval.json \
     --min-episodes 1 \
-    --min-level-completions 1 \
-    --min-kill-gain 1
+    --min-level-completions 1
 ```
 
 For the 5-seed promotion rung, change `--eval-episodes` to `5` and validate
@@ -916,6 +915,9 @@ use the first failing label to decide the next curriculum target. Because this
 policy selects high-level skills, describe passing results as PPO over
 structured skills unless a future checkpoint directly controls primitive Doom
 actions.
+By default, the true-spawn gate requires the post-combat kill threshold
+(`POST_COMBAT_EXIT_KILLS`, currently `5`). Use `--min-kill-gain 1` only for
+diagnostic smoke checks, not promotion claims.
 When `first_contact` fails after visible-but-not-shootable contact, train only
 that bridge before returning to post-combat routing. The PPO environment exposes
 `--visible-contact-loss-penalty` for losing visible contact before first
