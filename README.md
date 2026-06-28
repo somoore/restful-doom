@@ -813,6 +813,47 @@ post-combat state, execute only the allowed route/exit skills, use strict
 allowlist filtering, produce zero invalid or selected-disallowed actions, use
 zero action-mask or strict-filter fallbacks, have zero snapshot verification
 failures, attempt an exit route, and end with `level_transition_delta=1`.
+The stricter end-to-end promotion gate is the true-spawn gate. This is the
+artifact to use when claiming completion from a fresh Doom episode start: normal
+map spawn, no snapshots, no warmup/scripted reset state, no forced option eval,
+strict action masking, contact, earned kill gain, post-combat routing, exit
+attempt, and `level_transition_delta=1`.
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
+    --eval-checkpoint agent_models/ppo/ppo-postcombat2-exitshape-wave3-20260627-a-ppo-0001.pt \
+    --goal-preset exit_seeking \
+    --allowed-skill engage \
+    --allowed-skill fire \
+    --allowed-skill seek_enemy \
+    --allowed-skill open_use_line \
+    --allowed-skill route_progression \
+    --allowed-skill retreat \
+    --allowed-skill recover_stuck \
+    --allowed-skill press_exit \
+    --allowed-skill close_visible_contact \
+    --strict-allowed-skills \
+    --eval-episodes 1 \
+    --eval-max-steps 3000 \
+    --eval-trace-jsonl trajectories/ppo/true-spawn-e2e-smoke-trace.jsonl \
+    > trajectories/ppo/true-spawn-e2e-smoke-eval.json
+
+PYTHONPATH=agent python -m restfuldoom_agent.true_spawn_e2e_gate \
+    trajectories/ppo/true-spawn-e2e-smoke-eval.json \
+    --min-episodes 1 \
+    --min-level-completions 1 \
+    --min-kill-gain 1
+```
+
+For the 5-seed promotion rung, change `--eval-episodes` to `5` and validate
+with `--min-episodes 5 --min-level-completions 3`. The gate reports reset
+source counts, done reasons, aggregate skill counts, kill gain, damage, route
+progress, exit-route attempts, and bottleneck counts. The bottleneck labels are
+`spawn_route`, `first_contact`, `combat`, `post_combat_route`, and `final_line`;
+use the first failing label to decide the next curriculum target. Because this
+policy selects high-level skills, describe passing results as PPO over
+structured skills unless a future checkpoint directly controls primitive Doom
+actions.
 Eval aggregates also include `mean_item_gain`, `mean_secret_gain`, and
 `reset_source_breakdown`, which separates `snapshot_restore` outcomes from
 fresh-reset outcomes and carries the same route diagnostic totals per reset
