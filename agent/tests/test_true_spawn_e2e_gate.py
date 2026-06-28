@@ -3,6 +3,7 @@ import json
 from restfuldoom_agent.schemas import PPO_SKILL_ACTIONS
 from restfuldoom_agent.true_spawn_e2e_gate import (
     DEFAULT_ALLOWED_SKILLS,
+    DEFAULT_MIN_KILL_GAIN,
     main as gate_main,
     validate_true_spawn_e2e_gate,
 )
@@ -18,7 +19,7 @@ def test_true_spawn_e2e_gate_accepts_strict_episode_transition():
     assert report["summary"]["level_transition_episode_count"] == 1
     assert report["summary"]["level_complete_episode_count"] == 1
     assert report["summary"]["reset_source_counts"] == {"episode": 1}
-    assert report["summary"]["max_kill_gain_total"] == 2
+    assert report["summary"]["max_kill_gain_total"] == DEFAULT_MIN_KILL_GAIN
     assert report["summary"]["damage_delta_total"] == 42
     assert report["summary"]["route_attempt_steps"] == 8
     assert report["summary"]["exit_route_attempt_steps"] == 3
@@ -144,6 +145,23 @@ def test_true_spawn_e2e_gate_requires_strict_filter_evidence():
     assert relaxed_report["ok"] is True
 
 
+def test_true_spawn_e2e_gate_allows_diagnostic_lower_kill_threshold():
+    default_report = validate_true_spawn_e2e_gate(
+        _payload([_episode(max_kills=1, kill_delta=1, max_kill_gain=1)])
+    )
+    relaxed_report = validate_true_spawn_e2e_gate(
+        _payload([_episode(max_kills=1, kill_delta=1, max_kill_gain=1)]),
+        min_kill_gain=1,
+    )
+
+    assert default_report["ok"] is False
+    assert any(
+        failure["reason"] == "kill_gain_below_threshold"
+        for failure in default_report["failures"]
+    )
+    assert relaxed_report["ok"] is True
+
+
 def test_true_spawn_e2e_gate_cli_exits_nonzero_on_failure(tmp_path, capsys):
     path = tmp_path / "eval.json"
     path.write_text(json.dumps(_payload([_episode(level_transition_delta=0)])))
@@ -162,6 +180,10 @@ def test_true_spawn_e2e_gate_cli_exits_nonzero_on_failure(tmp_path, capsys):
 
 def test_true_spawn_e2e_gate_default_allowed_skills_match_ppo_schema():
     assert DEFAULT_ALLOWED_SKILLS == tuple(PPO_SKILL_ACTIONS)
+
+
+def test_true_spawn_e2e_gate_default_kill_threshold_matches_post_combat():
+    assert DEFAULT_MIN_KILL_GAIN == 5
 
 
 def _payload(
@@ -218,15 +240,15 @@ def _episode(**overrides):
         "total_reward": 30.0,
         "level_completed": True,
         "death": False,
-        "max_kills": 2,
+        "max_kills": DEFAULT_MIN_KILL_GAIN,
         "min_health": 72,
         "steps": 128,
         "steps_to_exit": 128,
         "stuck_events": 0,
         "done_reason": "level_complete",
         "start_kills": 0,
-        "kill_delta": 2,
-        "max_kill_gain": 2,
+        "kill_delta": DEFAULT_MIN_KILL_GAIN,
+        "max_kill_gain": DEFAULT_MIN_KILL_GAIN,
         "max_items": 0,
         "start_items": 0,
         "item_delta": 0,

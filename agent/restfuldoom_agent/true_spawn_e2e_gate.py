@@ -10,10 +10,12 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from .brain import POST_COMBAT_EXIT_KILLS
 from .schemas import PPO_SKILL_ACTIONS
 
 TRUE_SPAWN_E2E_GATE_SCHEMA = "restfuldoom.true_spawn_e2e_gate.v1"
 DEFAULT_ALLOWED_SKILLS = tuple(PPO_SKILL_ACTIONS)
+DEFAULT_MIN_KILL_GAIN = POST_COMBAT_EXIT_KILLS
 
 
 def validate_true_spawn_e2e_gate(
@@ -25,7 +27,7 @@ def validate_true_spawn_e2e_gate(
     min_level_completions: int = 1,
     min_first_visible_contacts: int = 1,
     min_first_shootable_contacts: int = 1,
-    min_kill_gain: int = 1,
+    min_kill_gain: int = DEFAULT_MIN_KILL_GAIN,
     min_route_attempt_steps: int = 1,
     min_exit_route_attempt_steps: int = 1,
     require_level_complete: bool = True,
@@ -609,7 +611,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-level-completions", type=int, default=1)
     parser.add_argument("--min-first-visible-contacts", type=int, default=1)
     parser.add_argument("--min-first-shootable-contacts", type=int, default=1)
-    parser.add_argument("--min-kill-gain", type=int, default=1)
+    parser.add_argument("--min-kill-gain", type=int, default=DEFAULT_MIN_KILL_GAIN)
     parser.add_argument("--min-route-attempt-steps", type=int, default=1)
     parser.add_argument("--min-exit-route-attempt-steps", type=int, default=1)
     parser.add_argument("--required-start-episode", type=int)
