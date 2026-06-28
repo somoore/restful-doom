@@ -103,6 +103,8 @@ class DoomEnvConfig:
     first_visible_bonus: float = 0.0
     first_shootable_bonus: float = 0.0
     visible_contact_progress_reward: float = 0.0
+    visible_contact_loss_penalty: float = 0.0
+    pre_shootable_route_penalty: float = 0.0
     terminate_on_first_visible: bool = False
     terminate_on_first_shootable: bool = False
     terminate_on_required_kills: bool = False
@@ -577,8 +579,6 @@ class SkillController:
         if features.visible_enemies:
             if not can_fire:
                 mask["close_visible_contact"] = True
-            if not can_fire and shootable is None and self.policy._select_known_enemy(features) is not None:
-                mask["seek_enemy"] = True
             contact_line = self._contact_use_line(features)
             if (
                 not can_fire
@@ -1543,6 +1543,7 @@ class DoomAgentEnv:
         contact_reward = 0.0
         visible_contact_distance_delta = 0.0
         visible_contact_progress_reward = 0.0
+        visible_contact_loss_penalty = 0.0
         transition_summaries: list[dict[str, Any]] = []
         for _ in range(action_tics):
             tick_previous = current
@@ -1560,6 +1561,10 @@ class DoomAgentEnv:
                 progress_reward = self._visible_contact_progress_reward(contact_delta)
                 visible_contact_progress_reward += progress_reward
                 total_reward += progress_reward
+            loss_penalty = self._visible_contact_loss_penalty(tick_previous, current)
+            if loss_penalty:
+                visible_contact_loss_penalty += loss_penalty
+                total_reward += loss_penalty
             if done:
                 break
             contact = self._contact_reward(current)
@@ -1580,7 +1585,12 @@ class DoomAgentEnv:
         )
         route_outcome = _route_outcome(skill, previous, current, decision=decision)
         combat_action_reward = self._combat_action_reward(skill, had_shootable_target)
-        route_action_reward = self._route_action_reward(route_outcome)
+        pre_shootable_route_penalty = self._pre_shootable_route_penalty(
+            skill,
+            route_outcome,
+            had_shootable_target=had_shootable_target,
+        )
+        route_action_reward = self._route_action_reward(route_outcome) + pre_shootable_route_penalty
         action_reward = combat_action_reward + route_action_reward
         total_reward += action_reward
         self._current_state = current
@@ -1619,6 +1629,8 @@ class DoomAgentEnv:
             "contact_reward": contact_reward,
             "visible_contact_distance_delta": round(visible_contact_distance_delta, 4),
             "visible_contact_progress_reward": round(visible_contact_progress_reward, 4),
+            "visible_contact_loss_penalty": round(visible_contact_loss_penalty, 4),
+            "pre_shootable_route_penalty": round(pre_shootable_route_penalty, 4),
             "had_visible_enemy": had_visible_enemy,
             "route_outcome": route_outcome,
             "had_shootable_target": had_shootable_target,
@@ -1809,6 +1821,38 @@ class DoomAgentEnv:
             return 0.0
         reward = distance_delta * self.config.visible_contact_progress_reward
         return max(-1.0, min(1.0, reward))
+
+    def _visible_contact_loss_penalty(self, previous: Any, current: Any) -> float:
+        if self.config.visible_contact_loss_penalty == 0.0:
+            return 0.0
+        if self._episode_seen_shootable_enemy:
+            return 0.0
+        lost_visible_contact = (
+            _has_visible_enemy(previous)
+            and not _has_shootable_enemy(previous)
+            and not _has_visible_enemy(current)
+            and not _has_shootable_enemy(current)
+        )
+        if not lost_visible_contact:
+            return 0.0
+        return -abs(float(self.config.visible_contact_loss_penalty))
+
+    def _pre_shootable_route_penalty(
+        self,
+        skill: str,
+        route_outcome: dict[str, Any],
+        *,
+        had_shootable_target: bool,
+    ) -> float:
+        if self.config.pre_shootable_route_penalty == 0.0:
+            return 0.0
+        if skill != "route_progression":
+            return 0.0
+        if not route_outcome.get("attempted"):
+            return 0.0
+        if had_shootable_target or self._episode_seen_shootable_enemy:
+            return 0.0
+        return -abs(float(self.config.pre_shootable_route_penalty))
 
     async def _ensure_stream(self) -> None:
         await self._ensure_client()

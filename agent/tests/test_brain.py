@@ -2596,7 +2596,7 @@ def test_close_exit_line_pushes_before_front_manual_probe(tmp_path):
     assert action.raw.buttons & 2
 
 
-def test_repeated_close_exit_push_recovers_from_bad_approach(tmp_path):
+def test_repeated_close_exit_push_keeps_approaching_clear_front_point(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
         memory=memory,
@@ -2632,11 +2632,10 @@ def test_repeated_close_exit_push_recovers_from_bad_approach(tmp_path):
     exit_line["front_distance"] = 152.0
     action, decision = policy._advance_progression_line(features, exit_line, stuck=False)
 
-    assert decision["skill"] == "recover_exit_switch_approach"
+    assert decision["skill"] == "approach_exit_switch_front"
     assert decision["use_line"]["line_id"] == 330
     assert not action.raw.buttons
-    assert action.raw.forward_move < 0
-    assert action.raw.side_move != 0
+    assert action.raw.forward_move > 0
 
 
 def test_stalled_exit_push_recovers_instead_of_pulsing_front_blocker(tmp_path):

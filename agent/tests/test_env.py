@@ -365,7 +365,7 @@ def test_skill_controller_action_mask_uses_affordances():
     assert not visible_mask["fire"]
     assert not visible_mask["engage"]
     assert visible_mask["close_visible_contact"]
-    assert visible_mask["seek_enemy"]
+    assert not visible_mask["seek_enemy"]
     assert not visible_route_mask["route_progression"]
     assert visible_use_mask["open_use_line"]
     assert quiet_mask["route_progression"]
@@ -573,6 +573,7 @@ def test_skill_controller_far_visible_contact_uses_close_option_before_use_line(
     _action, decision = controller.action_for(SKILL_ACTIONS.index("open_use_line"), state)
 
     assert mask["close_visible_contact"]
+    assert not mask["seek_enemy"]
     assert not mask["open_use_line"]
     assert decision["skill"] == "ppo_close_visible_contact"
     assert decision["ppo_skill"] == "open_use_line"
@@ -1860,6 +1861,64 @@ def test_doom_agent_env_rewards_visible_contact_distance_progress():
     assert step.info["visible_contact_distance_delta"] == pytest.approx(128.0)
     assert step.info["visible_contact_progress_reward"] == pytest.approx(0.128)
     assert step.reward == pytest.approx(0.128)
+
+
+def test_doom_agent_env_penalizes_visible_contact_loss_before_shootable():
+    first = _state(tick=1, enemy=True, combat=False)
+    second = _state(tick=2, enemy=False, combat=False)
+    client = _DurationAwareFakeClient([first, second])
+    env = DoomAgentEnv(
+        DoomEnvConfig(
+            max_steps=10,
+            goal_preset="custom",
+            max_action_tics=1,
+            visible_contact_loss_penalty=0.75,
+        ),
+        client=client,
+        controller=_FixedDurationController(duration_tics=1),
+    )
+
+    async def run():
+        await env.reset(seed=5)
+        step = await env.step(0)
+        await env.close()
+        return step
+
+    step = asyncio.run(run())
+
+    assert not step.done
+    assert step.info["visible_contact_loss_penalty"] == pytest.approx(-0.75)
+    assert step.reward == pytest.approx(-0.75)
+
+
+def test_doom_agent_env_penalizes_route_progression_before_first_shootable():
+    first = _state(tick=1, route=True, x_units=0)
+    second = _state(tick=2, route=True, x_units=128)
+    client = _DurationAwareFakeClient([first, second])
+    env = DoomAgentEnv(
+        DoomEnvConfig(
+            max_steps=10,
+            goal_preset="custom",
+            max_action_tics=1,
+            route_progress_reward=0.0,
+            pre_shootable_route_penalty=0.4,
+        ),
+        client=client,
+        controller=SkillController(),
+    )
+
+    async def run():
+        await env.reset(seed=5)
+        step = await env.step(SKILL_ACTIONS.index("route_progression"))
+        await env.close()
+        return step
+
+    step = asyncio.run(run())
+
+    assert step.info["route_outcome"]["attempted"]
+    assert step.info["pre_shootable_route_penalty"] == pytest.approx(-0.4)
+    assert step.info["route_action_reward"] == pytest.approx(-0.4)
+    assert step.reward == pytest.approx(-0.4)
 
 
 def test_doom_agent_env_records_route_outcome_and_reward():

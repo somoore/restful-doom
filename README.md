@@ -916,6 +916,13 @@ use the first failing label to decide the next curriculum target. Because this
 policy selects high-level skills, describe passing results as PPO over
 structured skills unless a future checkpoint directly controls primitive Doom
 actions.
+When `first_contact` fails after visible-but-not-shootable contact, train only
+that bridge before returning to post-combat routing. The PPO environment exposes
+`--visible-contact-loss-penalty` for losing visible contact before first
+shootable and `--pre-shootable-route-penalty` for route progression before the
+first shootable contact. These are shaping signals only; the promotion gate
+remains a normal fresh episode with all structured skills available under the
+strict mask.
 Eval aggregates also include `mean_item_gain`, `mean_secret_gain`, and
 `reset_source_breakdown`, which separates `snapshot_restore` outcomes from
 fresh-reset outcomes and carries the same route diagnostic totals per reset

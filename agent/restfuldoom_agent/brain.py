@@ -2215,6 +2215,27 @@ class BrainPolicy:
         ):
             front_distance = float(line.get("front_distance", distance))
             if not bool(features.navigation.get("forward_open", True)):
+                front_angle_delta = float(line.get("front_angle_delta", angle_delta))
+                if (
+                    int(features.navigation.get("front_blocking_line_special", 0)) == 0
+                    and min(distance, front_distance) > activate_distance
+                    and front_distance < distance
+                    and abs(front_angle_delta) <= 60.0
+                ):
+                    return (
+                        raw_ticcmd_action(
+                            forward_move=self.params.move_amount,
+                            angle_turn=raw_turn_for_delta(front_angle_delta),
+                            duration_tics=4,
+                            tick=features.tick,
+                        ),
+                        self._decision(
+                            "approach_exit_switch_front",
+                            features,
+                            stuck=stuck,
+                            use_line=line_record,
+                        ),
+                    )
                 if self._exit_push_stalled(features, line, distance):
                     return self._recover_stalled_exit_push(
                         features,

@@ -260,6 +260,12 @@ async def evaluate(args: argparse.Namespace) -> dict[str, object]:
         first_visible_bonus=args.first_visible_bonus,
         first_shootable_bonus=args.first_shootable_bonus,
         visible_contact_progress_reward=args.visible_contact_progress_reward,
+        visible_contact_loss_penalty=float(
+            getattr(args, "visible_contact_loss_penalty", 0.0)
+        ),
+        pre_shootable_route_penalty=float(
+            getattr(args, "pre_shootable_route_penalty", 0.0)
+        ),
         exit_route_progress_reward=float(
             getattr(args, "exit_route_progress_reward", 0.01)
         ),
@@ -389,6 +395,12 @@ def _env_config_for_start(
         first_visible_bonus=args.first_visible_bonus,
         first_shootable_bonus=args.first_shootable_bonus,
         visible_contact_progress_reward=args.visible_contact_progress_reward,
+        visible_contact_loss_penalty=float(
+            getattr(args, "visible_contact_loss_penalty", 0.0)
+        ),
+        pre_shootable_route_penalty=float(
+            getattr(args, "pre_shootable_route_penalty", 0.0)
+        ),
         exit_route_progress_reward=float(
             getattr(args, "exit_route_progress_reward", 0.01)
         ),
@@ -444,6 +456,12 @@ def _reward_config_from_args(args: argparse.Namespace) -> dict[str, object]:
         "first_visible_bonus": args.first_visible_bonus,
         "first_shootable_bonus": args.first_shootable_bonus,
         "visible_contact_progress_reward": args.visible_contact_progress_reward,
+        "visible_contact_loss_penalty": float(
+            getattr(args, "visible_contact_loss_penalty", 0.0)
+        ),
+        "pre_shootable_route_penalty": float(
+            getattr(args, "pre_shootable_route_penalty", 0.0)
+        ),
         "exit_route_progress_reward": float(
             getattr(args, "exit_route_progress_reward", 0.01)
         ),
@@ -1797,6 +1815,22 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
             ),
             4,
         ),
+        "visible_contact_loss_penalty": round(
+            sum(
+                float(record.info.get("visible_contact_loss_penalty", 0.0))
+                for record in records
+                if isinstance(record.info, dict)
+            ),
+            4,
+        ),
+        "pre_shootable_route_penalty": round(
+            sum(
+                float(record.info.get("pre_shootable_route_penalty", 0.0))
+                for record in records
+                if isinstance(record.info, dict)
+            ),
+            4,
+        ),
         "route_attempt_steps": sum(1 for outcome in route_outcomes if outcome.get("attempted")),
         "route_reached_steps": sum(1 for outcome in route_outcomes if outcome.get("reached")),
         "route_failed_steps": sum(1 for outcome in route_outcomes if outcome.get("failed")),
@@ -2163,6 +2197,8 @@ def main() -> None:
     parser.add_argument("--first-visible-bonus", type=float, default=0.0)
     parser.add_argument("--first-shootable-bonus", type=float, default=0.0)
     parser.add_argument("--visible-contact-progress-reward", type=float, default=0.0)
+    parser.add_argument("--visible-contact-loss-penalty", type=float, default=0.0)
+    parser.add_argument("--pre-shootable-route-penalty", type=float, default=0.0)
     parser.add_argument("--exit-route-progress-reward", type=float, default=0.01)
     parser.add_argument("--exit-route-reached-reward", type=float, default=0.5)
     parser.add_argument("--exit-route-failure-penalty", type=float, default=0.05)
