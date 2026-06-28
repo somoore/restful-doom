@@ -54,6 +54,7 @@ class ForcedOptionEvalConfig:
     visible_contact_progress_reward: float = 0.001
     terminate_on_first_visible: bool = False
     terminate_on_first_shootable: bool = False
+    terminate_on_required_kills: bool = False
     shootable_handoff_skill: str | None = None
     snapshot_verify_restored_state: bool = True
     snapshot_verify_tick_tolerance: int = 35
@@ -265,6 +266,7 @@ def _env_config_for_stage(
         visible_contact_progress_reward=config.visible_contact_progress_reward,
         terminate_on_first_visible=config.terminate_on_first_visible,
         terminate_on_first_shootable=config.terminate_on_first_shootable,
+        terminate_on_required_kills=config.terminate_on_required_kills,
         curriculum=_curriculum_metadata(curriculum),
         curriculum_stage=dict(stage),
         reset_mode=reset_mode,
@@ -491,6 +493,7 @@ def _config_from_args(args: argparse.Namespace) -> ForcedOptionEvalConfig:
         visible_contact_progress_reward=args.visible_contact_progress_reward,
         terminate_on_first_visible=args.terminate_on_first_visible,
         terminate_on_first_shootable=args.terminate_on_first_shootable,
+        terminate_on_required_kills=args.terminate_on_required_kills,
         shootable_handoff_skill=args.shootable_handoff_skill,
         snapshot_verify_restored_state=not args.no_snapshot_verify_restored_state,
         snapshot_verify_tick_tolerance=args.snapshot_verify_tick_tolerance,
@@ -535,6 +538,7 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--visible-contact-progress-reward", type=float, default=0.001)
     parser.add_argument("--terminate-on-first-visible", action="store_true")
     parser.add_argument("--terminate-on-first-shootable", action="store_true")
+    parser.add_argument("--terminate-on-required-kills", action="store_true")
     parser.add_argument(
         "--shootable-handoff-skill",
         choices=SKILL_ACTIONS,

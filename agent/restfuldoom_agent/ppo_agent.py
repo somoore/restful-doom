@@ -155,6 +155,9 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     "visible_contact_progress_reward": args.visible_contact_progress_reward,
                     "terminate_on_first_visible": args.terminate_on_first_visible,
                     "terminate_on_first_shootable": args.terminate_on_first_shootable,
+                    "terminate_on_required_kills": bool(
+                        getattr(args, "terminate_on_required_kills", False)
+                    ),
                     "allowed_skills": list(args.allowed_skill or []),
                     "strict_allowed_skills": bool(
                         getattr(args, "strict_allowed_skills", False)
@@ -185,6 +188,9 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                         "visible_contact_progress_reward": args.visible_contact_progress_reward,
                         "terminate_on_first_visible": args.terminate_on_first_visible,
                         "terminate_on_first_shootable": args.terminate_on_first_shootable,
+                        "terminate_on_required_kills": bool(
+                            getattr(args, "terminate_on_required_kills", False)
+                        ),
                         "allowed_skills": list(args.allowed_skill or []),
                         "strict_allowed_skills": bool(
                             getattr(args, "strict_allowed_skills", False)
@@ -209,6 +215,9 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                         "visible_contact_progress_reward": args.visible_contact_progress_reward,
                         "terminate_on_first_visible": args.terminate_on_first_visible,
                         "terminate_on_first_shootable": args.terminate_on_first_shootable,
+                        "terminate_on_required_kills": bool(
+                            getattr(args, "terminate_on_required_kills", False)
+                        ),
                         "allowed_skills": list(args.allowed_skill or []),
                         "strict_allowed_skills": bool(
                             getattr(args, "strict_allowed_skills", False)
@@ -308,6 +317,9 @@ async def evaluate(args: argparse.Namespace) -> dict[str, object]:
         visible_contact_progress_reward=args.visible_contact_progress_reward,
         terminate_on_first_visible=args.terminate_on_first_visible,
         terminate_on_first_shootable=args.terminate_on_first_shootable,
+        terminate_on_required_kills=bool(
+            getattr(args, "terminate_on_required_kills", False)
+        ),
         allowed_skills=tuple(getattr(args, "allowed_skill", []) or ()),
         strict_allowed_skills=bool(getattr(args, "strict_allowed_skills", False)),
         snapshot_verify_restored_state=args.snapshot_verify_restored_state,
@@ -425,6 +437,9 @@ def _env_config_for_start(
         visible_contact_progress_reward=args.visible_contact_progress_reward,
         terminate_on_first_visible=args.terminate_on_first_visible,
         terminate_on_first_shootable=args.terminate_on_first_shootable,
+        terminate_on_required_kills=bool(
+            getattr(args, "terminate_on_required_kills", False)
+        ),
         allowed_skills=tuple(getattr(args, "allowed_skill", []) or ()),
         strict_allowed_skills=bool(getattr(args, "strict_allowed_skills", False)),
     )
@@ -988,6 +1003,9 @@ async def _evaluate_checkpoint_curriculum(
         "episodes_per_stage": int(args.checkpoint_eval_episodes),
         "max_steps": int(args.checkpoint_eval_max_steps),
         "sample": bool(args.checkpoint_eval_sample),
+        "terminate_on_required_kills": bool(
+            getattr(args, "terminate_on_required_kills", False)
+        ),
         "allowed_skills": list(getattr(args, "allowed_skill", []) or []),
         "strict_allowed_skills": bool(getattr(args, "strict_allowed_skills", False)),
         "stage_count": len(stage_records),
@@ -1792,6 +1810,15 @@ def main() -> None:
     parser.add_argument("--visible-contact-progress-reward", type=float, default=0.0)
     parser.add_argument("--terminate-on-first-visible", action="store_true")
     parser.add_argument("--terminate-on-first-shootable", action="store_true")
+    parser.add_argument(
+        "--terminate-on-required-kills",
+        action="store_true",
+        help=(
+            "End a bottleneck episode once kills earned after reset reach "
+            "--required-kills. Intended for focused snapshot combat curricula, "
+            "not full-level promotion."
+        ),
+    )
     parser.add_argument(
         "--allowed-skill",
         action="append",

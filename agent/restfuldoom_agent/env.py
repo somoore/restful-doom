@@ -92,6 +92,7 @@ class DoomEnvConfig:
     visible_contact_progress_reward: float = 0.0
     terminate_on_first_visible: bool = False
     terminate_on_first_shootable: bool = False
+    terminate_on_required_kills: bool = False
     allowed_skills: tuple[str, ...] = ()
     strict_allowed_skills: bool = False
     curriculum: dict[str, Any] | None = None
@@ -1746,6 +1747,12 @@ class DoomAgentEnv:
             if current.player.kills - self._start_kills >= self.config.required_kills:
                 reward += self.config.kill_goal_bonus
             return True, "level_complete", reward
+        if (
+            self.config.terminate_on_required_kills
+            and current.player.kills - self._start_kills >= self.config.required_kills
+        ):
+            reward += self.config.kill_goal_bonus
+            return True, "required_kills", reward
         if self._steps >= self.config.max_steps:
             return True, "max_steps", reward
         return False, None, reward

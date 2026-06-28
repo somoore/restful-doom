@@ -73,6 +73,36 @@ def test_doom_agent_env_reset_step_with_fake_client():
     assert not step.done
 
 
+def test_doom_agent_env_terminates_on_required_kills_after_reset():
+    first = _state(tick=1, kills=0)
+    second = _state(tick=2, kills=1)
+    client = _FakeClient([first, second])
+    env = DoomAgentEnv(
+        DoomEnvConfig(
+            max_steps=10,
+            goal_preset="combat",
+            required_kills=1,
+            kill_goal_bonus=10.0,
+            terminate_on_required_kills=True,
+        ),
+        client=client,
+        controller=SkillController(),
+    )
+
+    async def run():
+        await env.reset(seed=99)
+        step = await env.step(SKILL_ACTIONS.index("fire"))
+        await env.close()
+        return step
+
+    step = asyncio.run(run())
+
+    assert step.done
+    assert step.info["done_reason"] == "required_kills"
+    assert step.info["transition"]["kill_delta"] == 1
+    assert step.reward >= 10.0
+
+
 def test_skill_controller_observation_includes_previous_action_history():
     controller = SkillController()
     state = _state(enemy=True, combat=True)

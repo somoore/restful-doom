@@ -194,6 +194,7 @@ def test_forced_option_eval_arg_defaults():
                 "visible_contact_progress_reward": 0.001,
                 "terminate_on_first_visible": False,
                 "terminate_on_first_shootable": False,
+                "terminate_on_required_kills": True,
                 "shootable_handoff_skill": "fire",
                 "no_snapshot_verify_restored_state": False,
                 "snapshot_verify_tick_tolerance": 35,
@@ -207,5 +208,6 @@ def test_forced_option_eval_arg_defaults():
 
     assert config.stage_indexes == (0, 2)
     assert config.forced_skills == ("close_visible_contact",)
+    assert config.terminate_on_required_kills
     assert config.shootable_handoff_skill == "fire"
     assert _skill_action_index("close_visible_contact") == 8
