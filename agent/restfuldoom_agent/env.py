@@ -46,6 +46,7 @@ from .skill_policy import features_from_tactical
 SKILL_ACTIONS = PPO_SKILL_ACTIONS
 LOW_HEALTH_RETREAT_STREAK_LIMIT = 96
 EXIT_ROUTE_FAILURE_RECOVERY_THRESHOLD = 4
+CONTACT_ROUTE_SUPPRESS_MAX_DISTANCE_UNITS = 768.0
 
 
 def _line_is_exit(line: dict[str, Any] | None) -> bool:
@@ -566,10 +567,15 @@ class SkillController:
             features.health <= self.params.retreat_health
             and (features.visible_enemies or recent_contact_active)
         )
+        exit_commitment_line = (
+            self._exit_commitment_line(features)
+            if low_health_contact and not features.visible_enemies and not can_fire
+            else None
+        )
         if low_health_contact and self._low_health_retreat_allowed(
             features,
             recent_contact_active=recent_contact_active,
-        ):
+        ) and exit_commitment_line is None:
             mask["retreat"] = True
             if stuck:
                 mask["recover_stuck"] = True
@@ -1210,6 +1216,19 @@ class SkillController:
             return True
         return self._same_skill_streak < LOW_HEALTH_RETREAT_STREAK_LIMIT
 
+    def _exit_commitment_line(self, features: Any) -> dict[str, Any] | None:
+        """Returns an exit line that should remain available after stale contact."""
+        line = self.policy._select_local_exit_line(features)
+        if _line_is_exit(line):
+            return line
+        line = self.policy._last_post_combat_exit_line_target(features)
+        if _line_is_exit(line):
+            return line
+        line = self.policy._select_progression_line(features)
+        if _line_is_exit(line):
+            return line
+        return None
+
     def _blind_seek_allowed(
         self,
         features: Any,
@@ -1258,9 +1277,20 @@ class SkillController:
             return False
         if features.visible_enemies:
             return False
+        if self._stale_contact_too_far_for_route_suppression(features):
+            return False
         if self._failed_route_attempt_count < 1:
             return False
         return self._recent_visible_contact_active(features)
+
+    def _stale_contact_too_far_for_route_suppression(self, features: Any) -> bool:
+        """Returns whether a stale no-LOS contact is too far to monopolize routing."""
+        if features.visible_enemies or self.policy._shootable_enemy(features) is not None:
+            return False
+        enemy = self.policy._select_known_enemy(features)
+        if enemy is None:
+            return False
+        return float(enemy.get("distance", 999999.0)) > CONTACT_ROUTE_SUPPRESS_MAX_DISTANCE_UNITS
 
 
 class DoomAgentEnv:

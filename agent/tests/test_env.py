@@ -964,6 +964,41 @@ def test_skill_controller_recent_contact_route_failures_suppress_progression_lin
     assert not combat_mask["route_progression"]
 
 
+def test_skill_controller_far_stale_contact_route_failure_restores_progression():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    first = _state(tick=5, kills=1, enemy=True, combat=False)
+    route_state = _state(
+        tick=20,
+        kills=1,
+        enemy=True,
+        enemy_line_of_sight=False,
+        combat=False,
+        enemy_distance=1000,
+        route=True,
+    )
+    enemy_obj = route_state.enemies[0].object
+    enemy_obj.position.x_fp = 1000 * 65536
+    enemy_obj.distance_fp = 1000 * 65536
+    route_index = SKILL_ACTIONS.index("route_progression")
+
+    controller.action_mask(first)
+    controller.record_action_history(
+        action_index=route_index,
+        had_shootable_target=False,
+        route_outcome={
+            "attempted": True,
+            "progress_units": -8.0,
+            "reached": False,
+            "failed": True,
+        },
+    )
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(route_state)))
+
+    assert mask["close_visible_contact"]
+    assert mask["route_progression"]
+
+
 def test_skill_controller_recent_contact_does_not_suppress_exit_route():
     controller = SkillController()
     controller.policy._start_kills = 0
@@ -1001,6 +1036,33 @@ def test_skill_controller_recent_contact_does_not_suppress_exit_route():
     assert mask["close_visible_contact"]
     assert mask["route_progression"]
     assert not mask["press_exit"]
+
+
+def test_skill_controller_low_health_stale_contact_preserves_exit_route():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    first = _state(tick=5, kills=4, enemy=True, combat=False, health=31)
+    active = _state(
+        tick=20,
+        kills=5,
+        enemy=True,
+        enemy_line_of_sight=False,
+        combat=False,
+        health=31,
+        route=True,
+        route_exit=True,
+    )
+    line = active.navigation.route_waypoint.line
+    line.line_id = 330
+    line.special = 11
+    active.navigation.route_waypoint.exit = True
+    active.navigation.route_waypoint.walk_trigger = False
+
+    controller.action_mask(first)
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(active)))
+
+    assert mask["route_progression"]
+    assert not mask["retreat"]
 
 
 def test_skill_controller_failed_stale_exit_route_exposes_recovery():
