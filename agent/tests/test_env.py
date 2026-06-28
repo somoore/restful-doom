@@ -936,6 +936,32 @@ def test_unstick_turn_does_not_reset_recovery_phase():
     assert next_decision["stuck_phase"] == 4
 
 
+def test_stuck_walk_trigger_route_yields_to_recovery():
+    controller = SkillController()
+    state = _state(
+        tick=40,
+        route=True,
+        direction_probes=[
+            {"angle_offset_degrees": -90, "open": False},
+            {"angle_offset_degrees": -30, "open": False},
+            {"angle_offset_degrees": 0, "open": False},
+            {"angle_offset_degrees": 30, "open": False},
+            {"angle_offset_degrees": 90, "open": False},
+        ],
+    )
+    state.navigation.forward_open = False
+    state.navigation.left_open = False
+    state.navigation.right_open = False
+    state.navigation.back_open = True
+    features = extract_features(state, controller.memory, controller.params)
+    line = features.navigation["route_waypoint"]["line"]
+
+    _action, decision = controller.policy._advance_progression_line(features, line, stuck=True)
+
+    assert decision["skill"].startswith("unstick_")
+    assert decision["skill"] != "cross_progression_line"
+
+
 def test_progression_line_attempts_do_not_blacklist_route_target():
     controller = SkillController()
     controller.policy._start_kills = 0

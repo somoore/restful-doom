@@ -1802,6 +1802,8 @@ class BrainPolicy:
                     stuck,
                     line_record,
                 )
+            if stuck:
+                return self._recover_from_stuck(features)
             if special not in WALK_TRIGGER_LINE_SPECIALS:
                 return self._avoid_blocked_front(features, "approach_progression_line")
 
