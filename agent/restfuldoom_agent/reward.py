@@ -139,7 +139,9 @@ class RewardEngine:
             return TransitionReward(0.0, 0, 0, 0.0, 0, 0, 0, 0.0, False)
 
         kill_delta = current.player.kills - previous.player.kills
-        damage_delta = _enemy_damage_delta(previous, current)
+        damage_delta = _enemy_damage_delta(previous, current, kill_delta=kill_delta)
+        if kill_delta > 0 and damage_delta == 0:
+            damage_delta = _terminal_combat_target_damage(previous)
         enemy_distance_delta = _nearest_enemy_distance_delta(previous, current)
         item_delta = current.player.items - previous.player.items
         secret_delta = current.player.secrets - previous.player.secrets
@@ -182,14 +184,20 @@ class RewardEngine:
         return prior_dist - current_dist
 
 
-def _enemy_damage_delta(previous: Any, current: Any) -> int:
+def _enemy_damage_delta(previous: Any, current: Any, *, kill_delta: int = 0) -> int:
     previous_health = _enemy_health_by_id(previous)
     current_health = _enemy_health_by_id(current)
     damage = 0
+    disappeared_health: list[int] = []
     for enemy_id, prior_health in previous_health.items():
         current_value = current_health.get(enemy_id)
         if current_value is not None and current_value < prior_health:
             damage += prior_health - current_value
+        elif current_value is None and prior_health > 0:
+            disappeared_health.append(prior_health)
+    if kill_delta > 0 and disappeared_health:
+        for prior_health in sorted(disappeared_health)[:kill_delta]:
+            damage += prior_health
     return damage
 
 
@@ -225,3 +233,14 @@ def _enemy_health_by_id(state: Any) -> dict[int, int]:
         if enemy_id:
             health[enemy_id] = int(getattr(obj, "health", 0))
     return health
+
+
+def _terminal_combat_target_damage(previous: Any) -> int:
+    combat = getattr(previous, "combat", None)
+    if combat is None:
+        return 0
+    if not bool(getattr(combat, "has_shootable_target", False)):
+        return 0
+    if not bool(getattr(combat, "target_is_enemy", False)):
+        return 0
+    return max(0, int(getattr(combat, "target_health", 0)))

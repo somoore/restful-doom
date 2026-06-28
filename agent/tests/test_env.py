@@ -481,6 +481,33 @@ def test_doom_agent_env_strict_allowed_skill_filter_stays_inside_allowlist():
     assert env._last_action_mask_filter["fallback_skill"] == "close_visible_contact"
 
 
+def test_doom_agent_env_strict_allowed_skill_filter_prefers_allowed_heuristic():
+    class HeuristicFireController:
+        def action_mask(self, state):
+            return [skill == "route_progression" for skill in SKILL_ACTIONS]
+
+        def heuristic_action_index(self, state):
+            return SKILL_ACTIONS.index("fire")
+
+    env = DoomAgentEnv(
+        DoomEnvConfig(
+            allowed_skills=("close_visible_contact", "fire"),
+            strict_allowed_skills=True,
+        ),
+        controller=HeuristicFireController(),
+    )
+
+    env._current_state = _state(enemy=True, combat=True)
+    mask = dict(zip(SKILL_ACTIONS, env.action_mask()))
+
+    assert mask["fire"]
+    assert not mask["close_visible_contact"]
+    assert not mask["route_progression"]
+    assert env._last_action_mask_filter["fallback_applied"]
+    assert env._last_action_mask_filter["fallback_skill"] == "fire"
+    assert env._last_action_mask_filter["fallback_reason"] == "heuristic_allowed_skill"
+
+
 def test_skill_controller_contact_actions_use_visible_enemy_and_route_waypoint():
     controller = SkillController()
     state = _state(enemy=True, combat=False, enemy_distance=640, route=True, contact_use=True)

@@ -14,6 +14,8 @@ def state(
     secrets=0,
     enemy_health=None,
     enemy_distance=0,
+    combat_target_health=0,
+    combat_target_enemy=False,
 ):
     position = SimpleNamespace(x_fp=x_fp, y_fp=y_fp)
     obj = SimpleNamespace(position=position)
@@ -35,7 +37,12 @@ def state(
                 )
             )
         )
-    return SimpleNamespace(player=player, enemies=enemies)
+    combat = SimpleNamespace(
+        has_shootable_target=combat_target_health > 0,
+        target_health=combat_target_health,
+        target_is_enemy=combat_target_enemy,
+    )
+    return SimpleNamespace(player=player, enemies=enemies, combat=combat)
 
 
 def test_reward_counts_progress_and_combat():
@@ -63,6 +70,58 @@ def test_reward_counts_enemy_damage_before_kill():
     assert reward.kill_delta == 0
     assert reward.damage_delta == 15
     assert reward.reward == 3.0
+
+
+def test_reward_counts_terminal_enemy_damage_on_kill():
+    engine = RewardEngine(goal_preset("combat"))
+
+    reward = engine.score(
+        state(0, 0, kills=0, enemy_health=5),
+        state(0, 0, kills=1, enemy_health=None),
+    )
+
+    assert reward.kill_delta == 1
+    assert reward.damage_delta == 5
+    assert reward.reward == 11.0
+
+
+def test_reward_counts_terminal_combat_target_damage_on_kill():
+    engine = RewardEngine(goal_preset("combat"))
+
+    reward = engine.score(
+        state(0, 0, kills=0, combat_target_health=15, combat_target_enemy=True),
+        state(0, 0, kills=1, enemy_health=None),
+    )
+
+    assert reward.kill_delta == 1
+    assert reward.damage_delta == 15
+    assert reward.reward == 13.0
+
+
+def test_reward_ignores_terminal_non_enemy_combat_target_damage():
+    engine = RewardEngine(goal_preset("combat"))
+
+    reward = engine.score(
+        state(0, 0, kills=1, combat_target_health=15, combat_target_enemy=False),
+        state(0, 0, kills=2, enemy_health=None),
+    )
+
+    assert reward.kill_delta == 1
+    assert reward.damage_delta == 0
+    assert reward.reward == 10.0
+
+
+def test_reward_ignores_disappeared_enemy_without_kill():
+    engine = RewardEngine(goal_preset("combat"))
+
+    reward = engine.score(
+        state(0, 0, kills=0, enemy_health=5),
+        state(0, 0, kills=0, enemy_health=None),
+    )
+
+    assert reward.kill_delta == 0
+    assert reward.damage_delta == 0
+    assert reward.reward == 0.0
 
 
 def test_reward_counts_nearest_enemy_distance_progress():

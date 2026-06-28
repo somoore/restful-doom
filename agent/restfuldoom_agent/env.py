@@ -1652,12 +1652,29 @@ class DoomAgentEnv:
             info["fallback_skill"] = "unfiltered_mask"
             self._last_action_mask_filter = info
             return mask
+        if self._current_state is not None and hasattr(self.controller, "heuristic_action_index"):
+            try:
+                heuristic_index = int(self.controller.heuristic_action_index(self._current_state))
+            except Exception:
+                heuristic_index = -1
+            if 0 <= heuristic_index < len(SKILL_ACTIONS):
+                heuristic_skill = SKILL_ACTIONS[heuristic_index]
+                if heuristic_skill in allowed:
+                    fallback = [False for _ in SKILL_ACTIONS]
+                    fallback[heuristic_index] = True
+                    info["fallback_applied"] = True
+                    info["fallback_skill"] = heuristic_skill
+                    info["fallback_reason"] = "heuristic_allowed_skill"
+                    info["filtered_allowed_count"] = 1
+                    self._last_action_mask_filter = info
+                    return fallback
         for skill in allowed_skills:
             if skill in SKILL_ACTIONS:
                 fallback = [False for _ in SKILL_ACTIONS]
                 fallback[SKILL_ACTIONS.index(skill)] = True
                 info["fallback_applied"] = True
                 info["fallback_skill"] = skill
+                info["fallback_reason"] = "first_allowed_skill"
                 info["filtered_allowed_count"] = 1
                 self._last_action_mask_filter = info
                 return fallback
