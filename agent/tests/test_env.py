@@ -1,12 +1,25 @@
 import asyncio
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
 from restfuldoom_agent.client import EpisodeReset
 from restfuldoom_agent.client import agent_pb2
-from restfuldoom_agent.brain import AgentMemory, BT_USE
-from restfuldoom_agent.env import DoomAgentEnv, DoomEnvConfig, SKILL_ACTIONS, SkillController
+from restfuldoom_agent.brain import (
+    AgentMemory,
+    BT_USE,
+    LINE_ATTEMPT_STALL_TICS,
+    _NON_LOCOMOTION_SKILLS,
+    extract_features,
+)
+from restfuldoom_agent.env import (
+    DoomAgentEnv,
+    DoomEnvConfig,
+    LOW_HEALTH_RETREAT_STREAK_LIMIT,
+    SKILL_ACTIONS,
+    SkillController,
+)
 from restfuldoom_agent.schemas import OBSERVATION_SCHEMA
 
 
@@ -314,6 +327,30 @@ def test_skill_controller_low_health_contact_forces_retreat():
     assert not visible_mask["close_visible_contact"]
 
 
+def test_skill_controller_low_health_no_visible_contact_breaks_retreat_loop():
+    controller = SkillController()
+    first = _state(tick=5, enemy=True, combat=False)
+    low_health_lost_contact = _state(
+        tick=40,
+        enemy=True,
+        enemy_line_of_sight=False,
+        combat=False,
+        health=30,
+    )
+
+    controller.action_mask(first)
+    initial_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(low_health_lost_contact)))
+    controller._previous_action_index = SKILL_ACTIONS.index("retreat")
+    controller._same_skill_streak = LOW_HEALTH_RETREAT_STREAK_LIMIT
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(low_health_lost_contact)))
+
+    assert initial_mask["retreat"]
+    assert not initial_mask["close_visible_contact"]
+    assert not mask["retreat"]
+    assert mask["close_visible_contact"]
+    assert not mask["route_progression"]
+
+
 def test_skill_controller_suppresses_blind_seek_before_episode_contact(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     memory.data["enemies"] = {
@@ -353,7 +390,8 @@ def test_skill_controller_suppresses_blind_seek_before_episode_contact(tmp_path)
     assert lost_heuristic == "route_progression"
     assert not recovered_mask["seek_enemy"]
     assert recovered_heuristic == "route_progression"
-    assert expired_mask["seek_enemy"]
+    assert not expired_mask["seek_enemy"]
+    assert expired_mask["route_progression"]
 
 
 def test_doom_agent_env_allowed_skill_filter_narrows_action_mask():
@@ -800,6 +838,30 @@ def test_skill_controller_recent_contact_route_failures_suppress_progression_lin
     assert not after_failure["route_progression"]
     assert combat_mask["fire"]
     assert not combat_mask["route_progression"]
+
+
+def test_exit_switch_decisions_do_not_trigger_stuck_recovery():
+    assert "push_exit_switch" in _NON_LOCOMOTION_SKILLS
+    assert "press_exit_switch" in _NON_LOCOMOTION_SKILLS
+    assert "backtrack_from_exit_switch" in _NON_LOCOMOTION_SKILLS
+    assert "turn_to_exit_switch" in _NON_LOCOMOTION_SKILLS
+
+
+def test_progression_line_attempts_do_not_blacklist_route_target():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    features = extract_features(
+        _state(tick=20, kills=1, route=True),
+        controller.memory,
+        controller.params,
+    )
+    line = features.navigation["route_waypoint"]["line"]
+
+    assert controller.policy._record_line_attempt(features, line)
+    stalled = replace(features, tick=features.tick + LINE_ATTEMPT_STALL_TICS + 1)
+
+    assert controller.policy._record_line_attempt(stalled, line)
+    assert controller.policy._select_progression_line(stalled) is not None
 
 
 def test_skill_controller_successful_route_outcome_resets_contact_route_backoff():

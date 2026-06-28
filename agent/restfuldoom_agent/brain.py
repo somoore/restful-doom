@@ -117,8 +117,12 @@ _NON_LOCOMOTION_SKILLS = {
     "fire_on_enemy",
     "hold_attack",
     "open_or_probe",
+    "backtrack_from_exit_switch",
+    "press_exit_switch",
+    "push_exit_switch",
     "strafe_cooldown",
     "turn_from_block",
+    "turn_to_exit_switch",
     "unstick_turn",
     "use_ahead",
     "use_blocking_line",
@@ -2279,6 +2283,8 @@ class BrainPolicy:
             int(line.get("special", 0)) in EXIT_LINE_SPECIALS
             and float(line.get("distance", 999999)) <= EXIT_ASSIST_DISTANCE_UNITS
         ):
+            return True
+        if int(line.get("special", 0)) in PROGRESSION_LINE_PRIORITIES:
             return True
         if (
             allow_immediate_use_bypass

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import random
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 from .env import ACTION_SCHEMA, DoomAgentEnv, DoomEnvConfig
@@ -78,6 +80,7 @@ async def evaluate_checkpoint(
     device: str = "cpu",
     deterministic: bool = True,
     before_reset: Callable[[DoomAgentEnv, int], None] | None = None,
+    trace_path: str | Path | None = None,
 ) -> PolicyEval:
     """Evaluates a PPO checkpoint in the Doom skill environment."""
     trainer = PPOTrainer.load_checkpoint(checkpoint_path, device=device)
@@ -98,6 +101,7 @@ async def evaluate_checkpoint(
         max_steps=max_steps,
         seed=seed,
         before_reset=before_reset,
+        trace_path=trace_path,
     )
 
 
@@ -166,10 +170,12 @@ async def evaluate_skill_policy(
     max_steps: int | None,
     seed: int,
     before_reset: Callable[[DoomAgentEnv, int], None] | None = None,
+    trace_path: str | Path | None = None,
 ) -> PolicyEval:
     """Evaluates a high-level skill policy in the resettable environment."""
     env = DoomAgentEnv(env_config)
     episode_results: list[EpisodeEval] = []
+    trace_handle = _open_trace(trace_path, policy_id)
     try:
         for episode_index in range(episodes):
             episode_seed = seed + episode_index
@@ -222,6 +228,19 @@ async def evaluate_skill_policy(
                 if not _action_allowed(action_mask, action_index):
                     invalid_action_steps += 1
                 step = await env.step(action_index)
+                _write_trace_step(
+                    trace_handle,
+                    policy_id=policy_id,
+                    episode_index=episode_index,
+                    seed=episode_seed,
+                    step_index=steps,
+                    action_index=action_index,
+                    action_mask=action_mask,
+                    reward=step.reward,
+                    done=step.done,
+                    observation=step.observation,
+                    info=step.info,
+                )
                 obs = step.observation
                 total_reward += step.reward
                 state = step.info.get("state", {})
@@ -310,8 +329,77 @@ async def evaluate_skill_policy(
                 )
             )
     finally:
+        if trace_handle is not None:
+            trace_handle.close()
         await env.close()
     return _aggregate(policy_id, episode_results)
+
+
+def _open_trace(trace_path: str | Path | None, policy_id: str) -> Any | None:
+    """Opens an eval trace JSONL file and writes its schema header."""
+    if trace_path is None:
+        return None
+    path = Path(trace_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = path.open("w", encoding="utf-8")
+    json.dump(
+        {
+            "schema": "restfuldoom.ppo_eval_trace.v1",
+            "policy_id": policy_id,
+        },
+        handle,
+        sort_keys=True,
+    )
+    handle.write("\n")
+    handle.flush()
+    return handle
+
+
+def _write_trace_step(
+    handle: Any | None,
+    *,
+    policy_id: str,
+    episode_index: int,
+    seed: int,
+    step_index: int,
+    action_index: int,
+    action_mask: list[bool],
+    reward: float,
+    done: bool,
+    observation: list[float],
+    info: dict[str, Any],
+) -> None:
+    """Writes one candidate eval step when tracing is enabled."""
+    if handle is None:
+        return
+    json.dump(
+        {
+            "policy_id": policy_id,
+            "episode_index": int(episode_index),
+            "seed": int(seed),
+            "step_index": int(step_index),
+            "action_index": int(action_index),
+            "action_mask": [bool(value) for value in action_mask],
+            "reward": round(float(reward), 6),
+            "done": bool(done),
+            "done_reason": info.get("done_reason"),
+            "skill": info.get("skill"),
+            "decision": info.get("decision", {}),
+            "state": info.get("state", {}),
+            "transition": info.get("transition", {}),
+            "had_visible_enemy": bool(info.get("had_visible_enemy")),
+            "had_shootable_target": bool(info.get("had_shootable_target")),
+            "first_visible_contact": bool(info.get("first_visible_contact")),
+            "first_shootable_contact": bool(info.get("first_shootable_contact")),
+            "route_outcome": info.get("route_outcome", {}),
+            "learning_trace": info.get("learning_trace", {}),
+            "observation": list(observation),
+        },
+        handle,
+        default=str,
+        sort_keys=True,
+    )
+    handle.write("\n")
 
 
 def decide_promotion(

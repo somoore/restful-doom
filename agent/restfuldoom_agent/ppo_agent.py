@@ -104,6 +104,21 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
             buffer_path = args.buffer_dir / f"{args.run_id}-buffer-{update_index:04d}.jsonl"
             buffer.save_jsonl(buffer_path)
             rollout_summary = _summarize_buffer(buffer)
+            if args.collect_only:
+                summaries.append(
+                    {
+                        "update": update_index,
+                        "records": len(buffer),
+                        "buffer_path": str(buffer_path),
+                        "checkpoint_path": None,
+                        "metrics": {},
+                        "rollout_summary": rollout_summary,
+                        "curriculum_stage": curriculum_stage,
+                        "checkpoint_eval": {},
+                        "collect_only": True,
+                    }
+                )
+                continue
             metrics = trainer.update(buffer)
             checkpoint_path = args.checkpoint_dir / f"{args.run_id}-ppo-{update_index:04d}.pt"
             checkpoint_extra = {
@@ -235,6 +250,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
         "resume_checkpoint": str(resume_checkpoint) if resume_checkpoint else None,
         "resume_checkpoint_source": resume_source,
         "best_checkpoint": best_checkpoint or {},
+        "collect_only": bool(args.collect_only),
         "observation_schema": OBSERVATION_SCHEMA,
         "action_schema": ACTION_SCHEMA,
     }
@@ -294,6 +310,7 @@ async def evaluate(args: argparse.Namespace) -> dict[str, object]:
         seed=args.seed,
         device=args.device,
         deterministic=not args.eval_sample,
+        trace_path=args.eval_trace_jsonl,
     )
     if args.eval_baseline == "random":
         baseline = await evaluate_random_policy(
@@ -478,6 +495,7 @@ async def _collect_curriculum_stage_rollout(
             steps=args.rollout_steps,
             seed=args.seed + update_index,
             before_reset=before_reset,
+            deterministic=bool(getattr(args, "collect_deterministic", False)),
         )
 
     env.config = _env_config_for_stage(
@@ -490,6 +508,7 @@ async def _collect_curriculum_stage_rollout(
         env,
         steps=args.rollout_steps,
         seed=args.seed + update_index,
+        deterministic=bool(getattr(args, "collect_deterministic", False)),
     )
     _annotate_buffer_curriculum(buffer, curriculum, curriculum_stage)
     return buffer
@@ -532,6 +551,7 @@ async def _collect_mixed_curriculum_rollout(
         steps=args.rollout_steps,
         seed=args.seed + update_index,
         before_reset=before_reset,
+        deterministic=bool(getattr(args, "collect_deterministic", False)),
     )
 
 
@@ -1748,6 +1768,16 @@ def main() -> None:
     parser.add_argument("--updates", type=int, default=1)
     parser.add_argument("--rollout-steps", type=int, default=512)
     parser.add_argument(
+        "--collect-only",
+        action="store_true",
+        help="Collect and save rollout JSONL buffers without PPO update/checkpoint/memory writes.",
+    )
+    parser.add_argument(
+        "--collect-deterministic",
+        action="store_true",
+        help="Use argmax actions during rollout collection, useful with --collect-only traces.",
+    )
+    parser.add_argument(
         "--rollout-stage-mix",
         choices=["off", "round_robin", "random"],
         default="off",
@@ -1793,6 +1823,11 @@ def main() -> None:
     parser.add_argument("--eval-episodes", type=int, default=1)
     parser.add_argument("--eval-max-steps", type=int, default=256)
     parser.add_argument("--eval-sample", action="store_true")
+    parser.add_argument(
+        "--eval-trace-jsonl",
+        type=Path,
+        help="Write candidate evaluation steps to a JSONL trace for debugging.",
+    )
     parser.add_argument(
         "--checkpoint-eval-curriculum",
         action="store_true",

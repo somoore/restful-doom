@@ -32,7 +32,14 @@ from restfuldoom_agent.ppo import (
     RolloutBuffer,
     TORCH_AVAILABLE,
 )
-from restfuldoom_agent.ppo_eval import EpisodeEval, PolicyEval, _aggregate, decide_promotion
+from restfuldoom_agent.ppo_eval import (
+    EpisodeEval,
+    PolicyEval,
+    _aggregate,
+    _open_trace,
+    _write_trace_step,
+    decide_promotion,
+)
 from restfuldoom_agent.snapshot_curriculum import load_snapshot_curriculum
 from restfuldoom_agent.schemas import (
     ACTION_SCHEMA,
@@ -72,6 +79,42 @@ def test_rollout_buffer_saves_jsonl(tmp_path):
     assert rows[1]["action"] == 1
     assert rows[1]["action_mask"] == [False, True]
     assert rows[1]["info"]["skill"] == "fire"
+
+
+def test_ppo_eval_trace_writer_serializes_steps(tmp_path):
+    path = tmp_path / "eval-trace.jsonl"
+    handle = _open_trace(path, "ppo:checkpoint.pt")
+    try:
+        _write_trace_step(
+            handle,
+            policy_id="ppo:checkpoint.pt",
+            episode_index=0,
+            seed=7,
+            step_index=1,
+            action_index=4,
+            action_mask=[False, False, False, False, True],
+            reward=1.25,
+            done=False,
+            observation=[0.1, 0.2],
+            info={
+                "skill": "route_progression",
+                "decision": {"skill": "route_to_progression_line"},
+                "state": {"kills": 2, "items": 1},
+                "transition": {"kill_delta": 1},
+                "route_outcome": {"attempted": True},
+                "had_visible_enemy": False,
+                "had_shootable_target": False,
+            },
+        )
+    finally:
+        handle.close()
+
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    assert rows[0]["schema"] == "restfuldoom.ppo_eval_trace.v1"
+    assert rows[1]["policy_id"] == "ppo:checkpoint.pt"
+    assert rows[1]["skill"] == "route_progression"
+    assert rows[1]["decision"]["skill"] == "route_to_progression_line"
+    assert rows[1]["action_mask"] == [False, False, False, False, True]
 
 
 def test_learning_trace_names_observation_mask_and_outcome():

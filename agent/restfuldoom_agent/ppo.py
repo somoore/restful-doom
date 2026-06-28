@@ -257,6 +257,7 @@ class PPOTrainer:
         steps: int | None = None,
         seed: int | None = None,
         before_reset: Callable[[int], None] | None = None,
+        deterministic: bool = False,
     ) -> RolloutBuffer:
         """Collects on-policy transitions from the Doom environment."""
         target_steps = steps or self.config.rollout_steps
@@ -268,7 +269,11 @@ class PPOTrainer:
         reset_index += 1
         while len(buffer) < target_steps:
             action_mask = env.action_mask()
-            action, logprob, value = self.model.act(obs, action_mask=action_mask)
+            action, logprob, value = self.model.act(
+                obs,
+                action_mask=action_mask,
+                deterministic=deterministic,
+            )
             transition: EnvStep = await env.step(action)
             info = dict(transition.info)
             info["learning_trace"] = build_learning_trace(

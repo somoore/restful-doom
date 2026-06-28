@@ -42,6 +42,7 @@ from .schemas import (
 from .skill_policy import features_from_tactical
 
 SKILL_ACTIONS = PPO_SKILL_ACTIONS
+LOW_HEALTH_RETREAT_STREAK_LIMIT = 96
 
 
 @dataclass(frozen=True)
@@ -534,9 +535,13 @@ class SkillController:
             self._remember_visible_contact(features)
         can_fire = shootable is not None and self.policy._can_shoot(features, shootable)
         recent_contact_active = self._recent_contact_active(features)
-        if (
+        low_health_contact = (
             features.health <= self.params.retreat_health
             and (features.visible_enemies or recent_contact_active)
+        )
+        if low_health_contact and self._low_health_retreat_allowed(
+            features,
+            recent_contact_active=recent_contact_active,
         ):
             mask["retreat"] = True
             if stuck:
@@ -1053,6 +1058,21 @@ class SkillController:
                 return True
         return self._recent_visible_contact_active(features)
 
+    def _low_health_retreat_allowed(
+        self,
+        features: Any,
+        *,
+        recent_contact_active: bool,
+    ) -> bool:
+        """Avoids trapping low-health no-LOS states in endless retreat."""
+        if features.visible_enemies:
+            return True
+        if not recent_contact_active:
+            return False
+        if self._previous_action_index != SKILL_ACTIONS.index("retreat"):
+            return True
+        return self._same_skill_streak < LOW_HEALTH_RETREAT_STREAK_LIMIT
+
     def _blind_seek_allowed(
         self,
         features: Any,
@@ -1064,8 +1084,6 @@ class SkillController:
             recent_contact_active = self._recent_contact_active(features)
         if recent_contact_active:
             return self._post_contact_seek_allowed(features)
-        if self.policy._last_visible_enemy_id is not None:
-            return True
         return any(self._recent_visible_enemy_flags)
 
     def _post_contact_seek_allowed(self, features: Any) -> bool:
