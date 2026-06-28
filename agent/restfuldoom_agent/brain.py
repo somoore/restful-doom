@@ -598,6 +598,8 @@ class BrainPolicy:
         self._last_visible_enemy_id: int | None = None
         self._last_contact_ray: dict[str, Any] | None = None
         self._hazard_escape: dict[str, Any] | None = None
+        self._last_post_combat_exit_tick = -9999
+        self._last_post_combat_exit_line_id: int | None = None
 
     def reset_episode_context(self) -> None:
         """Clear episode-local tactical state while preserving persistent memory."""
@@ -619,6 +621,8 @@ class BrainPolicy:
         self._last_visible_enemy_id = None
         self._last_contact_ray = None
         self._hazard_escape = None
+        self._last_post_combat_exit_tick = -9999
+        self._last_post_combat_exit_line_id = None
 
     async def next_action(self, state: Any) -> Any:
         """Return a fast local action for the current protobuf state."""
@@ -777,6 +781,10 @@ class BrainPolicy:
         phase = (elapsed // 8) % 5
         self._last_stuck_phase = phase
 
+        exit_recovery = self._recover_toward_visible_exit_line(features, phase)
+        if exit_recovery is not None:
+            return exit_recovery
+
         if phase == 0 and features.tick - self._last_use_tick >= self.params.use_interval_tics:
             self._last_use_tick = features.tick
             return (
@@ -827,6 +835,91 @@ class BrainPolicy:
             ),
             self._decision("unstick_forward", features, stuck=True, stuck_phase=phase),
         )
+
+    def _recover_toward_visible_exit_line(
+        self,
+        features: TacticalFeatures,
+        phase: int,
+    ) -> tuple[Any, dict[str, Any]] | None:
+        if features.visible_enemies or self._shootable_enemy(features) is not None:
+            return None
+        if not self._has_episode_kill(features):
+            return None
+        candidates = [
+            line
+            for line in features.navigation.get("use_lines", [])
+            if int(line.get("special", 0)) in EXIT_LINE_SPECIALS
+            and float(line.get("distance", 999999.0)) <= 2600.0
+            and abs(float(line.get("angle_delta", 999.0))) <= 170.0
+            and self._is_progression_line_ready(features, line)
+        ]
+        if not candidates:
+            return None
+        line = min(
+            candidates,
+            key=lambda line: (
+                float(line["distance"]) / 384.0,
+                abs(float(line["angle_delta"])) / 45.0,
+            ),
+        )
+        distance = self._line_control_distance(line)
+        angle_delta = self._line_control_angle_delta(line)
+        if (
+            distance <= self._line_activate_distance(features, line)
+            or (
+                int(line.get("side", 0)) == 0
+                and (
+                    distance <= 224.0
+                    or float(line.get("front_distance", 999999.0)) <= 160.0
+                )
+            )
+        ):
+            return self._advance_progression_line(features, line, stuck=False)
+
+        ray = self._best_navigation_ray(features, angle_delta)
+        line_record = self._line_record(line)
+        if ray is not None:
+            return self._move_on_ray_toward_line(
+                features,
+                angle_delta,
+                ray,
+                "unstick_route_to_exit_line",
+                True,
+                line_record,
+            )
+        if abs(angle_delta) > 18:
+            return (
+                semantic_action(
+                    turn_action_for_delta(angle_delta),
+                    amount=self.params.turn_amount,
+                    duration_tics=2,
+                    tick=features.tick,
+                ),
+                self._decision(
+                    "unstick_turn_to_exit_line",
+                    features,
+                    stuck=True,
+                    stuck_phase=phase,
+                    use_line=line_record,
+                ),
+            )
+        if features.navigation["forward_open"]:
+            return (
+                raw_ticcmd_action(
+                    forward_move=self.params.move_amount,
+                    angle_turn=raw_turn_for_delta(angle_delta),
+                    duration_tics=4,
+                    tick=features.tick,
+                ),
+                self._decision(
+                    "unstick_approach_exit_line",
+                    features,
+                    stuck=True,
+                    stuck_phase=phase,
+                    use_line=line_record,
+                ),
+            )
+        return None
 
     def _escape_hazard_cell(
         self,
@@ -1645,7 +1738,13 @@ class BrainPolicy:
             return None
         far_exit = self._select_post_combat_exit_progression_line(features, candidates)
         if far_exit is not None:
+            self._remember_post_combat_exit_line(features, far_exit)
             return far_exit
+        if self._recent_post_combat_exit_line_active(features) and all(
+            int(line.get("special", 0)) in WALK_TRIGGER_LINE_SPECIALS
+            for line in candidates
+        ):
+            return None
         return min(
             candidates,
             key=lambda line: (
@@ -1678,6 +1777,36 @@ class BrainPolicy:
                 float(line["distance"]) / 384.0,
                 abs(float(line["angle_delta"])) / 45.0,
             ),
+        )
+
+    def _remember_post_combat_exit_line(
+        self,
+        features: TacticalFeatures,
+        line: dict[str, Any],
+    ) -> None:
+        if int(line.get("special", 0)) not in EXIT_LINE_SPECIALS:
+            return
+        if features.visible_enemies or self._shootable_enemy(features) is not None:
+            return
+        if not self._has_episode_kill(features):
+            return
+        self._last_post_combat_exit_tick = int(features.tick)
+        self._last_post_combat_exit_line_id = int(line.get("line_id", 0))
+
+    def _recent_post_combat_exit_line_active(self, features: TacticalFeatures) -> bool:
+        if self._last_post_combat_exit_line_id is None:
+            return False
+        if features.visible_enemies or self._shootable_enemy(features) is not None:
+            return False
+        start_kills = self._start_kills if self._start_kills is not None else features.kills
+        if features.kills - start_kills < 1:
+            return False
+        if not 0 <= int(features.tick) - self._last_post_combat_exit_tick <= 420:
+            return False
+        return any(
+            int(line.get("line_id", 0)) == self._last_post_combat_exit_line_id
+            and int(line.get("special", 0)) in EXIT_LINE_SPECIALS
+            for line in features.navigation.get("use_lines", [])
         )
 
     def _is_progression_line_ready(
@@ -1719,6 +1848,7 @@ class BrainPolicy:
         distance = self._line_control_distance(line)
         line_record = self._line_record(line)
         special = int(line["special"])
+        self._remember_post_combat_exit_line(features, line)
         if special in EXIT_LINE_SPECIALS and distance > 224.0:
             assist_door = self._select_exit_assist_door(features, line)
             if assist_door is not None:

@@ -1196,6 +1196,174 @@ def test_blocked_far_exit_routes_before_turning_in_place(tmp_path):
     assert action.raw.side_move != 0
 
 
+def test_stuck_recovery_routes_toward_visible_exit_line(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    asyncio.run(policy.next_action(state(tick=1)))
+
+    game_state = state(tick=40)
+    game_state.player.kills = 6
+    game_state.navigation.forward_open = False
+    game_state.navigation.direction_probes = [
+        SimpleNamespace(
+            angle_offset_degrees=30,
+            open=True,
+            block_distance_fp=128 * 65536,
+            blocking_line_special=0,
+            use_line_ahead=False,
+        )
+    ]
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=760 * 65536, y_fp=280 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=760 * 65536, y_fp=280 * 65536, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=810 * 65536,
+            nearest_distance_fp=810 * 65536,
+        )
+    ]
+    features = extract_features(game_state, policy.memory, policy.params)
+
+    action, decision = policy._recover_from_stuck(features)
+
+    assert decision["skill"] == "unstick_route_to_exit_line"
+    assert decision["use_line"]["line_id"] == 330
+    assert decision["direction_probe"]["angle_offset_degrees"] == 30
+    assert action.raw.forward_move > 0
+    assert action.raw.side_move != 0
+
+
+def test_stuck_recovery_does_not_route_exit_during_visible_contact(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    asyncio.run(policy.next_action(state(tick=1)))
+
+    game_state = state(
+        tick=40,
+        enemy={"x": 512, "y": 0, "distance": 512, "line_of_sight": True},
+    )
+    game_state.player.kills = 6
+    game_state.navigation.forward_open = False
+    game_state.navigation.direction_probes = [
+        SimpleNamespace(
+            angle_offset_degrees=30,
+            open=True,
+            block_distance_fp=128 * 65536,
+            blocking_line_special=0,
+            use_line_ahead=False,
+        )
+    ]
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=760 * 65536, y_fp=280 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=760 * 65536, y_fp=280 * 65536, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=810 * 65536,
+            nearest_distance_fp=810 * 65536,
+        )
+    ]
+    features = extract_features(game_state, policy.memory, policy.params)
+
+    _action, decision = policy._recover_from_stuck(features)
+
+    assert decision["skill"] != "unstick_route_to_exit_line"
+
+
+def test_post_combat_exit_memory_suppresses_stale_walk_trigger_while_exit_visible(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    asyncio.run(policy.next_action(state(tick=1)))
+
+    exit_state = state(tick=40)
+    exit_state.player.kills = 2
+    exit_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=195,
+            midpoint=SimpleNamespace(x_fp=640 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=640 * 65536, y_fp=0, z_fp=0),
+            special=88,
+            tag=2,
+            distance_fp=640 * 65536,
+            nearest_distance_fp=640 * 65536,
+        ),
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=500 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=500 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=500 * 65536,
+            nearest_distance_fp=500 * 65536,
+        ),
+    ]
+
+    asyncio.run(policy.next_action(exit_state))
+
+    assert policy.last_decision["use_line"]["line_id"] == 330
+
+    stale_state = state(tick=80)
+    stale_state.player.kills = 2
+    stale_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=195,
+            midpoint=SimpleNamespace(x_fp=640 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=640 * 65536, y_fp=0, z_fp=0),
+            special=88,
+            tag=2,
+            distance_fp=640 * 65536,
+            nearest_distance_fp=640 * 65536,
+        ),
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=3000 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=3000 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=3000 * 65536,
+            nearest_distance_fp=3000 * 65536,
+        )
+    ]
+    stale_features = extract_features(stale_state, policy.memory, policy.params)
+
+    assert policy._select_progression_line(stale_features) is None
+
+    exit_gone_state = state(tick=90)
+    exit_gone_state.player.kills = 2
+    exit_gone_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=195,
+            midpoint=SimpleNamespace(x_fp=640 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=640 * 65536, y_fp=0, z_fp=0),
+            special=88,
+            tag=2,
+            distance_fp=640 * 65536,
+            nearest_distance_fp=640 * 65536,
+        )
+    ]
+    exit_gone_features = extract_features(exit_gone_state, policy.memory, policy.params)
+
+    selected_after_exit_gone = policy._select_progression_line(exit_gone_features)
+
+    assert selected_after_exit_gone is not None
+    assert selected_after_exit_gone["line_id"] == 195
+
+
 def test_post_kill_policy_prioritizes_local_exit_line_but_approaches_until_close(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
