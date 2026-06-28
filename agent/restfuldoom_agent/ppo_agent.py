@@ -145,26 +145,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
             }
             trainer.save_checkpoint(
                 checkpoint_path,
-                reward_config={
-                    "goal_preset": args.goal_preset,
-                    "target_x_fp": args.target_x_fp,
-                    "target_y_fp": args.target_y_fp,
-                    "level_complete_bonus": args.level_complete_bonus,
-                    "kill_goal_bonus": args.kill_goal_bonus,
-                    "required_kills": args.required_kills,
-                    "first_visible_bonus": args.first_visible_bonus,
-                    "first_shootable_bonus": args.first_shootable_bonus,
-                    "visible_contact_progress_reward": args.visible_contact_progress_reward,
-                    "terminate_on_first_visible": args.terminate_on_first_visible,
-                    "terminate_on_first_shootable": args.terminate_on_first_shootable,
-                    "terminate_on_required_kills": bool(
-                        getattr(args, "terminate_on_required_kills", False)
-                    ),
-                    "allowed_skills": list(args.allowed_skill or []),
-                    "strict_allowed_skills": bool(
-                        getattr(args, "strict_allowed_skills", False)
-                    ),
-                },
+                reward_config=_reward_config_from_args(args),
                 extra=checkpoint_extra,
             )
             checkpoint_eval = None
@@ -178,26 +159,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                 checkpoint_extra["checkpoint_curriculum_eval"] = checkpoint_eval
                 trainer.save_checkpoint(
                     checkpoint_path,
-                    reward_config={
-                        "goal_preset": args.goal_preset,
-                        "target_x_fp": args.target_x_fp,
-                        "target_y_fp": args.target_y_fp,
-                        "level_complete_bonus": args.level_complete_bonus,
-                        "kill_goal_bonus": args.kill_goal_bonus,
-                        "required_kills": args.required_kills,
-                        "first_visible_bonus": args.first_visible_bonus,
-                        "first_shootable_bonus": args.first_shootable_bonus,
-                        "visible_contact_progress_reward": args.visible_contact_progress_reward,
-                        "terminate_on_first_visible": args.terminate_on_first_visible,
-                        "terminate_on_first_shootable": args.terminate_on_first_shootable,
-                        "terminate_on_required_kills": bool(
-                            getattr(args, "terminate_on_required_kills", False)
-                        ),
-                        "allowed_skills": list(args.allowed_skill or []),
-                        "strict_allowed_skills": bool(
-                            getattr(args, "strict_allowed_skills", False)
-                        ),
-                    },
+                    reward_config=_reward_config_from_args(args),
                     extra=checkpoint_extra,
                 )
             if memory is not None:
@@ -205,26 +167,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     memory,
                     checkpoint_path,
                     goal_preset=args.goal_preset,
-                    reward_config={
-                        "goal_preset": args.goal_preset,
-                        "target_x_fp": args.target_x_fp,
-                        "target_y_fp": args.target_y_fp,
-                        "level_complete_bonus": args.level_complete_bonus,
-                        "kill_goal_bonus": args.kill_goal_bonus,
-                        "required_kills": args.required_kills,
-                        "first_visible_bonus": args.first_visible_bonus,
-                        "first_shootable_bonus": args.first_shootable_bonus,
-                        "visible_contact_progress_reward": args.visible_contact_progress_reward,
-                        "terminate_on_first_visible": args.terminate_on_first_visible,
-                        "terminate_on_first_shootable": args.terminate_on_first_shootable,
-                        "terminate_on_required_kills": bool(
-                            getattr(args, "terminate_on_required_kills", False)
-                        ),
-                        "allowed_skills": list(args.allowed_skill or []),
-                        "strict_allowed_skills": bool(
-                            getattr(args, "strict_allowed_skills", False)
-                        ),
-                    },
+                    reward_config=_reward_config_from_args(args),
                     metrics=metrics,
                     rollout_summary=rollout_summary,
                     update_index=update_index,
@@ -317,6 +260,15 @@ async def evaluate(args: argparse.Namespace) -> dict[str, object]:
         first_visible_bonus=args.first_visible_bonus,
         first_shootable_bonus=args.first_shootable_bonus,
         visible_contact_progress_reward=args.visible_contact_progress_reward,
+        exit_route_progress_reward=float(
+            getattr(args, "exit_route_progress_reward", 0.01)
+        ),
+        exit_route_reached_reward=float(
+            getattr(args, "exit_route_reached_reward", 0.5)
+        ),
+        exit_route_failure_penalty=float(
+            getattr(args, "exit_route_failure_penalty", 0.05)
+        ),
         terminate_on_first_visible=args.terminate_on_first_visible,
         terminate_on_first_shootable=args.terminate_on_first_shootable,
         terminate_on_required_kills=bool(
@@ -437,6 +389,15 @@ def _env_config_for_start(
         first_visible_bonus=args.first_visible_bonus,
         first_shootable_bonus=args.first_shootable_bonus,
         visible_contact_progress_reward=args.visible_contact_progress_reward,
+        exit_route_progress_reward=float(
+            getattr(args, "exit_route_progress_reward", 0.01)
+        ),
+        exit_route_reached_reward=float(
+            getattr(args, "exit_route_reached_reward", 0.5)
+        ),
+        exit_route_failure_penalty=float(
+            getattr(args, "exit_route_failure_penalty", 0.05)
+        ),
         terminate_on_first_visible=args.terminate_on_first_visible,
         terminate_on_first_shootable=args.terminate_on_first_shootable,
         terminate_on_required_kills=bool(
@@ -469,6 +430,37 @@ def _build_training_curriculum(
         start_index=args.curriculum_start_index,
         seed=args.seed,
     )
+
+
+def _reward_config_from_args(args: argparse.Namespace) -> dict[str, object]:
+    """Returns checkpoint metadata for the active PPO reward surface."""
+    return {
+        "goal_preset": args.goal_preset,
+        "target_x_fp": args.target_x_fp,
+        "target_y_fp": args.target_y_fp,
+        "level_complete_bonus": args.level_complete_bonus,
+        "kill_goal_bonus": args.kill_goal_bonus,
+        "required_kills": args.required_kills,
+        "first_visible_bonus": args.first_visible_bonus,
+        "first_shootable_bonus": args.first_shootable_bonus,
+        "visible_contact_progress_reward": args.visible_contact_progress_reward,
+        "exit_route_progress_reward": float(
+            getattr(args, "exit_route_progress_reward", 0.01)
+        ),
+        "exit_route_reached_reward": float(
+            getattr(args, "exit_route_reached_reward", 0.5)
+        ),
+        "exit_route_failure_penalty": float(
+            getattr(args, "exit_route_failure_penalty", 0.05)
+        ),
+        "terminate_on_first_visible": args.terminate_on_first_visible,
+        "terminate_on_first_shootable": args.terminate_on_first_shootable,
+        "terminate_on_required_kills": bool(
+            getattr(args, "terminate_on_required_kills", False)
+        ),
+        "allowed_skills": list(args.allowed_skill or []),
+        "strict_allowed_skills": bool(getattr(args, "strict_allowed_skills", False)),
+    }
 
 
 def _env_config_for_stage(
@@ -2083,6 +2075,9 @@ def main() -> None:
     parser.add_argument("--first-visible-bonus", type=float, default=0.0)
     parser.add_argument("--first-shootable-bonus", type=float, default=0.0)
     parser.add_argument("--visible-contact-progress-reward", type=float, default=0.0)
+    parser.add_argument("--exit-route-progress-reward", type=float, default=0.01)
+    parser.add_argument("--exit-route-reached-reward", type=float, default=0.5)
+    parser.add_argument("--exit-route-failure-penalty", type=float, default=0.05)
     parser.add_argument("--terminate-on-first-visible", action="store_true")
     parser.add_argument("--terminate-on-first-shootable", action="store_true")
     parser.add_argument(

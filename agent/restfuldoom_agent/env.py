@@ -87,6 +87,9 @@ class DoomEnvConfig:
     route_progress_reward: float = 0.01
     route_reached_reward: float = 0.25
     route_failure_penalty: float = 0.03
+    exit_route_progress_reward: float = 0.01
+    exit_route_reached_reward: float = 0.5
+    exit_route_failure_penalty: float = 0.05
     first_visible_bonus: float = 0.0
     first_shootable_bonus: float = 0.0
     visible_contact_progress_reward: float = 0.0
@@ -1561,12 +1564,20 @@ class DoomAgentEnv:
     def _route_action_reward(self, route_outcome: dict[str, Any]) -> float:
         if not route_outcome.get("attempted"):
             return 0.0
-        reward = float(route_outcome.get("progress_units") or 0.0) * self.config.route_progress_reward
+        progress_units = float(route_outcome.get("progress_units") or 0.0)
+        reward = progress_units * self.config.route_progress_reward
         reward = max(-1.0, min(1.0, reward))
+        if route_outcome.get("exit"):
+            exit_reward = progress_units * self.config.exit_route_progress_reward
+            reward += max(-1.0, min(1.0, exit_reward))
         if route_outcome.get("reached"):
             reward += self.config.route_reached_reward
+            if route_outcome.get("exit"):
+                reward += self.config.exit_route_reached_reward
         if route_outcome.get("failed"):
             reward -= self.config.route_failure_penalty
+            if route_outcome.get("exit"):
+                reward -= self.config.exit_route_failure_penalty
         return reward
 
     def _contact_reward(self, current: Any) -> dict[str, Any]:

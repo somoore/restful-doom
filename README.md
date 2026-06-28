@@ -760,6 +760,10 @@ through E1M1 but still never reaches a shootable target or stalls after combat
 instead of pressing the exit. First-contact curriculum runs also report
 `visible_enemy_steps`,
 `first_visible_contacts`, `first_shootable_contacts`, and `contact_reward`.
+Exit-marked route waypoints receive additional route shaping controlled by
+`--exit-route-progress-reward`, `--exit-route-reached-reward`, and
+`--exit-route-failure-penalty`, which gives post-combat exit-routing curricula a
+dense learning signal before the sparse `level_complete` terminal reward.
 Snapshot-backed runs also report earned kill fields: `kill_delta`,
 `max_kill_gain`, `snapshot_kill_delta`, and `snapshot_max_kill_gain`. Use those
 fields, not absolute `max_kills`, when judging whether PPO earned a kill after

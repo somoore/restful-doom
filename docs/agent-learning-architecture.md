@@ -442,6 +442,14 @@ reward produces positive distance deltas without first-shootable contacts, the
 next missing observation is likely topology or progressed-map state, not another
 scalar reward.
 
+Post-combat exit routing has a matching narrow reward hook. When the protobuf
+route waypoint is marked as `exit`, `route_progression` receives additional
+progress/reached reward and additional failure penalty through
+`exit_route_progress_reward`, `exit_route_reached_reward`, and
+`exit_route_failure_penalty`. This gives PPO a dense signal for moving toward an
+exit-marked line before the sparse `level_complete` terminal event. It is still
+only curriculum shaping; promotion remains tied to actual level transition.
+
 The named `e1m1-contact-to-combat` curriculum trains the next boundary
 directly. Its early stages are fresh-reset visible-contact positions validated
 from `ppo-first-visible-train`; they begin with line-of-sight enemy contact but

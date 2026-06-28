@@ -1437,10 +1437,35 @@ def test_doom_agent_env_records_route_outcome_and_reward():
     assert step.info["route_outcome"]["attempted"]
     assert step.info["route_outcome"]["progress_units"] == pytest.approx(128.0)
     assert step.info["route_outcome"]["failed"] is False
-    assert step.info["route_action_reward"] > 0.0
+    assert step.info["route_action_reward"] == pytest.approx(1.0)
     assert features["prev_route_progression"] == 1.0
     assert features["prev_route_progress_norm"] == pytest.approx(0.5)
     assert features["route_waypoint_failed_recently"] == 0.0
+
+
+def test_doom_agent_env_boosts_exit_route_outcome_reward():
+    first = _state(tick=1, route=True, route_exit=True, x_units=0)
+    second = _state(tick=2, route=True, route_exit=True, x_units=512)
+    client = _DurationAwareFakeClient([first, second])
+    env = DoomAgentEnv(
+        DoomEnvConfig(max_steps=10, goal_preset="navigation", max_action_tics=1),
+        client=client,
+        controller=SkillController(),
+    )
+
+    async def run():
+        await env.reset(seed=5)
+        step = await env.step(SKILL_ACTIONS.index("route_progression"))
+        await env.close()
+        return step
+
+    step = asyncio.run(run())
+
+    assert step.info["route_outcome"]["attempted"]
+    assert step.info["route_outcome"]["exit"]
+    assert step.info["route_outcome"]["reached"]
+    assert step.info["route_action_reward"] == pytest.approx(2.75)
+    assert step.reward >= step.info["route_action_reward"]
 
 
 def test_doom_agent_env_reset_can_warmup_until_shootable_target():
@@ -1578,6 +1603,7 @@ def _state(
     health=100,
     hazard=False,
     route=False,
+    route_exit=False,
     contact_use=False,
     contact_use_distance_units=640,
     direction_probes=None,
@@ -1694,7 +1720,7 @@ def _state(
         navigation.route_waypoint = SimpleNamespace(
             line=route_line,
             priority=0,
-            exit=False,
+            exit=route_exit,
             walk_trigger=True,
         )
     combat_probe = SimpleNamespace(
