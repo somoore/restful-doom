@@ -37,9 +37,13 @@ EXIT_ASSIST_DOOR_USE_DISTANCE_UNITS = 384.0
 EXIT_ASSIST_DOOR_EXIT_DISTANCE_UNITS = 420.0
 EXIT_ASSIST_DOOR_CLOSE_USE_DISTANCE_UNITS = 96.0
 EXIT_ASSIST_DOOR_CLOSE_USE_ANGLE_DEGREES = 48.0
-POST_COMBAT_EXIT_KILLS = 2
+EXIT_ROUTE_LOCAL_DOOR_DISTANCE_UNITS = 192.0
+EXIT_ROUTE_LOCAL_DOOR_ANGLE_DEGREES = 60.0
+EXIT_ROUTE_LOCAL_DOOR_USE_COOLDOWN_TICS = 8
+POST_COMBAT_EXIT_KILLS = 5
 POST_COMBAT_EXIT_ROUTE_DISTANCE_UNITS = 3200.0
 POST_COMBAT_ROUTE_WAYPOINT_FINISH_DISTANCE_UNITS = 700.0
+POST_COMBAT_ROUTE_WAYPOINT_REACHED_DISTANCE_UNITS = 32.0
 LINE_ATTEMPT_STALL_TICS = 45
 LINE_ATTEMPT_BLOCK_TICS = 1200
 # Manual door/switch specials handled by Doom's P_UseSpecialLine path.
@@ -120,7 +124,6 @@ _NON_LOCOMOTION_SKILLS = {
     "fire_on_enemy",
     "hold_attack",
     "open_or_probe",
-    "backtrack_from_exit_switch",
     "press_exit_switch",
     "push_exit_switch",
     "strafe_cooldown",
@@ -603,6 +606,8 @@ class BrainPolicy:
         self._hazard_escape: dict[str, Any] | None = None
         self._last_post_combat_exit_tick = -9999
         self._last_post_combat_exit_line_id: int | None = None
+        self._last_post_combat_exit_line: dict[str, Any] | None = None
+        self._completed_walk_route_line_ids: set[int] = set()
 
     def reset_episode_context(self) -> None:
         """Clear episode-local tactical state while preserving persistent memory."""
@@ -626,6 +631,8 @@ class BrainPolicy:
         self._hazard_escape = None
         self._last_post_combat_exit_tick = -9999
         self._last_post_combat_exit_line_id = None
+        self._last_post_combat_exit_line = None
+        self._completed_walk_route_line_ids.clear()
 
     async def next_action(self, state: Any) -> Any:
         """Return a fast local action for the current protobuf state."""
@@ -959,6 +966,7 @@ class BrainPolicy:
         )
         distance = self._line_control_distance(line)
         angle_delta = self._line_control_angle_delta(line)
+        line_record = self._line_record(line)
         if (
             distance <= self._line_activate_distance(features, line)
             or (
@@ -971,8 +979,59 @@ class BrainPolicy:
         ):
             return self._advance_progression_line(features, line, stuck=False)
 
-        ray = self._best_navigation_ray(features, angle_delta)
-        line_record = self._line_record(line)
+        local_door = self._select_exit_route_local_manual_line(features, line)
+        if local_door is not None:
+            return self._use_exit_route_local_manual_line(features, local_door, stuck=True)
+
+        assist_door = self._select_exit_assist_door(features, line)
+        if assist_door is not None:
+            return self._use_nearby_line(features, assist_door, stuck=True)
+
+        slide_line = (
+            self._select_exit_slide_assist_line(features, line)
+            if phase in {2, 3, 4}
+            else None
+        )
+        if slide_line is not None:
+            slide_angle = self._line_control_angle_delta(slide_line)
+            slide_sign = -1 if int(slide_line.get("side", 0)) == 0 else 1
+            return (
+                raw_ticcmd_action(
+                    forward_move=-max(4, self.params.retreat_amount // 2)
+                    if features.navigation["back_open"]
+                    else 0,
+                    side_move=slide_sign * max(12, self.params.strafe_amount),
+                    angle_turn=raw_turn_for_delta(angle_delta),
+                    duration_tics=4,
+                    tick=features.tick,
+                ),
+                self._decision(
+                    "unstick_slide_to_exit_line",
+                    features,
+                    stuck=True,
+                    use_line=line_record,
+                    assist_line=self._line_record(slide_line),
+                ),
+            )
+
+        if phase == 1 and features.navigation["back_open"]:
+            return (
+                raw_ticcmd_action(
+                    forward_move=-self.params.retreat_amount,
+                    angle_turn=raw_turn_for_delta(angle_delta),
+                    duration_tics=4,
+                    tick=features.tick,
+                ),
+                self._decision(
+                    "unstick_backtrack_from_exit_line",
+                    features,
+                    stuck=True,
+                    stuck_phase=phase,
+                    use_line=line_record,
+                ),
+            )
+
+        ray = self._exit_recovery_ray(features, angle_delta, phase)
         if ray is not None:
             return self._move_on_ray_toward_line(
                 features,
@@ -1015,6 +1074,35 @@ class BrainPolicy:
                 ),
             )
         return None
+
+    def _exit_recovery_ray(
+        self,
+        features: TacticalFeatures,
+        angle_delta: float,
+        phase: int,
+    ) -> dict[str, Any] | None:
+        probes = features.navigation.get("direction_probes") or []
+        open_probes = [probe for probe in probes if probe.get("open")]
+        if phase in {2, 3, 4}:
+            target = {2: 30.0, 3: 60.0, 4: 90.0}[phase]
+            side_probes = [
+                probe
+                for probe in open_probes
+                if abs(float(probe.get("angle_offset_degrees", 0.0))) >= 30.0
+            ]
+            if side_probes:
+                preferred_sign = 1 if self._explore_bias >= 0 else -1
+                return min(
+                    side_probes,
+                    key=lambda probe: (
+                        0
+                        if float(probe.get("angle_offset_degrees", 0.0)) * preferred_sign > 0
+                        else 1,
+                        abs(abs(float(probe.get("angle_offset_degrees", 0.0))) - target),
+                        abs(float(probe.get("angle_offset_degrees", 0.0)) - angle_delta),
+                    ),
+                )
+        return self._best_navigation_ray(features, angle_delta)
 
     def _escape_hazard_cell(
         self,
@@ -1840,7 +1928,7 @@ class BrainPolicy:
         if far_exit is not None:
             self._remember_post_combat_exit_line(features, far_exit)
             route_line = self._select_nearby_walk_route_waypoint(features)
-            if route_line is not None:
+            if route_line is not None and not self._walk_route_waypoint_reached(route_line):
                 return route_line
             return far_exit
         if self._recent_post_combat_exit_line_active(features) and all(
@@ -1877,6 +1965,8 @@ class BrainPolicy:
             return None
         if int(line.get("line_id", 0)) <= 0:
             return None
+        if int(line.get("line_id", 0)) in self._completed_walk_route_line_ids:
+            return None
         if int(line.get("special", 0)) not in WALK_TRIGGER_LINE_SPECIALS:
             return None
         if (
@@ -1892,12 +1982,30 @@ class BrainPolicy:
             return None
         return line
 
+    def _walk_route_waypoint_reached(self, line: dict[str, Any]) -> bool:
+        if int(line.get("special", 0)) not in WALK_TRIGGER_LINE_SPECIALS:
+            return False
+        line_id = int(line.get("line_id", 0))
+        if line_id <= 0:
+            return False
+        if line_id in self._completed_walk_route_line_ids:
+            return True
+        if float(line.get("distance", 999999.0)) > POST_COMBAT_ROUTE_WAYPOINT_REACHED_DISTANCE_UNITS:
+            return False
+        self._completed_walk_route_line_ids.add(line_id)
+        return True
+
     def _select_post_combat_exit_progression_line(
         self,
         features: TacticalFeatures,
         candidates: list[dict[str, Any]],
     ) -> dict[str, Any] | None:
-        if features.visible_enemies or self._shootable_enemy(features) is not None:
+        if self._shootable_enemy(features) is not None:
+            return None
+        if features.visible_enemies and not self._recent_post_combat_exit_line_active(
+            features,
+            allow_visible_contact=True,
+        ):
             return None
         if not self._has_episode_kill(features):
             return None
@@ -1929,14 +2037,78 @@ class BrainPolicy:
             return
         self._last_post_combat_exit_tick = int(features.tick)
         self._last_post_combat_exit_line_id = int(line.get("line_id", 0))
+        self._last_post_combat_exit_line = dict(line)
 
-    def _recent_post_combat_exit_line_active(self, features: TacticalFeatures) -> bool:
+    def _last_post_combat_exit_line_target(
+        self,
+        features: TacticalFeatures,
+    ) -> dict[str, Any] | None:
+        if self._last_post_combat_exit_line_id is None:
+            return None
+        if self._last_post_combat_exit_line is None:
+            return None
+        if self._shootable_enemy(features) is not None or features.visible_enemies:
+            return None
+        if not self._has_episode_kill(features):
+            return None
+        if not 0 <= int(features.tick) - self._last_post_combat_exit_tick <= 420:
+            return None
+        line = dict(self._last_post_combat_exit_line)
+        if int(line.get("special", 0)) not in EXIT_LINE_SPECIALS:
+            return None
+        if int(line.get("line_id", 0)) != self._last_post_combat_exit_line_id:
+            return None
+        nearest = line_nearest_point_units(line, features.x_units, features.y_units)
+        if nearest is None:
+            return None
+        nearest_x, nearest_y = nearest
+        distance = math.dist((features.x_units, features.y_units), (nearest_x, nearest_y))
+        if distance > EXIT_ASSIST_DISTANCE_UNITS:
+            return None
+        line["nearest_x_units"] = nearest_x
+        line["nearest_y_units"] = nearest_y
+        line["distance"] = distance
+        line["distance_fp"] = int(distance * FP)
+        line["nearest_distance_fp"] = int(distance * FP)
+        line["angle_delta"] = angle_to_target_units(
+            features.x_units,
+            features.y_units,
+            features.angle,
+            nearest_x,
+            nearest_y,
+        )
+        line["side"] = doom_line_side(features.x_units, features.y_units, line)
+        front_point = line_front_point_units(line, offset_units=96.0)
+        if front_point is not None:
+            front_x, front_y = front_point
+            line["front_x_units"] = front_x
+            line["front_y_units"] = front_y
+            line["front_distance"] = math.dist(
+                (features.x_units, features.y_units),
+                (front_x, front_y),
+            )
+            line["front_angle_delta"] = angle_to_target_units(
+                features.x_units,
+                features.y_units,
+                features.angle,
+                front_x,
+                front_y,
+            )
+        return line
+
+    def _recent_post_combat_exit_line_active(
+        self,
+        features: TacticalFeatures,
+        *,
+        allow_visible_contact: bool = False,
+    ) -> bool:
         if self._last_post_combat_exit_line_id is None:
             return False
-        if features.visible_enemies or self._shootable_enemy(features) is not None:
+        if self._shootable_enemy(features) is not None:
             return False
-        start_kills = self._start_kills if self._start_kills is not None else features.kills
-        if features.kills - start_kills < 1:
+        if features.visible_enemies and not allow_visible_contact:
+            return False
+        if not self._has_episode_kill(features):
             return False
         if not 0 <= int(features.tick) - self._last_post_combat_exit_tick <= 420:
             return False
@@ -1986,9 +2158,13 @@ class BrainPolicy:
         special = int(line["special"])
         self._remember_post_combat_exit_line(features, line)
         if special in EXIT_LINE_SPECIALS and distance > 224.0:
-            assist_door = self._select_exit_assist_door(features, line)
-            if assist_door is not None:
-                return self._use_nearby_line(features, assist_door, stuck)
+            local_door = self._select_exit_route_local_manual_line(features, line)
+            if local_door is not None:
+                return self._use_exit_route_local_manual_line(features, local_door, stuck)
+            if self._exit_assist_preemption_allowed(features, line):
+                assist_door = self._select_exit_assist_door(features, line)
+                if assist_door is not None:
+                    return self._use_nearby_line(features, assist_door, stuck)
 
         activate_distance = self._line_activate_distance(features, line)
         if (
@@ -2005,20 +2181,82 @@ class BrainPolicy:
                 retry_door = self._select_retry_exit_assist_door(features, line)
                 if retry_door is not None:
                     return self._use_exit_assist_retry(features, retry_door, stuck)
+                front_distance = float(line.get("front_distance", 999999.0))
+                if front_distance <= activate_distance:
+                    if abs(angle_delta) > 30:
+                        return (
+                            semantic_action(
+                                turn_action_for_delta(angle_delta),
+                                amount=self.params.turn_amount,
+                                duration_tics=2,
+                                tick=features.tick,
+                            ),
+                            self._decision(
+                                "turn_to_exit_switch",
+                                features,
+                                stuck=stuck,
+                                use_line=line_record,
+                            ),
+                        )
+                    return (
+                        raw_ticcmd_action(
+                            buttons=BT_USE,
+                            forward_move=self.params.move_amount,
+                            angle_turn=raw_turn_for_delta(angle_delta),
+                            duration_tics=3,
+                            tick=features.tick,
+                        ),
+                        self._decision(
+                            "push_exit_switch",
+                            features,
+                            stuck=stuck,
+                            use_line=line_record,
+                        ),
+                    )
+                if (
+                    bool(features.navigation.get("use_line_ahead"))
+                    and int(features.navigation.get("front_blocking_line_special", 0))
+                    in MANUAL_USE_LINE_SPECIALS
+                    and float(features.navigation.get("front_block_distance_fp", 0)) / FP
+                    <= EXIT_ASSIST_DOOR_CLOSE_USE_DISTANCE_UNITS
+                    and features.tick - self._last_use_tick
+                    >= EXIT_ROUTE_LOCAL_DOOR_USE_COOLDOWN_TICS
+                ):
+                    self._last_use_tick = features.tick
+                    return (
+                        semantic_action(
+                            agent_pb2.ACTION_USE,
+                            duration_tics=1,
+                            tick=features.tick,
+                        ),
+                        self._decision(
+                            "use_exit_route_blocker_ahead",
+                            features,
+                            stuck=stuck,
+                            use_line=line_record,
+                            front_block_distance_fp=int(
+                                features.navigation.get("front_block_distance_fp", 0)
+                            ),
+                            front_blocking_line_special=int(
+                                features.navigation.get("front_blocking_line_special", 0)
+                            ),
+                        ),
+                    )
             if not features.navigation["forward_open"] and not exit_push_stalled:
                 side_use_ray = self._select_exit_side_use_ray(features)
                 if side_use_ray is not None:
                     return self._use_directional_line(features, side_use_ray, stuck)
-            if exit_push_stalled and features.navigation["back_open"]:
+            if exit_push_stalled:
+                front_angle_delta = float(line.get("front_angle_delta", angle_delta))
                 return (
                     raw_ticcmd_action(
-                        forward_move=-self.params.retreat_amount,
-                        angle_turn=raw_turn_for_delta(angle_delta),
+                        forward_move=self.params.move_amount,
+                        angle_turn=raw_turn_for_delta(front_angle_delta),
                         duration_tics=4,
                         tick=features.tick,
                     ),
                     self._decision(
-                        "backtrack_from_exit_switch",
+                        "approach_exit_switch_front",
                         features,
                         stuck=stuck,
                         use_line=line_record,
@@ -2057,7 +2295,6 @@ class BrainPolicy:
 
         if (
             special in EXIT_LINE_SPECIALS
-            and int(line.get("side", 0)) == 0
             and distance <= activate_distance
         ):
             if abs(angle_delta) > 18:
@@ -2205,6 +2442,8 @@ class BrainPolicy:
                 EXIT_ASSIST_DOOR_CLOSE_USE_DISTANCE_UNITS + 24.0
             ):
                 continue
+            if self._is_line_blocked(features, line):
+                continue
             if self._line_center_distance(line, exit_line) > EXIT_ASSIST_DOOR_EXIT_DISTANCE_UNITS:
                 continue
             if abs(float(line.get("angle_delta", 999))) > EXIT_ASSIST_DOOR_CLOSE_USE_ANGLE_DEGREES:
@@ -2221,6 +2460,150 @@ class BrainPolicy:
                 self._line_center_distance(line, exit_line),
             ),
         )
+
+    def _exit_assist_preemption_allowed(
+        self,
+        features: TacticalFeatures,
+        exit_line: dict[str, Any],
+    ) -> bool:
+        """Return whether an assist door may preempt an active exit approach."""
+        if not features.navigation.get("forward_open", True):
+            return True
+        if not features.visible_enemies:
+            return True
+        if not self._recent_post_combat_exit_line_active(
+            features,
+            allow_visible_contact=True,
+        ):
+            return True
+        return int(exit_line.get("line_id", 0)) != self._last_post_combat_exit_line_id
+
+    def _select_exit_route_local_manual_line(
+        self,
+        features: TacticalFeatures,
+        exit_line: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if (
+            features.tick - self._last_use_tick
+            < EXIT_ROUTE_LOCAL_DOOR_USE_COOLDOWN_TICS
+        ):
+            return None
+        exit_distance = self._line_control_distance(exit_line)
+        candidates = []
+        for line in features.navigation.get("use_lines", []):
+            if int(line.get("line_id", -1)) == int(exit_line.get("line_id", -2)):
+                continue
+            if int(line.get("special", 0)) != 1:
+                continue
+            if self._is_line_blocked(features, line):
+                continue
+            distance = float(line.get("distance", 999999.0))
+            front_distance = float(line.get("front_distance", distance))
+            angle_delta = self._line_control_angle_delta(line)
+            if distance > EXIT_ROUTE_LOCAL_DOOR_DISTANCE_UNITS and front_distance > EXIT_ASSIST_DOOR_CLOSE_USE_DISTANCE_UNITS:
+                continue
+            if abs(angle_delta) > EXIT_ROUTE_LOCAL_DOOR_ANGLE_DEGREES:
+                continue
+            center_distance = self._line_center_distance(line, exit_line)
+            if (
+                center_distance > exit_distance + EXIT_ASSIST_DOOR_CLOSE_USE_DISTANCE_UNITS
+                and min(distance, front_distance) > EXIT_ASSIST_DOOR_CLOSE_USE_DISTANCE_UNITS
+            ):
+                continue
+            candidates.append(line)
+        if not candidates:
+            return None
+        return min(
+            candidates,
+            key=lambda line: (
+                0 if int(line.get("side", 0)) == 0 else 1,
+                min(
+                    float(line.get("distance", 999999.0)),
+                    float(line.get("front_distance", 999999.0)),
+                ),
+                abs(self._line_control_angle_delta(line)),
+                self._line_center_distance(line, exit_line),
+            ),
+        )
+
+    def _use_exit_route_local_manual_line(
+        self,
+        features: TacticalFeatures,
+        line: dict[str, Any],
+        stuck: bool,
+    ) -> tuple[Any, dict[str, Any]]:
+        if not self._record_line_attempt(features, line):
+            return self._advance_nearby_exit_line_after_assist(features, stuck)
+
+        angle_delta = self._line_control_angle_delta(line)
+        distance = float(line.get("distance", 999999.0))
+        front_distance = float(line.get("front_distance", distance))
+        line_record = self._line_record(line)
+        if (
+            min(distance, front_distance) <= EXIT_ASSIST_DOOR_CLOSE_USE_DISTANCE_UNITS
+            and abs(angle_delta) <= EXIT_ASSIST_DOOR_CLOSE_USE_ANGLE_DEGREES
+        ):
+            self._last_use_tick = features.tick
+            return (
+                raw_ticcmd_action(
+                    buttons=BT_USE,
+                    forward_move=max(4, self.params.move_amount // 2),
+                    angle_turn=raw_turn_for_delta(angle_delta),
+                    duration_tics=2,
+                    tick=features.tick,
+                ),
+                self._decision(
+                    "use_exit_route_local_door",
+                    features,
+                    stuck=stuck,
+                    use_line=line_record,
+                ),
+            )
+
+        if abs(angle_delta) > EXIT_ROUTE_LOCAL_DOOR_ANGLE_DEGREES:
+            return (
+                semantic_action(
+                    turn_action_for_delta(angle_delta),
+                    amount=self.params.turn_amount,
+                    duration_tics=2,
+                    tick=features.tick,
+                ),
+                self._decision(
+                    "turn_to_exit_route_local_door",
+                    features,
+                    stuck=stuck,
+                    use_line=line_record,
+                ),
+            )
+
+        side_move = -max(12, self.params.strafe_amount)
+        if int(line.get("side", 0)) == 1:
+            side_move *= -1
+        return (
+            raw_ticcmd_action(
+                forward_move=self.params.move_amount,
+                side_move=side_move,
+                angle_turn=raw_turn_for_delta(angle_delta),
+                duration_tics=4,
+                tick=features.tick,
+            ),
+            self._decision(
+                "approach_exit_route_local_door",
+                features,
+                stuck=stuck,
+                use_line=line_record,
+            ),
+        )
+
+    def _advance_nearby_exit_line_after_assist(
+        self,
+        features: TacticalFeatures,
+        stuck: bool,
+    ) -> tuple[Any, dict[str, Any]]:
+        exit_line = self._select_local_exit_line(features)
+        if exit_line is not None:
+            return self._advance_progression_line(features, exit_line, stuck)
+        return self._explore(features, stuck)
 
     def _select_exit_assist_door(
         self,
@@ -2252,6 +2635,36 @@ class BrainPolicy:
                 self._line_center_distance(line, exit_line),
                 abs(float(line["angle_delta"])),
                 float(line["distance"]),
+            ),
+        )
+
+    def _select_exit_slide_assist_line(
+        self,
+        features: TacticalFeatures,
+        exit_line: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        candidates = []
+        for line in features.navigation.get("use_lines", []):
+            if int(line.get("line_id", -1)) == int(exit_line.get("line_id", -2)):
+                continue
+            if int(line.get("special", 0)) != 1:
+                continue
+            if float(line.get("distance", 999999)) > EXIT_ASSIST_DOOR_USE_DISTANCE_UNITS:
+                continue
+            if self._line_center_distance(line, exit_line) > EXIT_ASSIST_DOOR_EXIT_DISTANCE_UNITS:
+                continue
+            if abs(float(line.get("angle_delta", 999))) > 35:
+                continue
+            candidates.append(line)
+        if not candidates:
+            return None
+        return min(
+            candidates,
+            key=lambda line: (
+                0 if int(line.get("side", 0)) == 0 else 1,
+                float(line.get("front_distance", line.get("distance", 999999))),
+                abs(float(line["angle_delta"])),
+                self._line_center_distance(line, exit_line),
             ),
         )
 
@@ -2315,6 +2728,13 @@ class BrainPolicy:
         line: dict[str, Any],
         stuck: bool,
     ) -> tuple[Any, dict[str, Any]]:
+        if not self._record_line_attempt(
+            features,
+            line,
+            allow_immediate_use_bypass=False,
+        ):
+            return self._advance_nearby_exit_line_after_assist(features, stuck)
+
         angle_delta = self._line_control_angle_delta(line)
         line_record = self._line_record(line)
         if abs(angle_delta) > 15:
@@ -2334,6 +2754,7 @@ class BrainPolicy:
             )
 
         self._last_use_tick = features.tick
+        self._exit_push_attempts.clear()
         return (
             raw_ticcmd_action(
                 buttons=BT_USE,
@@ -2389,6 +2810,7 @@ class BrainPolicy:
             return (
                 raw_ticcmd_action(
                     buttons=BT_USE,
+                    forward_move=max(4, self.params.move_amount // 2),
                     angle_turn=raw_turn_for_delta(angle_delta),
                     duration_tics=2,
                     tick=features.tick,
@@ -2596,7 +3018,10 @@ class BrainPolicy:
             and float(line.get("distance", 999999)) <= EXIT_ASSIST_DISTANCE_UNITS
         ):
             return True
-        if int(line.get("special", 0)) in PROGRESSION_LINE_PRIORITIES:
+        if (
+            int(line.get("special", 0)) in PROGRESSION_LINE_PRIORITIES
+            and int(line.get("special", 0)) not in WALK_TRIGGER_LINE_SPECIALS
+        ):
             return True
         if (
             allow_immediate_use_bypass
@@ -3972,6 +4397,26 @@ def line_front_point_units(
         nearest_x + front_normal_x * offset_units,
         nearest_y + front_normal_y * offset_units,
     )
+
+
+def line_nearest_point_units(
+    line: dict[str, Any],
+    x: float,
+    y: float,
+) -> tuple[float, float] | None:
+    """Return the nearest point on a finite Doom line segment."""
+    start_x = float(line.get("start_x_units", line.get("x_units", 0.0)))
+    start_y = float(line.get("start_y_units", line.get("y_units", 0.0)))
+    end_x = float(line.get("end_x_units", line.get("x_units", 0.0)))
+    end_y = float(line.get("end_y_units", line.get("y_units", 0.0)))
+    dx = end_x - start_x
+    dy = end_y - start_y
+    length_sq = dx * dx + dy * dy
+    if length_sq < 1e-6:
+        return None
+    t = ((x - start_x) * dx + (y - start_y) * dy) / length_sq
+    t = max(0.0, min(1.0, t))
+    return start_x + dx * t, start_y + dy * t
 
 
 def normalize_angle_delta(delta: float) -> float:

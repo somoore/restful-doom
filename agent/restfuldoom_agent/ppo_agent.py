@@ -1608,6 +1608,19 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
             or not bool(record.action_mask[record.action])
         )
     )
+    selected_disallowed_steps = sum(
+        1
+        for record in records
+        if isinstance(record.info, dict)
+        and record.info.get("action_mask_enforced")
+        and not bool(record.info.get("action_mask_requested_allowed", True))
+    )
+    action_mask_fallback_steps = sum(
+        1
+        for record in records
+        if isinstance(record.info, dict)
+        and record.info.get("action_mask_fallback_applied")
+    )
     action_mask_filters = [
         record.info.get("action_mask_filter", {})
         for record in records
@@ -1844,8 +1857,13 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
             4,
         ),
         "invalid_action_steps": invalid_action_steps,
+        "selected_disallowed_steps": selected_disallowed_steps,
+        "action_mask_fallback_steps": action_mask_fallback_steps,
         "allowed_skill_filter_steps": len(action_mask_filters),
         "allowed_skill_filter_fallback_steps": len(fallback_filter_steps),
+        "strict_allowed_skill_filter_steps": sum(
+            1 for context in action_mask_filters if context.get("strict")
+        ),
         "strict_allowed_skill_fallback_steps": sum(
             1 for context in fallback_filter_steps if context.get("strict")
         ),

@@ -53,8 +53,11 @@ class EpisodeEval:
     missed_shootable_fire_steps: int = 0
     damage_delta: int = 0
     invalid_action_steps: int = 0
+    selected_disallowed_steps: int = 0
+    action_mask_fallback_steps: int = 0
     allowed_skill_filter_steps: int = 0
     allowed_skill_filter_fallback_steps: int = 0
+    strict_allowed_skill_filter_steps: int = 0
     strict_allowed_skill_fallback_steps: int = 0
     allowed_skill_filter_fallback_skills: dict[str, int] = field(default_factory=dict)
     snapshot_verification_failures: int = 0
@@ -240,8 +243,11 @@ async def evaluate_skill_policy(
             missed_shootable_fire_steps = 0
             damage_delta = 0
             invalid_action_steps = 0
+            selected_disallowed_steps = 0
+            action_mask_fallback_steps = 0
             allowed_skill_filter_steps = 0
             allowed_skill_filter_fallback_steps = 0
+            strict_allowed_skill_filter_steps = 0
             strict_allowed_skill_fallback_steps = 0
             allowed_skill_filter_fallback_skills: dict[str, int] = {}
             route_action_reward = 0.0
@@ -260,6 +266,13 @@ async def evaluate_skill_policy(
                 if not _action_allowed(action_mask, action_index):
                     invalid_action_steps += 1
                 step = await env.step(action_index)
+                if (
+                    step.info.get("action_mask_enforced")
+                    and not bool(step.info.get("action_mask_requested_allowed", True))
+                ):
+                    selected_disallowed_steps += 1
+                if step.info.get("action_mask_fallback_applied"):
+                    action_mask_fallback_steps += 1
                 _write_trace_step(
                     trace_handle,
                     policy_id=policy_id,
@@ -327,6 +340,8 @@ async def evaluate_skill_policy(
                 action_mask_filter = step.info.get("action_mask_filter", {})
                 if isinstance(action_mask_filter, dict) and action_mask_filter:
                     allowed_skill_filter_steps += 1
+                    if action_mask_filter.get("strict"):
+                        strict_allowed_skill_filter_steps += 1
                     if action_mask_filter.get("fallback_applied"):
                         allowed_skill_filter_fallback_steps += 1
                         if action_mask_filter.get("strict"):
@@ -393,8 +408,11 @@ async def evaluate_skill_policy(
                     missed_shootable_fire_steps=missed_shootable_fire_steps,
                     damage_delta=damage_delta,
                     invalid_action_steps=invalid_action_steps,
+                    selected_disallowed_steps=selected_disallowed_steps,
+                    action_mask_fallback_steps=action_mask_fallback_steps,
                     allowed_skill_filter_steps=allowed_skill_filter_steps,
                     allowed_skill_filter_fallback_steps=allowed_skill_filter_fallback_steps,
+                    strict_allowed_skill_filter_steps=strict_allowed_skill_filter_steps,
                     strict_allowed_skill_fallback_steps=strict_allowed_skill_fallback_steps,
                     allowed_skill_filter_fallback_skills=dict(
                         sorted(allowed_skill_filter_fallback_skills.items())
@@ -525,6 +543,25 @@ def _aggregate(policy_id: str, episodes: list[EpisodeEval]) -> PolicyEval:
         snapshot_verification_failures=sum(
             int(episode.snapshot_verification_failures) for episode in episodes
         ),
+        invalid_action_steps=sum(int(episode.invalid_action_steps) for episode in episodes),
+        selected_disallowed_steps=sum(
+            int(episode.selected_disallowed_steps) for episode in episodes
+        ),
+        action_mask_fallback_steps=sum(
+            int(episode.action_mask_fallback_steps) for episode in episodes
+        ),
+        allowed_skill_filter_steps=sum(
+            int(episode.allowed_skill_filter_steps) for episode in episodes
+        ),
+        allowed_skill_filter_fallback_steps=sum(
+            int(episode.allowed_skill_filter_fallback_steps) for episode in episodes
+        ),
+        strict_allowed_skill_filter_steps=sum(
+            int(episode.strict_allowed_skill_filter_steps) for episode in episodes
+        ),
+        strict_allowed_skill_fallback_steps=sum(
+            int(episode.strict_allowed_skill_fallback_steps) for episode in episodes
+        ),
         route_action_reward=round(
             sum(float(episode.route_action_reward) for episode in episodes),
             4,
@@ -607,6 +644,30 @@ def _reset_source_breakdown(episodes: list[EpisodeEval]) -> dict[str, dict[str, 
             / count,
             "snapshot_verification_failures": sum(
                 int(episode.snapshot_verification_failures)
+                for episode in source_episodes
+            ),
+            "invalid_action_steps": sum(
+                int(episode.invalid_action_steps) for episode in source_episodes
+            ),
+            "selected_disallowed_steps": sum(
+                int(episode.selected_disallowed_steps) for episode in source_episodes
+            ),
+            "action_mask_fallback_steps": sum(
+                int(episode.action_mask_fallback_steps) for episode in source_episodes
+            ),
+            "allowed_skill_filter_steps": sum(
+                int(episode.allowed_skill_filter_steps) for episode in source_episodes
+            ),
+            "allowed_skill_filter_fallback_steps": sum(
+                int(episode.allowed_skill_filter_fallback_steps)
+                for episode in source_episodes
+            ),
+            "strict_allowed_skill_filter_steps": sum(
+                int(episode.strict_allowed_skill_filter_steps)
+                for episode in source_episodes
+            ),
+            "strict_allowed_skill_fallback_steps": sum(
+                int(episode.strict_allowed_skill_fallback_steps)
                 for episode in source_episodes
             ),
             "route_action_reward": round(

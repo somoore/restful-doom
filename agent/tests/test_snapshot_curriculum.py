@@ -131,6 +131,40 @@ def test_snapshot_builder_selects_post_combat_exit_route(tmp_path):
     assert exit_route["snapshot"]["ref"] == "save_slot:8"
 
 
+def test_snapshot_builder_selects_post_combat_exit_route_from_decision_line(tmp_path):
+    trajectory = tmp_path / "post-combat-decision-exit.jsonl"
+    _write_jsonl(
+        trajectory,
+        [
+            _trajectory_row(0, visible=False, shootable=False, kills=4),
+            _trajectory_row(1, visible=False, shootable=False, kills=5),
+            _trajectory_row(
+                2,
+                visible=False,
+                shootable=False,
+                kills=5,
+                route_exit=False,
+                route_line_id=195,
+                skill="approach_progression_line",
+                decision_use_line={"line_id": 330, "special": 11, "distance": 768.0},
+            ),
+        ],
+    )
+
+    manifest = build_snapshot_curriculum_from_trajectory(
+        trajectory,
+        output_path=tmp_path / "post-combat-decision-exit.json",
+        name="e1m1-post-combat-decision-exit",
+        auto_selectors=["post-combat-exit-route"],
+        snapshot_dir=Path("snapshots"),
+        save_slot_base=8,
+    )
+
+    assert manifest["stages"][0]["evidence"]["source_record_index"] == 2
+    assert manifest["stages"][0]["expected_state"]["route_waypoint_exit"] is False
+    assert manifest["stages"][0]["expected_state"]["route_waypoint_line_id"] == 195
+
+
 def test_snapshot_builder_rejects_exit_control_without_exit_route_waypoint(tmp_path):
     trajectory = tmp_path / "post-combat-exit-control.jsonl"
     _write_jsonl(
@@ -744,6 +778,7 @@ def _trajectory_row(
     route_exit: bool = False,
     route_line_id: int = 0,
     use_line_specials: list[int] | None = None,
+    decision_use_line: dict | None = None,
 ) -> dict:
     if target_is_enemy is None:
         target_is_enemy = bool(shootable)
@@ -769,6 +804,16 @@ def _trajectory_row(
         }
         for offset, special in enumerate(use_line_specials or [])
     ]
+    policy_decision = {
+        "skill": skill,
+        "visible_enemies": 1 if visible else 0,
+        "combat": {
+            "has_shootable_target": shootable,
+            "target_is_enemy": target_is_enemy,
+        },
+    }
+    if decision_use_line is not None:
+        policy_decision["use_line"] = dict(decision_use_line)
     return {
         "index": index,
         "state": {
@@ -796,13 +841,6 @@ def _trajectory_row(
             "kill_delta": kill_delta,
         },
         "metadata": {
-            "policy_decision": {
-                "skill": skill,
-                "visible_enemies": 1 if visible else 0,
-                "combat": {
-                    "has_shootable_target": shootable,
-                    "target_is_enemy": target_is_enemy,
-                },
-            }
+            "policy_decision": policy_decision
         },
     }

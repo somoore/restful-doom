@@ -969,7 +969,7 @@ def test_skill_controller_recent_contact_does_not_suppress_exit_route():
     first = _state(tick=5, kills=1, enemy=True, combat=False)
     active = _state(
         tick=20,
-        kills=2,
+        kills=5,
         enemy=True,
         enemy_line_of_sight=False,
         combat=False,
@@ -1005,7 +1005,7 @@ def test_skill_controller_recent_contact_does_not_suppress_exit_route():
 def test_skill_controller_failed_stale_exit_route_exposes_recovery():
     controller = SkillController()
     controller.policy._start_kills = 0
-    state = _state(tick=80, kills=2, route=True, route_exit=False, x_units=-1400)
+    state = _state(tick=80, kills=5, route=True, route_exit=False, x_units=-1400)
     route_line = state.navigation.route_waypoint.line
     route_line.line_id = 195
     route_line.special = 88
@@ -1044,13 +1044,13 @@ def test_skill_controller_failed_stale_exit_route_exposes_recovery():
     mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
 
     assert mask["recover_stuck"]
-    assert not mask["route_progression"]
+    assert mask["route_progression"]
 
 
 def test_skill_controller_route_progression_recovers_after_failed_stale_exit_route():
     controller = SkillController()
     controller.policy._start_kills = 0
-    state = _state(tick=80, kills=2, route=True, route_exit=False, x_units=-1400)
+    state = _state(tick=80, kills=5, route=True, route_exit=False, x_units=-1400)
     route_line = state.navigation.route_waypoint.line
     route_line.line_id = 195
     route_line.special = 88
@@ -1217,7 +1217,6 @@ def test_skill_controller_allows_press_exit_inside_push_window():
 def test_exit_switch_decisions_do_not_trigger_stuck_recovery():
     assert "push_exit_switch" in _NON_LOCOMOTION_SKILLS
     assert "press_exit_switch" in _NON_LOCOMOTION_SKILLS
-    assert "backtrack_from_exit_switch" in _NON_LOCOMOTION_SKILLS
     assert "turn_to_exit_switch" in _NON_LOCOMOTION_SKILLS
 
 
@@ -1270,7 +1269,25 @@ def test_stuck_walk_trigger_route_yields_to_recovery():
     assert decision["skill"] != "cross_progression_line"
 
 
-def test_progression_line_attempts_do_not_blacklist_route_target():
+def test_exit_progression_line_attempts_do_not_blacklist_route_target():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    features = extract_features(
+        _state(tick=20, kills=1, route=True),
+        controller.memory,
+        controller.params,
+    )
+    line = features.navigation["route_waypoint"]["line"]
+    line["special"] = 11
+
+    assert controller.policy._record_line_attempt(features, line)
+    stalled = replace(features, tick=features.tick + LINE_ATTEMPT_STALL_TICS + 1)
+
+    assert controller.policy._record_line_attempt(stalled, line)
+    assert controller.policy._select_progression_line(stalled) is not None
+
+
+def test_walk_trigger_progression_attempts_blacklist_stalled_route_target():
     controller = SkillController()
     controller.policy._start_kills = 0
     features = extract_features(
@@ -1283,8 +1300,8 @@ def test_progression_line_attempts_do_not_blacklist_route_target():
     assert controller.policy._record_line_attempt(features, line)
     stalled = replace(features, tick=features.tick + LINE_ATTEMPT_STALL_TICS + 1)
 
-    assert controller.policy._record_line_attempt(stalled, line)
-    assert controller.policy._select_progression_line(stalled) is not None
+    assert not controller.policy._record_line_attempt(stalled, line)
+    assert controller.policy._is_line_blocked(stalled, line)
 
 
 def test_skill_controller_successful_route_outcome_resets_contact_route_backoff():

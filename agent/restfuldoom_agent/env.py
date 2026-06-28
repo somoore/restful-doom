@@ -646,7 +646,10 @@ class SkillController:
         ):
             mask["open_use_line"] = True
 
-        if exit_route_recovery or stale_route_recovery:
+        if exit_route_recovery:
+            mask["route_progression"] = True
+            mask["recover_stuck"] = True
+        elif stale_route_recovery:
             mask["recover_stuck"] = True
         elif not can_fire and progression_line is not None:
             if not self._suppress_route_after_contact_failures(
@@ -679,7 +682,9 @@ class SkillController:
         """Returns whether a repeated stale-waypoint exit route should recover."""
         if self._failed_route_attempt_count < EXIT_ROUTE_FAILURE_RECOVERY_THRESHOLD:
             return False
-        if features.visible_enemies or self.policy._shootable_enemy(features) is not None:
+        if self.policy._shootable_enemy(features) is not None:
+            return False
+        if features.visible_enemies and not self.policy._has_episode_kill(features):
             return False
         if not _line_is_exit(progression_line):
             return False
@@ -927,6 +932,11 @@ class SkillController:
             )
 
         if skill == "route_progression":
+            line = self.policy._select_local_exit_line(features)
+            if line is None:
+                line = self.policy._last_post_combat_exit_line_target(features)
+            if line is not None:
+                return self.policy._advance_progression_line(features, line, stuck)
             line = self.policy._select_progression_line(features)
             if line is None and self._stale_route_waypoint_recovery_needed(features, None):
                 return self.policy._recover_from_stuck(features)
@@ -964,6 +974,8 @@ class SkillController:
 
         if skill == "press_exit":
             line = self.policy._select_local_exit_line(features)
+            if line is None:
+                line = self.policy._last_post_combat_exit_line_target(features)
             if line is not None:
                 return self.policy._advance_progression_line(features, line, stuck)
             self.policy._last_use_tick = features.tick
@@ -2186,13 +2198,20 @@ def _route_attempted_for_outcome(
     if not bool(_line_value(route, "exit", False)):
         return False
     return decision_skill in {
-        "unstick_route_to_exit_line",
-        "unstick_turn_to_exit_line",
-        "unstick_approach_exit_line",
-        "turn_to_exit_switch",
-        "push_exit_switch",
-        "press_exit_switch",
-    }
+            "approach_exit_switch_front",
+            "approach_exit_route_local_door",
+            "use_exit_route_blocker_ahead",
+            "unstick_route_to_exit_line",
+            "unstick_turn_to_exit_line",
+            "unstick_approach_exit_line",
+            "unstick_backtrack_from_exit_line",
+            "unstick_slide_to_exit_line",
+            "turn_to_exit_route_local_door",
+            "use_exit_route_local_door",
+            "turn_to_exit_switch",
+            "push_exit_switch",
+            "press_exit_switch",
+        }
 
 
 def _route_target_for_outcome(

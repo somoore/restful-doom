@@ -7,6 +7,7 @@ from restfuldoom_agent.brain import (
     BrainPolicy,
     BrainPolicyParams,
     EpisodeStats,
+    LINE_ATTEMPT_STALL_TICS,
     cell_key,
     combat_from_state,
     doom_line_side,
@@ -15,6 +16,7 @@ from restfuldoom_agent.brain import (
     normalize_angle_delta,
     turn_action_for_delta,
 )
+from restfuldoom_agent.client import agent_pb2
 
 
 def state(*, tick=1, x=0, y=0, angle=0, enemy=None, combat=None, direction_probes=None):
@@ -961,7 +963,7 @@ def test_post_combat_policy_prefers_visible_far_exit_when_combat_is_quiet(tmp_pa
     asyncio.run(policy.next_action(state(tick=1)))
 
     game_state = state(tick=40, x=8)
-    game_state.player.kills = 3
+    game_state.player.kills = 5
     game_state.navigation.use_lines = [
         SimpleNamespace(
             line_id=195,
@@ -999,7 +1001,7 @@ def test_post_combat_snapshot_prefers_visible_exit_with_inherited_kills(tmp_path
     )
 
     game_state = state(tick=40)
-    game_state.player.kills = 2
+    game_state.player.kills = 5
     game_state.navigation.use_lines = [
         SimpleNamespace(
             line_id=195,
@@ -1021,12 +1023,108 @@ def test_post_combat_snapshot_prefers_visible_exit_with_inherited_kills(tmp_path
         ),
     ]
     features = extract_features(game_state, policy.memory, policy.params)
-    policy._start_kills = 2
+    policy._start_kills = 5
 
     selected = policy._select_progression_line(features)
     action, decision = policy._advance_progression_line(features, selected, stuck=False)
 
     assert selected["line_id"] == 330
+    assert decision["use_line"]["line_id"] == 330
+    assert decision["skill"] == "approach_progression_line"
+    assert action.raw.forward_move > 0
+
+
+def test_visible_post_combat_exit_route_keeps_remembered_exit(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    params = BrainPolicyParams()
+    policy = BrainPolicy(
+        memory=memory,
+        params=params,
+        policy_id="test-policy",
+    )
+    policy._start_kills = 5
+    policy._last_post_combat_exit_line_id = 330
+    policy._last_post_combat_exit_tick = 32
+
+    game_state = state(
+        tick=40,
+        enemy={"x": 512, "y": 128, "distance": 528},
+    )
+    game_state.player.kills = 5
+    game_state.navigation.forward_open = True
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=324,
+            midpoint=SimpleNamespace(x_fp=372 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=372 * 65536, y_fp=0, z_fp=0),
+            special=1,
+            tag=0,
+            distance_fp=372 * 65536,
+            nearest_distance_fp=372 * 65536,
+        ),
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=500 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=500 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=500 * 65536,
+            nearest_distance_fp=500 * 65536,
+        ),
+    ]
+
+    features = extract_features(game_state, memory, params)
+    line = policy._select_progression_line(features)
+
+    assert line is not None
+    assert line["line_id"] == 330
+
+
+def test_visible_post_combat_exit_route_bypasses_forward_open_assist_door(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    params = BrainPolicyParams()
+    policy = BrainPolicy(
+        memory=memory,
+        params=params,
+        policy_id="test-policy",
+    )
+    policy._start_kills = 5
+    policy._last_post_combat_exit_line_id = 330
+    policy._last_post_combat_exit_tick = 32
+
+    game_state = state(
+        tick=40,
+        enemy={"x": 512, "y": 128, "distance": 528},
+    )
+    game_state.player.kills = 5
+    game_state.navigation.forward_open = True
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=324,
+            midpoint=SimpleNamespace(x_fp=372 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=372 * 65536, y_fp=0, z_fp=0),
+            special=1,
+            tag=0,
+            distance_fp=372 * 65536,
+            nearest_distance_fp=372 * 65536,
+        ),
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=500 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=500 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=500 * 65536,
+            nearest_distance_fp=500 * 65536,
+        ),
+    ]
+
+    features = extract_features(game_state, memory, params)
+    line = policy._select_progression_line(features)
+    assert line is not None
+
+    action, decision = policy._advance_progression_line(features, line, stuck=False)
+
     assert decision["use_line"]["line_id"] == 330
     assert decision["skill"] == "approach_progression_line"
     assert action.raw.forward_move > 0
@@ -1059,7 +1157,7 @@ def test_post_combat_snapshot_finishes_nearby_walk_route_waypoint_before_far_exi
         nearest_distance_fp=2250 * 65536,
     )
     game_state = state(tick=40)
-    game_state.player.kills = 2
+    game_state.player.kills = 5
     game_state.navigation.use_lines = [route_line, exit_line]
     game_state.navigation.route_waypoint = SimpleNamespace(
         line=route_line,
@@ -1068,7 +1166,7 @@ def test_post_combat_snapshot_finishes_nearby_walk_route_waypoint_before_far_exi
         walk_trigger=True,
     )
     features = extract_features(game_state, policy.memory, policy.params)
-    policy._start_kills = 2
+    policy._start_kills = 5
 
     selected = policy._select_progression_line(features)
     action, decision = policy._advance_progression_line(features, selected, stuck=False)
@@ -1077,6 +1175,113 @@ def test_post_combat_snapshot_finishes_nearby_walk_route_waypoint_before_far_exi
     assert decision["use_line"]["line_id"] == 195
     assert decision["skill"] == "cross_progression_line"
     assert action.raw.forward_move > 0
+
+
+def test_stalled_nearby_walk_route_yields_to_visible_far_exit(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+
+    route_line = SimpleNamespace(
+        line_id=195,
+        midpoint=SimpleNamespace(x_fp=560 * 65536, y_fp=0, z_fp=0),
+        nearest_point=SimpleNamespace(x_fp=560 * 65536, y_fp=0, z_fp=0),
+        special=88,
+        tag=2,
+        distance_fp=560 * 65536,
+        nearest_distance_fp=560 * 65536,
+    )
+    exit_line = SimpleNamespace(
+        line_id=330,
+        midpoint=SimpleNamespace(x_fp=2250 * 65536, y_fp=0, z_fp=0),
+        nearest_point=SimpleNamespace(x_fp=2250 * 65536, y_fp=0, z_fp=0),
+        special=11,
+        tag=0,
+        distance_fp=2250 * 65536,
+        nearest_distance_fp=2250 * 65536,
+    )
+
+    first_state = state(tick=40)
+    first_state.player.kills = 5
+    first_state.navigation.use_lines = [route_line, exit_line]
+    first_state.navigation.route_waypoint = SimpleNamespace(
+        line=route_line,
+        priority=0,
+        exit=False,
+        walk_trigger=True,
+    )
+    policy._start_kills = 5
+    first_features = extract_features(first_state, policy.memory, policy.params)
+    selected = policy._select_progression_line(first_features)
+
+    assert selected["line_id"] == 195
+    assert policy._record_line_attempt(first_features, selected) is True
+
+    stalled_state = state(tick=40 + LINE_ATTEMPT_STALL_TICS + 1)
+    stalled_state.player.kills = 5
+    stalled_state.navigation.use_lines = [route_line, exit_line]
+    stalled_state.navigation.route_waypoint = SimpleNamespace(
+        line=route_line,
+        priority=0,
+        exit=False,
+        walk_trigger=True,
+    )
+    stalled_features = extract_features(stalled_state, policy.memory, policy.params)
+    stalled_selection = policy._select_progression_line(stalled_features)
+
+    assert stalled_selection["line_id"] == 195
+    assert policy._record_line_attempt(stalled_features, stalled_selection) is False
+
+    selected_after_stall = policy._select_progression_line(stalled_features)
+
+    assert selected_after_stall["line_id"] == 330
+
+
+def test_reached_walk_route_waypoint_yields_to_visible_far_exit(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+
+    route_line = SimpleNamespace(
+        line_id=195,
+        midpoint=SimpleNamespace(x_fp=24 * 65536, y_fp=0, z_fp=0),
+        nearest_point=SimpleNamespace(x_fp=24 * 65536, y_fp=0, z_fp=0),
+        special=88,
+        tag=2,
+        distance_fp=24 * 65536,
+        nearest_distance_fp=24 * 65536,
+    )
+    exit_line = SimpleNamespace(
+        line_id=330,
+        midpoint=SimpleNamespace(x_fp=1800 * 65536, y_fp=0, z_fp=0),
+        nearest_point=SimpleNamespace(x_fp=1800 * 65536, y_fp=0, z_fp=0),
+        special=11,
+        tag=0,
+        distance_fp=1800 * 65536,
+        nearest_distance_fp=1800 * 65536,
+    )
+    game_state = state(tick=40)
+    game_state.player.kills = 5
+    game_state.navigation.use_lines = [route_line, exit_line]
+    game_state.navigation.route_waypoint = SimpleNamespace(
+        line=route_line,
+        priority=0,
+        exit=False,
+        walk_trigger=True,
+    )
+    policy._start_kills = 5
+    features = extract_features(game_state, policy.memory, policy.params)
+
+    selected = policy._select_progression_line(features)
+
+    assert selected["line_id"] == 330
+    assert 195 in policy._completed_walk_route_line_ids
 
 
 def test_post_combat_stuck_recovery_finishes_nearby_walk_route_waypoint(tmp_path):
@@ -1106,7 +1311,7 @@ def test_post_combat_stuck_recovery_finishes_nearby_walk_route_waypoint(tmp_path
         nearest_distance_fp=2250 * 65536,
     )
     game_state = state(tick=40)
-    game_state.player.kills = 2
+    game_state.player.kills = 5
     game_state.navigation.forward_open = False
     game_state.navigation.direction_probes = [
         SimpleNamespace(
@@ -1125,7 +1330,7 @@ def test_post_combat_stuck_recovery_finishes_nearby_walk_route_waypoint(tmp_path
         walk_trigger=True,
     )
     features = extract_features(game_state, policy.memory, policy.params)
-    policy._start_kills = 2
+    policy._start_kills = 5
 
     action, decision = policy._recover_from_stuck(features)
 
@@ -1163,7 +1368,7 @@ def test_blocked_post_combat_route_progression_backtracks_from_nearby_waypoint(t
         nearest_distance_fp=2250 * 65536,
     )
     game_state = state(tick=40)
-    game_state.player.kills = 2
+    game_state.player.kills = 5
     game_state.navigation.forward_open = False
     game_state.navigation.left_open = False
     game_state.navigation.right_open = False
@@ -1186,7 +1391,7 @@ def test_blocked_post_combat_route_progression_backtracks_from_nearby_waypoint(t
         walk_trigger=True,
     )
     features = extract_features(game_state, policy.memory, policy.params)
-    policy._start_kills = 2
+    policy._start_kills = 5
 
     selected = policy._select_progression_line(features)
     action, decision = policy._advance_progression_line(features, selected, stuck=False)
@@ -1446,6 +1651,138 @@ def test_stuck_recovery_routes_toward_visible_exit_line(tmp_path):
     assert action.raw.side_move != 0
 
 
+def test_stuck_exit_recovery_slides_after_assist_doors_stall(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+
+    def use_line(
+        *,
+        line_id,
+        special,
+        midpoint,
+        nearest,
+        start,
+        end,
+        distance,
+    ):
+        return SimpleNamespace(
+            line_id=line_id,
+            midpoint=SimpleNamespace(
+                x_fp=int(midpoint[0] * 65536),
+                y_fp=int(midpoint[1] * 65536),
+                z_fp=0,
+            ),
+            nearest_point=SimpleNamespace(
+                x_fp=int(nearest[0] * 65536),
+                y_fp=int(nearest[1] * 65536),
+                z_fp=0,
+            ),
+            start=SimpleNamespace(
+                x_fp=int(start[0] * 65536),
+                y_fp=int(start[1] * 65536),
+                z_fp=0,
+            ),
+            end=SimpleNamespace(
+                x_fp=int(end[0] * 65536),
+                y_fp=int(end[1] * 65536),
+                z_fp=0,
+            ),
+            special=special,
+            tag=0,
+            distance_fp=int(distance * 65536),
+            nearest_distance_fp=int(distance * 65536),
+        )
+
+    game_state = state(tick=100, x=2918, y=-4336, angle=270)
+    game_state.player.kills = 6
+    game_state.navigation.forward_open = True
+    game_state.navigation.back_open = False
+    game_state.navigation.use_lines = [
+        use_line(
+            line_id=324,
+            special=1,
+            midpoint=(3008, -4648),
+            nearest=(2976, -4648),
+            start=(2976, -4648),
+            end=(3040, -4648),
+            distance=341,
+        ),
+        use_line(
+            line_id=325,
+            special=1,
+            midpoint=(3008, -4632),
+            nearest=(2976, -4632),
+            start=(3040, -4632),
+            end=(2976, -4632),
+            distance=325,
+        ),
+        use_line(
+            line_id=330,
+            special=11,
+            midpoint=(2912, -4768),
+            nearest=(2912, -4736),
+            start=(2912, -4800),
+            end=(2912, -4736),
+            distance=403,
+        ),
+    ]
+    features = extract_features(game_state, policy.memory, policy.params)
+    policy._start_kills = 5
+    policy._last_progress_tick = features.tick - 16
+    for line in features.navigation["use_lines"]:
+        if line["line_id"] in {324, 325}:
+            policy._blocked_use_lines[policy._line_key(features.cell, line)] = (
+                features.tick + 120
+            )
+
+    action, decision = policy._recover_from_stuck(features)
+
+    assert decision["skill"] == "unstick_slide_to_exit_line"
+    assert decision["use_line"]["line_id"] == 330
+    assert decision["assist_line"]["line_id"] == 325
+    assert action.raw.forward_move == 0
+    assert action.raw.side_move < 0
+
+
+def test_stuck_exit_recovery_backtracks_without_assist_slide(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+
+    game_state = state(tick=100)
+    game_state.player.kills = 6
+    game_state.navigation.forward_open = True
+    game_state.navigation.back_open = True
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=420 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=420 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=420 * 65536,
+            nearest_distance_fp=420 * 65536,
+        ),
+    ]
+    features = extract_features(game_state, policy.memory, policy.params)
+    policy._start_kills = 5
+    policy._last_progress_tick = features.tick - 8
+
+    action, decision = policy._recover_from_stuck(features)
+
+    assert decision["skill"] == "unstick_backtrack_from_exit_line"
+    assert decision["stuck_phase"] == 1
+    assert decision["use_line"]["line_id"] == 330
+    assert action.raw.forward_move < 0
+
+
 def test_post_combat_snapshot_recovery_routes_toward_far_visible_exit(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
@@ -1455,7 +1792,7 @@ def test_post_combat_snapshot_recovery_routes_toward_far_visible_exit(tmp_path):
     )
 
     game_state = state(tick=40)
-    game_state.player.kills = 2
+    game_state.player.kills = 5
     game_state.navigation.forward_open = False
     game_state.navigation.direction_probes = [
         SimpleNamespace(
@@ -1487,7 +1824,7 @@ def test_post_combat_snapshot_recovery_routes_toward_far_visible_exit(tmp_path):
         ),
     ]
     features = extract_features(game_state, policy.memory, policy.params)
-    policy._start_kills = 2
+    policy._start_kills = 5
 
     action, decision = policy._recover_from_stuck(features)
 
@@ -1550,7 +1887,7 @@ def test_post_combat_exit_memory_suppresses_stale_walk_trigger_while_exit_visibl
     asyncio.run(policy.next_action(state(tick=1)))
 
     exit_state = state(tick=40)
-    exit_state.player.kills = 2
+    exit_state.player.kills = 5
     exit_state.navigation.use_lines = [
         SimpleNamespace(
             line_id=195,
@@ -1577,7 +1914,7 @@ def test_post_combat_exit_memory_suppresses_stale_walk_trigger_while_exit_visibl
     assert policy.last_decision["use_line"]["line_id"] == 330
 
     stale_state = state(tick=80)
-    stale_state.player.kills = 2
+    stale_state.player.kills = 5
     stale_state.navigation.use_lines = [
         SimpleNamespace(
             line_id=195,
@@ -1606,7 +1943,7 @@ def test_post_combat_exit_memory_suppresses_stale_walk_trigger_while_exit_visibl
     assert selected_while_exit_visible["line_id"] == 330
 
     exit_gone_state = state(tick=90)
-    exit_gone_state.player.kills = 2
+    exit_gone_state.player.kills = 5
     exit_gone_state.navigation.use_lines = [
         SimpleNamespace(
             line_id=195,
@@ -1774,6 +2111,7 @@ def test_local_exit_opens_nearby_assist_door_when_blocked(tmp_path):
     assert policy.last_decision["skill"] == "use_exit_assist_door"
     assert policy.last_decision["use_line"]["line_id"] == 325
     assert action.raw.buttons & 2
+    assert action.raw.forward_move > 0
 
 
 def test_exit_assist_ignores_manual_line_far_from_exit(tmp_path):
@@ -2097,6 +2435,48 @@ def test_local_exit_presses_switch_near_wall_without_assist_door(tmp_path):
     assert action.raw.forward_move > 0
 
 
+def test_recent_exit_line_target_rebuilds_when_live_line_drops(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    first = state(tick=40, x=2961.9, y=-4727.1, angle=0)
+    first.player.kills = 6
+    first.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=2912 * 65536, y_fp=-4768 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=2912 * 65536, y_fp=-4736 * 65536, z_fp=0),
+            start=SimpleNamespace(x_fp=2912 * 65536, y_fp=-4800 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=2912 * 65536, y_fp=-4736 * 65536, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=60 * 65536,
+            nearest_distance_fp=60 * 65536,
+        )
+    ]
+    first_features = extract_features(first, memory, BrainPolicyParams())
+    policy._remember_post_combat_exit_line(
+        first_features,
+        first_features.navigation["use_lines"][0],
+    )
+
+    later = state(tick=60, x=2961.9, y=-4727.1, angle=0)
+    later.player.kills = 6
+    later.navigation.use_lines = []
+    later_features = extract_features(later, memory, BrainPolicyParams())
+
+    target = policy._last_post_combat_exit_line_target(later_features)
+
+    assert target is not None
+    assert target["line_id"] == 330
+    assert target["special"] == 11
+    assert target["distance"] < 64
+    assert "front_distance" in target
+
+
 def test_close_exit_line_pushes_switch_before_blocked_front_recovery(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
@@ -2216,7 +2596,7 @@ def test_close_exit_line_uses_front_manual_probe_before_side_probe(tmp_path):
     assert action.raw.buttons & 2
 
 
-def test_repeated_close_exit_push_backtracks_from_switch(tmp_path):
+def test_repeated_close_exit_push_approaches_switch_front(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
         memory=memory,
@@ -2246,14 +2626,111 @@ def test_repeated_close_exit_push_backtracks_from_switch(tmp_path):
     later.navigation.forward_open = False
     later.navigation.back_open = True
     later.navigation.use_lines = first.navigation.use_lines
-    action = asyncio.run(policy.next_action(later))
+    features = extract_features(later, memory, BrainPolicyParams())
+    exit_line = features.navigation["use_lines"][0]
+    exit_line["front_angle_delta"] = 37.0
+    exit_line["front_distance"] = 152.0
+    action, decision = policy._advance_progression_line(features, exit_line, stuck=False)
 
-    assert policy.last_decision["skill"] == "backtrack_from_exit_switch"
-    assert policy.last_decision["use_line"]["line_id"] == 330
-    assert action.raw.forward_move < 0
+    assert decision["skill"] == "approach_exit_switch_front"
+    assert decision["use_line"]["line_id"] == 330
+    assert not action.raw.buttons
+    assert action.raw.forward_move > 0
+    assert action.raw.angle_turn > 0
 
 
-def test_stalled_exit_push_retries_close_assist_door_even_when_blocked(tmp_path):
+def test_stalled_exit_push_pulses_front_blocking_line_use(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    game_state = state(tick=100)
+    game_state.player.kills = 6
+    game_state.navigation.forward_open = False
+    game_state.navigation.back_open = True
+    game_state.navigation.use_line_ahead = True
+    game_state.navigation.front_blocking_line_special = 1
+    game_state.navigation.front_block_distance_fp = 16 * 65536
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=200 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=168 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=168 * 65536,
+            nearest_distance_fp=168 * 65536,
+        )
+    ]
+    features = extract_features(game_state, memory, BrainPolicyParams())
+    exit_line = features.navigation["use_lines"][0]
+    policy._exit_push_attempts[policy._line_key(features.cell, exit_line)] = {
+        "first_tick": 40,
+        "best_distance": 168.0,
+        "signature": {
+            "cell": features.cell,
+            "episode": features.episode,
+            "map": features.map,
+            "kills": features.kills,
+            "items": features.items,
+        },
+    }
+
+    action, decision = policy._advance_progression_line(features, exit_line, stuck=False)
+
+    assert decision["skill"] == "use_exit_route_blocker_ahead"
+    assert decision["front_blocking_line_special"] == 1
+    assert action.action == agent_pb2.ACTION_USE
+
+
+def test_stalled_exit_push_closes_from_front_side_when_front_point_is_near(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    game_state = state(tick=100)
+    game_state.player.kills = 6
+    game_state.navigation.forward_open = True
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=128 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=112 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=112 * 65536,
+            nearest_distance_fp=112 * 65536,
+        )
+    ]
+    features = extract_features(game_state, memory, BrainPolicyParams())
+    exit_line = features.navigation["use_lines"][0]
+    exit_line["front_distance"] = 16.0
+    exit_line["front_angle_delta"] = -55.0
+    policy._exit_push_attempts[policy._line_key(features.cell, exit_line)] = {
+        "first_tick": 40,
+        "best_distance": 112.0,
+        "signature": {
+            "cell": features.cell,
+            "episode": features.episode,
+            "map": features.map,
+            "kills": features.kills,
+            "items": features.items,
+        },
+    }
+
+    action, decision = policy._advance_progression_line(features, exit_line, stuck=False)
+
+    assert decision["skill"] == "push_exit_switch"
+    assert decision["use_line"]["line_id"] == 330
+    assert action.raw.buttons & 2
+    assert action.raw.forward_move > 0
+
+
+def test_stalled_exit_push_retries_next_unblocked_close_assist_door(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
         memory=memory,
@@ -2316,7 +2793,7 @@ def test_stalled_exit_push_retries_close_assist_door_even_when_blocked(tmp_path)
     action, decision = policy._advance_progression_line(features, exit_line, stuck=False)
 
     assert decision["skill"] == "retry_exit_assist_door"
-    assert decision["use_line"]["line_id"] == 325
+    assert decision["use_line"]["line_id"] == 324
     assert action.raw.buttons & 2
     assert action.raw.forward_move > 0
 

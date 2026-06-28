@@ -641,6 +641,13 @@ class EvaluationResult:
     mean_secrets: float = 0.0
     mean_secret_gain: float = 0.0
     snapshot_verification_failures: int = 0
+    invalid_action_steps: int = 0
+    selected_disallowed_steps: int = 0
+    action_mask_fallback_steps: int = 0
+    allowed_skill_filter_steps: int = 0
+    allowed_skill_filter_fallback_steps: int = 0
+    strict_allowed_skill_filter_steps: int = 0
+    strict_allowed_skill_fallback_steps: int = 0
     route_action_reward: float = 0.0
     route_attempt_steps: int = 0
     route_reached_steps: int = 0

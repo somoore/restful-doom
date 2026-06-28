@@ -781,6 +781,38 @@ Checkpoint curriculum eval uses the same rule: `mean_kills`, `mean_items`, and
 keeps start counters, absolute max counters, deltas/gains, `reset_source`,
 start/end map, item/secret deltas, and route/exit-route diagnostic totals so
 snapshot-stage wins are auditable.
+For the strict post-combat exit-routing gate, run checkpoint curriculum eval
+with the exit-route allowlist and strict skill filtering, then validate the JSON
+artifact:
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
+    --eval-checkpoint agent_models/ppo/post-combat.pt \
+    --checkpoint-eval-curriculum \
+    --snapshot-curriculum trajectories/e1m1-snapshot-curriculum.json \
+    --curriculum-mode fixed \
+    --curriculum-start-index 0 \
+    --goal-preset exit_seeking \
+    --allowed-skill route_progression \
+    --allowed-skill press_exit \
+    --allowed-skill open_use_line \
+    --strict-allowed-skills \
+    --checkpoint-eval-episodes 3 \
+    --checkpoint-eval-max-steps 512 \
+    > trajectories/post-combat-exit-eval.json
+
+PYTHONPATH=agent python -m restfuldoom_agent.post_combat_exit_gate \
+    trajectories/post-combat-exit-eval.json \
+    --stage-name 0003-post-combat-exit-route_snapshot \
+    --required-start-kills 5 \
+    --min-episodes 3
+```
+
+The gate requires each checked episode to start from a snapshot-restored
+post-combat state, execute only the allowed route/exit skills, use strict
+allowlist filtering, produce zero invalid or selected-disallowed actions, use
+zero action-mask or strict-filter fallbacks, have zero snapshot verification
+failures, attempt an exit route, and end with `level_transition_delta=1`.
 Eval aggregates also include `mean_item_gain`, `mean_secret_gain`, and
 `reset_source_breakdown`, which separates `snapshot_restore` outcomes from
 fresh-reset outcomes and carries the same route diagnostic totals per reset

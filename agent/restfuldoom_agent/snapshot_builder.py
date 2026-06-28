@@ -30,6 +30,9 @@ AUTO_SELECTORS = frozenset(
     }
 )
 POST_COMBAT_KILL_THRESHOLD = 5
+POST_COMBAT_EXIT_ROUTE_APPROACH_DISTANCE_UNITS = 900.0
+POST_COMBAT_EXIT_ROUTE_MIN_HEALTH = 50
+EXIT_LINE_SPECIALS = frozenset({11, 51, 52, 124, 197, 198})
 
 
 def build_snapshot_curriculum_from_trajectory(
@@ -545,7 +548,40 @@ def _is_post_combat_exit_route(
     route = _route_waypoint(record)
     line = route.get("line") if isinstance(route, dict) else None
     line_id = _int_or_none(line.get("line_id")) if isinstance(line, dict) else None
-    return bool(route and route.get("exit") is True and line_id is not None and line_id > 0)
+    if bool(route and route.get("exit") is True and line_id is not None and line_id > 0):
+        return True
+    state = _record_state(record)
+    health = _int_or_none(state.get("health"))
+    if health is None or health < POST_COMBAT_EXIT_ROUTE_MIN_HEALTH:
+        return False
+    decision = _policy_decision(record)
+    decision_line = decision.get("use_line")
+    if not isinstance(decision_line, dict):
+        return False
+    special = _int_or_none(decision_line.get("special"))
+    line_id = _int_or_none(decision_line.get("line_id"))
+    if special not in EXIT_LINE_SPECIALS or line_id is None or line_id <= 0:
+        return False
+    distance = _float_or_none(decision_line.get("distance"))
+    if distance is None or distance > POST_COMBAT_EXIT_ROUTE_APPROACH_DISTANCE_UNITS:
+        return False
+    return str(decision.get("skill", "")) in {
+        "approach_exit_switch_front",
+        "approach_exit_route_local_door",
+        "approach_progression_line",
+        "route_to_progression_line",
+        "turn_to_progression_line",
+        "unstick_approach_exit_line",
+        "unstick_backtrack_from_exit_line",
+        "unstick_slide_to_exit_line",
+        "unstick_route_to_exit_line",
+        "use_exit_route_blocker_ahead",
+        "turn_to_exit_route_local_door",
+        "use_exit_route_local_door",
+        "turn_to_exit_switch",
+        "push_exit_switch",
+        "press_exit_switch",
+    }
 
 
 def _route_waypoint(record: dict[str, Any]) -> dict[str, Any]:
@@ -605,6 +641,15 @@ def _int_or_none(value: object) -> int | None:
         if value is None:
             return None
         return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_or_none(value: object) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
     except (TypeError, ValueError):
         return None
 
