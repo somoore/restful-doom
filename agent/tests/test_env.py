@@ -1826,6 +1826,38 @@ def test_route_outcome_counts_exit_recovery_decision_line():
     assert outcome["progress_units"] == pytest.approx(128.0)
 
 
+def test_route_outcome_counts_waypoint_recovery_decision_line():
+    previous = _state(tick=1, route=True, route_exit=False, x_units=0)
+    current = _state(tick=2, route=True, route_exit=False, x_units=128)
+    line = previous.navigation.route_waypoint.line
+
+    for decision_skill in (
+        "unstick_route_to_waypoint_line",
+        "unstick_backtrack_from_waypoint_line",
+    ):
+        outcome = _route_outcome(
+            "recover_stuck",
+            previous,
+            current,
+            decision={
+                "skill": decision_skill,
+                "use_line": {
+                    "line_id": line.line_id,
+                    "special": line.special,
+                    "distance": 512.0,
+                    "angle_delta": 0.0,
+                },
+            },
+        )
+
+        assert outcome["attempted"]
+        assert outcome["line_id"] == line.line_id
+        assert outcome["exit"] is False
+        assert outcome["walk_trigger"] is True
+        assert outcome["target_source"] == "route_waypoint"
+        assert outcome["progress_units"] == pytest.approx(128.0)
+
+
 def test_route_outcome_does_not_count_non_exit_recovery_decision_line():
     previous = _state(tick=1, route=True, route_exit=False, x_units=0)
     current = _state(tick=2, route=True, route_exit=False, x_units=128)

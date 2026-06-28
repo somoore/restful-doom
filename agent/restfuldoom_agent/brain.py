@@ -39,6 +39,7 @@ EXIT_ASSIST_DOOR_CLOSE_USE_DISTANCE_UNITS = 96.0
 EXIT_ASSIST_DOOR_CLOSE_USE_ANGLE_DEGREES = 48.0
 POST_COMBAT_EXIT_KILLS = 2
 POST_COMBAT_EXIT_ROUTE_DISTANCE_UNITS = 3200.0
+POST_COMBAT_ROUTE_WAYPOINT_FINISH_DISTANCE_UNITS = 700.0
 LINE_ATTEMPT_STALL_TICS = 45
 LINE_ATTEMPT_BLOCK_TICS = 1200
 # Manual door/switch specials handled by Doom's P_UseSpecialLine path.
@@ -783,6 +784,10 @@ class BrainPolicy:
         phase = (elapsed // 8) % 5
         self._last_stuck_phase = phase
 
+        route_recovery = self._recover_toward_route_waypoint(features, phase)
+        if route_recovery is not None:
+            return route_recovery
+
         exit_recovery = self._recover_toward_visible_exit_line(features, phase)
         if exit_recovery is not None:
             return exit_recovery
@@ -836,6 +841,93 @@ class BrainPolicy:
                 tick=features.tick,
             ),
             self._decision("unstick_forward", features, stuck=True, stuck_phase=phase),
+        )
+
+    def _recover_toward_route_waypoint(
+        self,
+        features: TacticalFeatures,
+        phase: int,
+    ) -> tuple[Any, dict[str, Any]] | None:
+        line = self._select_nearby_walk_route_waypoint(features)
+        if line is None:
+            return None
+
+        angle_delta = self._line_control_angle_delta(line)
+        line_record = self._line_record(line)
+        ray = self._best_navigation_ray(features, angle_delta)
+        if ray is not None:
+            return self._move_on_ray_toward_line(
+                features,
+                angle_delta,
+                ray,
+                "unstick_route_to_waypoint_line",
+                True,
+                line_record,
+            )
+        if abs(angle_delta) > 18:
+            return (
+                semantic_action(
+                    turn_action_for_delta(angle_delta),
+                    amount=self.params.turn_amount,
+                    duration_tics=2,
+                    tick=features.tick,
+                ),
+                self._decision(
+                    "unstick_turn_to_waypoint_line",
+                    features,
+                    stuck=True,
+                    stuck_phase=phase,
+                    use_line=line_record,
+                ),
+            )
+        if features.navigation["forward_open"]:
+            return (
+                raw_ticcmd_action(
+                    forward_move=self.params.move_amount,
+                    angle_turn=raw_turn_for_delta(angle_delta),
+                    duration_tics=4,
+                    tick=features.tick,
+                ),
+                self._decision(
+                    "unstick_cross_waypoint_line",
+                    features,
+                    stuck=True,
+                    stuck_phase=phase,
+                    use_line=line_record,
+                ),
+            )
+        if features.navigation["back_open"]:
+            return (
+                raw_ticcmd_action(
+                    forward_move=-self.params.retreat_amount,
+                    angle_turn=raw_turn_for_delta(angle_delta),
+                    duration_tics=4,
+                    tick=features.tick,
+                ),
+                self._decision(
+                    "unstick_backtrack_from_waypoint_line",
+                    features,
+                    stuck=True,
+                    stuck_phase=phase,
+                    use_line=line_record,
+                ),
+            )
+        self._explore_bias *= -1
+        return (
+            raw_ticcmd_action(
+                forward_move=0,
+                side_move=self._explore_bias * max(10, self.params.strafe_amount),
+                angle_turn=raw_turn_for_delta(angle_delta),
+                duration_tics=4,
+                tick=features.tick,
+            ),
+            self._decision(
+                "unstick_strafe_from_waypoint_line",
+                features,
+                stuck=True,
+                stuck_phase=phase,
+                use_line=line_record,
+            ),
         )
 
     def _recover_toward_visible_exit_line(
@@ -1747,6 +1839,9 @@ class BrainPolicy:
         far_exit = self._select_post_combat_exit_progression_line(features, candidates)
         if far_exit is not None:
             self._remember_post_combat_exit_line(features, far_exit)
+            route_line = self._select_nearby_walk_route_waypoint(features)
+            if route_line is not None:
+                return route_line
             return far_exit
         if self._recent_post_combat_exit_line_active(features) and all(
             int(line.get("special", 0)) in WALK_TRIGGER_LINE_SPECIALS
@@ -1761,6 +1856,41 @@ class BrainPolicy:
                 abs(float(line["angle_delta"])) / 45.0,
             ),
         )
+
+    def _select_nearby_walk_route_waypoint(
+        self,
+        features: TacticalFeatures,
+    ) -> dict[str, Any] | None:
+        if features.visible_enemies or self._shootable_enemy(features) is not None:
+            return None
+        if not self._has_episode_kill(features):
+            return None
+        route = features.navigation.get("route_waypoint")
+        if not isinstance(route, dict):
+            return None
+        if bool(route.get("exit", False)):
+            return None
+        if not bool(route.get("walk_trigger", False)):
+            return None
+        line = route.get("line")
+        if not isinstance(line, dict):
+            return None
+        if int(line.get("line_id", 0)) <= 0:
+            return None
+        if int(line.get("special", 0)) not in WALK_TRIGGER_LINE_SPECIALS:
+            return None
+        if (
+            float(line.get("distance", 999999.0))
+            > POST_COMBAT_ROUTE_WAYPOINT_FINISH_DISTANCE_UNITS
+        ):
+            return None
+        if abs(float(line.get("angle_delta", 999.0))) > 170.0:
+            return None
+        if not self._is_progression_line_ready(features, line):
+            return None
+        if self._is_line_blocked(features, line):
+            return None
+        return line
 
     def _select_post_combat_exit_progression_line(
         self,
@@ -1973,6 +2103,13 @@ class BrainPolicy:
                     stuck,
                     line_record,
                 )
+            if (
+                special in WALK_TRIGGER_LINE_SPECIALS
+                and self._select_nearby_walk_route_waypoint(features) is not None
+            ):
+                route_recovery = self._recover_toward_route_waypoint(features, phase=0)
+                if route_recovery is not None:
+                    return route_recovery
             if stuck:
                 return self._recover_from_stuck(features)
             if special not in WALK_TRIGGER_LINE_SPECIALS:

@@ -1032,6 +1032,171 @@ def test_post_combat_snapshot_prefers_visible_exit_with_inherited_kills(tmp_path
     assert action.raw.forward_move > 0
 
 
+def test_post_combat_snapshot_finishes_nearby_walk_route_waypoint_before_far_exit(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+
+    route_line = SimpleNamespace(
+        line_id=195,
+        midpoint=SimpleNamespace(x_fp=560 * 65536, y_fp=0, z_fp=0),
+        nearest_point=SimpleNamespace(x_fp=560 * 65536, y_fp=0, z_fp=0),
+        special=88,
+        tag=2,
+        distance_fp=560 * 65536,
+        nearest_distance_fp=560 * 65536,
+    )
+    exit_line = SimpleNamespace(
+        line_id=330,
+        midpoint=SimpleNamespace(x_fp=2250 * 65536, y_fp=0, z_fp=0),
+        nearest_point=SimpleNamespace(x_fp=2250 * 65536, y_fp=0, z_fp=0),
+        special=11,
+        tag=0,
+        distance_fp=2250 * 65536,
+        nearest_distance_fp=2250 * 65536,
+    )
+    game_state = state(tick=40)
+    game_state.player.kills = 2
+    game_state.navigation.use_lines = [route_line, exit_line]
+    game_state.navigation.route_waypoint = SimpleNamespace(
+        line=route_line,
+        priority=0,
+        exit=False,
+        walk_trigger=True,
+    )
+    features = extract_features(game_state, policy.memory, policy.params)
+    policy._start_kills = 2
+
+    selected = policy._select_progression_line(features)
+    action, decision = policy._advance_progression_line(features, selected, stuck=False)
+
+    assert selected["line_id"] == 195
+    assert decision["use_line"]["line_id"] == 195
+    assert decision["skill"] == "cross_progression_line"
+    assert action.raw.forward_move > 0
+
+
+def test_post_combat_stuck_recovery_finishes_nearby_walk_route_waypoint(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+
+    route_line = SimpleNamespace(
+        line_id=195,
+        midpoint=SimpleNamespace(x_fp=560 * 65536, y_fp=0, z_fp=0),
+        nearest_point=SimpleNamespace(x_fp=560 * 65536, y_fp=0, z_fp=0),
+        special=88,
+        tag=2,
+        distance_fp=560 * 65536,
+        nearest_distance_fp=560 * 65536,
+    )
+    exit_line = SimpleNamespace(
+        line_id=330,
+        midpoint=SimpleNamespace(x_fp=2250 * 65536, y_fp=0, z_fp=0),
+        nearest_point=SimpleNamespace(x_fp=2250 * 65536, y_fp=0, z_fp=0),
+        special=11,
+        tag=0,
+        distance_fp=2250 * 65536,
+        nearest_distance_fp=2250 * 65536,
+    )
+    game_state = state(tick=40)
+    game_state.player.kills = 2
+    game_state.navigation.forward_open = False
+    game_state.navigation.direction_probes = [
+        SimpleNamespace(
+            angle_offset_degrees=30,
+            open=True,
+            block_distance_fp=128 * 65536,
+            blocking_line_special=0,
+            use_line_ahead=False,
+        )
+    ]
+    game_state.navigation.use_lines = [route_line, exit_line]
+    game_state.navigation.route_waypoint = SimpleNamespace(
+        line=route_line,
+        priority=0,
+        exit=False,
+        walk_trigger=True,
+    )
+    features = extract_features(game_state, policy.memory, policy.params)
+    policy._start_kills = 2
+
+    action, decision = policy._recover_from_stuck(features)
+
+    assert decision["skill"] == "unstick_route_to_waypoint_line"
+    assert decision["use_line"]["line_id"] == 195
+    assert decision["direction_probe"]["angle_offset_degrees"] == 30
+    assert action.raw.forward_move > 0
+    assert action.raw.side_move != 0
+
+
+def test_blocked_post_combat_route_progression_backtracks_from_nearby_waypoint(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+
+    route_line = SimpleNamespace(
+        line_id=195,
+        midpoint=SimpleNamespace(x_fp=560 * 65536, y_fp=0, z_fp=0),
+        nearest_point=SimpleNamespace(x_fp=560 * 65536, y_fp=0, z_fp=0),
+        special=88,
+        tag=2,
+        distance_fp=560 * 65536,
+        nearest_distance_fp=560 * 65536,
+    )
+    exit_line = SimpleNamespace(
+        line_id=330,
+        midpoint=SimpleNamespace(x_fp=2250 * 65536, y_fp=0, z_fp=0),
+        nearest_point=SimpleNamespace(x_fp=2250 * 65536, y_fp=0, z_fp=0),
+        special=11,
+        tag=0,
+        distance_fp=2250 * 65536,
+        nearest_distance_fp=2250 * 65536,
+    )
+    game_state = state(tick=40)
+    game_state.player.kills = 2
+    game_state.navigation.forward_open = False
+    game_state.navigation.left_open = False
+    game_state.navigation.right_open = False
+    game_state.navigation.back_open = True
+    game_state.navigation.direction_probes = [
+        SimpleNamespace(
+            angle_offset_degrees=offset,
+            open=False,
+            block_distance_fp=96 * 65536,
+            blocking_line_special=0,
+            use_line_ahead=False,
+        )
+        for offset in (-90, -60, -30, -15, 0, 15, 30, 60, 90)
+    ]
+    game_state.navigation.use_lines = [route_line, exit_line]
+    game_state.navigation.route_waypoint = SimpleNamespace(
+        line=route_line,
+        priority=0,
+        exit=False,
+        walk_trigger=True,
+    )
+    features = extract_features(game_state, policy.memory, policy.params)
+    policy._start_kills = 2
+
+    selected = policy._select_progression_line(features)
+    action, decision = policy._advance_progression_line(features, selected, stuck=False)
+
+    assert selected["line_id"] == 195
+    assert decision["skill"] == "unstick_backtrack_from_waypoint_line"
+    assert decision["use_line"]["line_id"] == 195
+    assert action.raw.forward_move < 0
+
+
 def test_far_exit_preference_does_not_preempt_visible_combat(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(

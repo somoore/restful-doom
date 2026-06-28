@@ -2093,11 +2093,26 @@ def _route_attempted_for_outcome(
         return True
     if skill not in {"recover_stuck", "press_exit"}:
         return False
-    if not bool(_line_value(route, "exit", False)):
-        return False
     if not isinstance(decision, dict):
         return False
     decision_skill = str(decision.get("skill", ""))
+    if (
+        not bool(_line_value(route, "exit", False))
+        and decision_skill
+        in {
+            "unstick_route_to_waypoint_line",
+            "unstick_turn_to_waypoint_line",
+            "unstick_cross_waypoint_line",
+            "unstick_backtrack_from_waypoint_line",
+            "unstick_strafe_from_waypoint_line",
+        }
+    ):
+        return (
+            bool(_line_value(route, "walk_trigger", False))
+            and str(_line_value(route, "source", "route_waypoint")) == "route_waypoint"
+        )
+    if not bool(_line_value(route, "exit", False)):
+        return False
     return decision_skill in {
         "unstick_route_to_exit_line",
         "unstick_turn_to_exit_line",
