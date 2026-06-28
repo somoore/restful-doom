@@ -12,6 +12,7 @@ from restfuldoom_agent.ppo_agent import (
     _checkpoint_selection_score,
     _checkpoint_resume_score,
     _checkpoint_resume_score_source,
+    _checkpoint_eval_trace_path,
     _evaluate_checkpoint_curriculum,
     _redacted_restore_argv,
     _render_snapshot_restore_command,
@@ -118,6 +119,57 @@ def test_ppo_eval_trace_writer_serializes_steps(tmp_path):
     assert rows[1]["skill"] == "route_progression"
     assert rows[1]["decision"]["skill"] == "route_to_progression_line"
     assert rows[1]["action_mask"] == [False, False, False, False, True]
+
+
+def test_checkpoint_eval_trace_path_uses_stage_suffix_for_multi_stage(tmp_path):
+    base = tmp_path / "eval-trace.jsonl"
+
+    assert (
+        _checkpoint_eval_trace_path(
+            base,
+            stage_name="first visible/stage",
+            stage_index=0,
+            stage_count=3,
+            update_index=2,
+        )
+        == tmp_path / "eval-trace-update0002-stage00-first-visible-stage.jsonl"
+    )
+    assert (
+        _checkpoint_eval_trace_path(
+            base,
+            stage_name="only-stage",
+            stage_index=0,
+            stage_count=1,
+            update_index=2,
+        )
+        == tmp_path / "eval-trace-update0002-stage00-only-stage.jsonl"
+    )
+    assert (
+        _checkpoint_eval_trace_path(
+            base,
+            stage_name="only-stage",
+            stage_index=0,
+            stage_count=1,
+            update_index=0,
+        )
+        == base
+    )
+    assert (
+        _checkpoint_eval_trace_path(
+            base,
+            stage_name="a/b",
+            stage_index=1,
+            stage_count=2,
+            update_index=2,
+        )
+        != _checkpoint_eval_trace_path(
+            base,
+            stage_name="a:b",
+            stage_index=2,
+            stage_count=2,
+            update_index=2,
+        )
+    )
 
 
 def test_learning_trace_names_observation_mask_and_outcome():
@@ -1981,11 +2033,13 @@ def test_checkpoint_resume_score_prefers_curriculum_eval_when_present():
 
 def test_checkpoint_curriculum_eval_restores_snapshot_stages(monkeypatch, tmp_path):
     seen_configs = []
+    seen_trace_paths = []
 
     async def fake_evaluate_checkpoint(checkpoint_path, env_config, **kwargs):
         env = SimpleNamespace(config=env_config)
         kwargs["before_reset"](env, 0)
         seen_configs.append(env.config)
+        seen_trace_paths.append(kwargs.get("trace_path"))
         return PolicyEval(
             result=EvaluationResult(
                 policy_id=f"ppo:{checkpoint_path}",
@@ -2038,6 +2092,7 @@ def test_checkpoint_curriculum_eval_restores_snapshot_stages(monkeypatch, tmp_pa
         checkpoint_eval_max_steps=16,
         checkpoint_eval_episodes=1,
         checkpoint_eval_sample=False,
+        eval_trace_jsonl=tmp_path / "eval-trace.jsonl",
         device="cpu",
         level_complete_bonus=100.0,
         kill_goal_bonus=10.0,
@@ -2095,6 +2150,9 @@ def test_checkpoint_curriculum_eval_restores_snapshot_stages(monkeypatch, tmp_pa
     assert payload["schema"] == "restfuldoom.ppo_checkpoint_curriculum_eval.v1"
     assert payload["score_schema"] == "restfuldoom.ppo_checkpoint_eval_score.v4"
     assert seen_configs
+    assert seen_trace_paths[0] == (
+        tmp_path / "eval-trace-update0002-stage00-first_kill_snapshot.jsonl"
+    )
     config = seen_configs[0]
     assert config.reset_mode == "snapshot"
     assert config.snapshot == {"id": "slot-3", "slot": 3, "ref": "save_slot:3"}
@@ -2137,6 +2195,9 @@ def test_checkpoint_curriculum_eval_restores_snapshot_stages(monkeypatch, tmp_pa
             "earned_kill_bonus"
         ]
         == 0.0
+    )
+    assert seen_trace_paths[1] == (
+        tmp_path / "eval-trace-update0003-stage00-1420-post-combat_snapshot.jsonl"
     )
 
 

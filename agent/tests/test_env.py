@@ -946,6 +946,80 @@ def test_skill_controller_recent_contact_does_not_suppress_exit_route():
     assert not mask["press_exit"]
 
 
+def test_skill_controller_masks_far_exit_as_route_not_press():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(kills=1, enemy=False)
+    state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=800 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=800 * 65536, y_fp=-32 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=800 * 65536, y_fp=32 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=800 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=800 * 65536,
+            nearest_distance_fp=800 * 65536,
+        )
+    ]
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+
+    assert mask["route_progression"]
+    assert not mask["press_exit"]
+    assert controller.heuristic_action_index(state) == SKILL_ACTIONS.index("route_progression")
+
+
+def test_skill_controller_allows_press_exit_inside_activation_range():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(kills=1, enemy=False)
+    state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=80 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=80 * 65536, y_fp=32 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=80 * 65536, y_fp=-32 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=80 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=80 * 65536,
+            nearest_distance_fp=80 * 65536,
+        )
+    ]
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+
+    assert mask["press_exit"]
+    assert controller.heuristic_action_index(state) == SKILL_ACTIONS.index("press_exit")
+
+
+def test_skill_controller_allows_press_exit_inside_push_window():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(kills=1, enemy=False)
+    state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=168 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=168 * 65536, y_fp=32 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=168 * 65536, y_fp=-32 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=168 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=168 * 65536,
+            nearest_distance_fp=168 * 65536,
+        )
+    ]
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+    _action, decision = controller.action_for(SKILL_ACTIONS.index("press_exit"), state)
+
+    assert mask["press_exit"]
+    assert decision["skill"] == "push_exit_switch"
+
+
 def test_exit_switch_decisions_do_not_trigger_stuck_recovery():
     assert "push_exit_switch" in _NON_LOCOMOTION_SKILLS
     assert "press_exit_switch" in _NON_LOCOMOTION_SKILLS

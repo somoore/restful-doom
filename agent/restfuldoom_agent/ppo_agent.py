@@ -971,6 +971,13 @@ async def _evaluate_checkpoint_curriculum(
             device=args.device,
             deterministic=not args.checkpoint_eval_sample,
             before_reset=before_reset,
+            trace_path=_checkpoint_eval_trace_path(
+                getattr(args, "eval_trace_jsonl", None),
+                stage_name=stage_name,
+                stage_index=stage_index,
+                stage_count=len(stages),
+                update_index=update_index,
+            ),
         )
         stage_score_components = _policy_eval_selection_components(
             result,
@@ -1021,6 +1028,32 @@ async def _evaluate_checkpoint_curriculum(
         ),
         "stages": stage_records,
     }
+
+
+def _checkpoint_eval_trace_path(
+    base_path: object,
+    *,
+    stage_name: str,
+    stage_index: int,
+    stage_count: int,
+    update_index: int,
+) -> Path | None:
+    """Returns a stage-specific trace path for checkpoint curriculum eval."""
+    if base_path is None:
+        return None
+    path = Path(base_path)
+    update_index = int(update_index)
+    stage_index = int(stage_index)
+    if update_index <= 0 and stage_count <= 1:
+        return path
+    safe_stage = "".join(
+        char if char.isalnum() or char in {"-", "_"} else "-"
+        for char in str(stage_name)
+    ).strip("-")
+    safe_stage = safe_stage or "stage"
+    return path.with_name(
+        f"{path.stem}-update{update_index:04d}-stage{stage_index:02d}-{safe_stage}{path.suffix}"
+    )
 
 
 def _policy_eval_selection_score(

@@ -522,7 +522,8 @@ class SkillController:
             if features.health <= self.params.retreat_health:
                 return SKILL_ACTIONS.index("retreat")
             return SKILL_ACTIONS.index("close_visible_contact")
-        if self.policy._select_local_exit_line(features) is not None:
+        local_exit = self.policy._select_local_exit_line(features)
+        if local_exit is not None and self._exit_press_ready(features, local_exit):
             return SKILL_ACTIONS.index("press_exit")
         if (
             self.policy._select_nearby_use_line(features) is not None
@@ -648,13 +649,30 @@ class SkillController:
         if stuck:
             mask["recover_stuck"] = True
 
-        if not can_fire and self.policy._select_local_exit_line(features) is not None:
+        local_exit = self.policy._select_local_exit_line(features) if not can_fire else None
+        if local_exit is not None and self._exit_press_ready(features, local_exit):
             mask["press_exit"] = True
 
         if not any(mask.values()):
             mask["route_progression"] = True
 
         return [mask[skill] for skill in SKILL_ACTIONS]
+
+    def _exit_press_ready(self, features: Any, line: dict[str, Any]) -> bool:
+        """Returns whether the exit option can do exit activation work now."""
+        if int(line.get("special", 0)) not in EXIT_LINE_SPECIALS:
+            return False
+        distance = self.policy._line_control_distance(line)
+        activate_distance = self.policy._line_activate_distance(features, line)
+        if distance <= activate_distance:
+            return True
+        return (
+            int(line.get("side", 0)) == 0
+            and (
+                distance <= 224.0
+                or float(line.get("front_distance", 999999.0)) <= 160.0
+            )
+        )
 
     def _execute_skill(self, skill: str, features: Any, stuck: bool) -> tuple[Any, dict[str, Any]]:
         if features.visible_enemies:
