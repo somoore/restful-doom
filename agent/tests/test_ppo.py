@@ -215,6 +215,35 @@ def test_promotion_gate_blocks_regressions():
     assert "mean kills did not beat baseline" in decision.reasons
 
 
+def test_promotion_gate_blocks_snapshot_verification_failures():
+    baseline = EvaluationResult(
+        policy_id="brain",
+        level_completion_rate=1.0,
+        mean_kills=5.0,
+        survival_rate=1.0,
+        mean_steps_to_exit=5000,
+        mean_stuck_events=20,
+        episode_count=3,
+        mean_reward=100.0,
+    )
+    candidate = EvaluationResult(
+        policy_id="ppo",
+        level_completion_rate=1.0,
+        mean_kills=6.0,
+        survival_rate=1.0,
+        mean_steps_to_exit=4000,
+        mean_stuck_events=10,
+        episode_count=3,
+        mean_reward=120.0,
+        snapshot_verification_failures=1,
+    )
+
+    decision = PromotionGate().decide(candidate=candidate, baseline=baseline)
+
+    assert not decision.promote
+    assert "snapshot verification failures present" in decision.reasons
+
+
 def test_ppo_eval_contract_serializes_and_blocks_weak_candidate():
     candidate = PolicyEval(
         result=EvaluationResult(
@@ -643,6 +672,73 @@ def test_rollout_summary_counts_allowed_skill_filter_fallbacks():
         "close_visible_contact": 1,
         "unfiltered_mask": 1,
     }
+
+
+def test_rollout_summary_splits_exit_route_outcomes():
+    buffer = SimpleNamespace(
+        records=[
+            SimpleNamespace(
+                reward=0.25,
+                done=False,
+                info={
+                    "skill": "route_progression",
+                    "route_outcome": {
+                        "attempted": True,
+                        "reached": False,
+                        "failed": False,
+                        "exit": False,
+                        "progress_units": 8.0,
+                    },
+                    "route_action_reward": 0.08,
+                    "transition": {},
+                    "state": {"health": 100, "kills": 0},
+                },
+            ),
+            SimpleNamespace(
+                reward=0.5,
+                done=False,
+                info={
+                    "skill": "route_progression",
+                    "route_outcome": {
+                        "attempted": True,
+                        "reached": True,
+                        "failed": False,
+                        "exit": True,
+                        "progress_units": 12.0,
+                    },
+                    "route_action_reward": 0.37,
+                    "transition": {},
+                    "state": {"health": 100, "kills": 0},
+                },
+            ),
+            SimpleNamespace(
+                reward=-0.25,
+                done=False,
+                info={
+                    "skill": "route_progression",
+                    "route_outcome": {
+                        "attempted": True,
+                        "reached": False,
+                        "failed": True,
+                        "exit": True,
+                        "progress_units": -3.0,
+                    },
+                    "route_action_reward": -0.06,
+                    "transition": {},
+                    "state": {"health": 100, "kills": 0},
+                },
+            ),
+        ]
+    )
+
+    summary = _summarize_buffer(buffer)
+
+    assert summary["route_attempt_steps"] == 3
+    assert summary["route_progress_units"] == 17.0
+    assert summary["exit_route_attempt_steps"] == 2
+    assert summary["exit_route_reached_steps"] == 1
+    assert summary["exit_route_failed_steps"] == 1
+    assert summary["exit_route_progress_units"] == 9.0
 
 
 def test_reset_start_from_trajectory_row(tmp_path):
@@ -1512,6 +1608,71 @@ def test_required_kill_selection_score_caps_reward_tiebreak_for_speed():
     assert fast_components["selection_score"] > slow_components["selection_score"]
 
 
+def test_exit_routing_selection_score_prefers_fast_exit_over_slow_reward():
+    slow_high_reward = PolicyEval(
+        result=EvaluationResult(
+            policy_id="ppo:slow-exit",
+            level_completion_rate=1.0,
+            mean_kills=0.0,
+            survival_rate=1.0,
+            mean_steps_to_exit=600,
+            mean_stuck_events=0.0,
+            episode_count=1,
+            mean_reward=120.0,
+        ),
+        episodes=[
+            EpisodeEval(
+                seed=7,
+                total_reward=120.0,
+                level_completed=True,
+                death=False,
+                max_kills=5,
+                min_health=80,
+                steps=300,
+                steps_to_exit=600,
+                stuck_events=0,
+                done_reason="level_complete",
+                start_kills=5,
+            )
+        ],
+    )
+    fast_lower_reward = PolicyEval(
+        result=EvaluationResult(
+            policy_id="ppo:fast-exit",
+            level_completion_rate=1.0,
+            mean_kills=0.0,
+            survival_rate=1.0,
+            mean_steps_to_exit=160,
+            mean_stuck_events=0.0,
+            episode_count=1,
+            mean_reward=10.0,
+        ),
+        episodes=[
+            EpisodeEval(
+                seed=8,
+                total_reward=10.0,
+                level_completed=True,
+                death=False,
+                max_kills=5,
+                min_health=80,
+                steps=80,
+                steps_to_exit=160,
+                stuck_events=0,
+                done_reason="level_complete",
+                start_kills=5,
+            )
+        ],
+    )
+
+    slow_components = _policy_eval_selection_components(slow_high_reward)
+    fast_components = _policy_eval_selection_components(fast_lower_reward)
+
+    assert slow_components["mode"] == "exit_routing_speed"
+    assert slow_components["reward_tiebreak"] == 20.0
+    assert fast_components["exit_speed_bonus"] > slow_components["exit_speed_bonus"]
+    assert fast_components["selection_score"] > slow_components["selection_score"]
+
+
 def test_policy_eval_aggregates_earned_kills_not_restored_snapshot_kills():
     inherited = EpisodeEval(
         seed=7,
@@ -1571,6 +1732,83 @@ def test_policy_eval_aggregates_earned_kills_not_restored_snapshot_kills():
     assert _policy_eval_selection_score(earned_eval) > _policy_eval_selection_score(
         inherited_eval
     )
+
+
+def test_policy_eval_aggregates_snapshot_verification_failures():
+    ok = EpisodeEval(
+        seed=7,
+        total_reward=1.0,
+        level_completed=False,
+        death=False,
+        max_kills=0,
+        min_health=100,
+        steps=64,
+        steps_to_exit=64,
+        stuck_events=0,
+        done_reason="max_steps",
+        snapshot_verification_failures=0,
+    )
+    failed = EpisodeEval(
+        seed=8,
+        total_reward=1.0,
+        level_completed=False,
+        death=False,
+        max_kills=0,
+        min_health=100,
+        steps=64,
+        steps_to_exit=64,
+        stuck_events=0,
+        done_reason="max_steps",
+        snapshot_verification_failures=1,
+    )
+
+    result = _aggregate("ppo:snapshot-failure", [ok, failed])
+
+    assert result.result.snapshot_verification_failures == 1
+    assert result.to_dict()["result"]["snapshot_verification_failures"] == 1
+
+
+def test_policy_eval_reports_reset_source_breakdown():
+    snapshot_episode = EpisodeEval(
+        seed=7,
+        total_reward=20.0,
+        level_completed=True,
+        death=False,
+        max_kills=5,
+        min_health=80,
+        steps=96,
+        steps_to_exit=192,
+        stuck_events=1,
+        done_reason="level_complete",
+        start_kills=5,
+        reset_source="snapshot_restore",
+    )
+    fresh_episode = EpisodeEval(
+        seed=8,
+        total_reward=-5.0,
+        level_completed=False,
+        death=False,
+        max_kills=1,
+        min_health=70,
+        steps=256,
+        steps_to_exit=256,
+        stuck_events=4,
+        done_reason="max_steps",
+        start_kills=0,
+        kill_delta=1,
+        max_kill_gain=1,
+        reset_source="reset_episode",
+    )
+
+    result = _aggregate("ppo:mixed-reset", [snapshot_episode, fresh_episode])
+    breakdown = result.to_dict()["result"]["reset_source_breakdown"]
+
+    assert breakdown["snapshot_restore"]["episode_count"] == 1
+    assert breakdown["snapshot_restore"]["level_completion_rate"] == 1.0
+    assert breakdown["snapshot_restore"]["mean_steps_to_exit"] == 192
+    assert breakdown["snapshot_restore"]["mean_kills"] == 0.0
+    assert breakdown["reset_episode"]["level_completion_rate"] == 0.0
+    assert breakdown["reset_episode"]["mean_kills"] == 1.0
 
 
 def test_checkpoint_resume_score_prefers_curriculum_eval_when_present():
@@ -1700,7 +1938,7 @@ def test_checkpoint_curriculum_eval_restores_snapshot_stages(monkeypatch, tmp_pa
     )
 
     assert payload["schema"] == "restfuldoom.ppo_checkpoint_curriculum_eval.v1"
-    assert payload["score_schema"] == "restfuldoom.ppo_checkpoint_eval_score.v2"
+    assert payload["score_schema"] == "restfuldoom.ppo_checkpoint_eval_score.v3"
     assert seen_configs
     config = seen_configs[0]
     assert config.reset_mode == "snapshot"

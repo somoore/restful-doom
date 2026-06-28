@@ -467,8 +467,55 @@ def _aggregate(policy_id: str, episodes: list[EpisodeEval]) -> PolicyEval:
         mean_stuck_events=sum(episode.stuck_events for episode in episodes) / count,
         episode_count=len(episodes),
         mean_reward=sum(episode.total_reward for episode in episodes) / count,
+        snapshot_verification_failures=sum(
+            int(episode.snapshot_verification_failures) for episode in episodes
+        ),
+        reset_source_breakdown=_reset_source_breakdown(episodes),
     )
     return PolicyEval(result=result, episodes=episodes)
+
+
+def _reset_source_breakdown(episodes: list[EpisodeEval]) -> dict[str, dict[str, Any]]:
+    """Aggregates eval metrics by reset source so snapshot gates remain visible."""
+    grouped: dict[str, list[EpisodeEval]] = {}
+    for episode in episodes:
+        source = str(getattr(episode, "reset_source", "") or "unknown")
+        grouped.setdefault(source, []).append(episode)
+    breakdown: dict[str, dict[str, Any]] = {}
+    for source, source_episodes in sorted(grouped.items()):
+        count = max(1, len(source_episodes))
+        breakdown[source] = {
+            "episode_count": len(source_episodes),
+            "level_completion_rate": sum(
+                1 for episode in source_episodes if episode.level_completed
+            )
+            / count,
+            "level_transition_rate": sum(
+                int(episode.level_transition_delta) for episode in source_episodes
+            )
+            / count,
+            "mean_steps_to_exit": sum(
+                episode.steps_to_exit for episode in source_episodes
+            )
+            / count,
+            "survival_rate": sum(1 for episode in source_episodes if not episode.death)
+            / count,
+            "mean_reward": sum(episode.total_reward for episode in source_episodes)
+            / count,
+            "mean_kills": sum(
+                _episode_earned_kills(episode) for episode in source_episodes
+            )
+            / count,
+            "mean_stuck_events": sum(
+                episode.stuck_events for episode in source_episodes
+            )
+            / count,
+            "snapshot_verification_failures": sum(
+                int(episode.snapshot_verification_failures)
+                for episode in source_episodes
+            ),
+        }
+    return breakdown
 
 
 def _episode_earned_kills(episode: EpisodeEval) -> int:

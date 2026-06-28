@@ -612,6 +612,8 @@ class EvaluationResult:
     mean_stuck_events: float
     episode_count: int
     mean_reward: float = 0.0
+    snapshot_verification_failures: int = 0
+    reset_source_breakdown: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -648,6 +650,8 @@ class PromotionGate:
     ) -> PromotionDecision:
         """Returns whether the candidate should replace the baseline."""
         reasons: list[str] = []
+        if candidate.snapshot_verification_failures > 0:
+            reasons.append("snapshot verification failures present")
         if (
             candidate.level_completion_rate
             < baseline.level_completion_rate + self.min_completion_delta

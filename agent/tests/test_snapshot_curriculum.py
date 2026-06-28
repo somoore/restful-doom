@@ -60,6 +60,7 @@ def test_snapshot_builder_generates_manifest_from_trajectory_rows(tmp_path):
     assert manifest["source"]["selection"] == {
         "indexes": [1],
         "auto": ["first-enemy-shootable", "first-damage"],
+        "post_combat_kills": 5,
     }
     assert [stage["evidence"]["source_record_index"] for stage in manifest["stages"]] == [
         1,
@@ -86,6 +87,103 @@ def test_snapshot_builder_generates_manifest_from_trajectory_rows(tmp_path):
         "0001-explicit_snapshot",
         "0003-first-enemy-shootable_snapshot",
     ]
+
+
+def test_snapshot_builder_selects_post_combat_exit_route(tmp_path):
+    trajectory = tmp_path / "post-combat.jsonl"
+    _write_jsonl(
+        trajectory,
+        [
+            _trajectory_row(0, visible=False, shootable=False, kills=4),
+            _trajectory_row(1, visible=True, shootable=True, kills=5),
+            _trajectory_row(2, visible=False, shootable=False, kills=5),
+            _trajectory_row(
+                3,
+                visible=False,
+                shootable=False,
+                kills=5,
+                route_exit=True,
+                route_line_id=330,
+            ),
+        ],
+    )
+
+    manifest = build_snapshot_curriculum_from_trajectory(
+        trajectory,
+        output_path=tmp_path / "post-combat-snapshot.json",
+        name="e1m1-post-combat",
+        auto_selectors=["post-combat", "post-combat-exit-route"],
+        snapshot_dir=Path("snapshots"),
+        save_slot_base=7,
+    )
+
+    assert [stage["evidence"]["source_record_index"] for stage in manifest["stages"]] == [
+        2,
+        3,
+    ]
+    post_combat, exit_route = manifest["stages"]
+    assert post_combat["name"] == "0002-post-combat_snapshot"
+    assert post_combat["expected_state"]["kills"] == 5
+    assert post_combat["snapshot"]["slot"] == 7
+    assert exit_route["name"] == "0003-post-combat-exit-route_snapshot"
+    assert exit_route["expected_state"]["route_waypoint_exit"] is True
+    assert exit_route["expected_state"]["route_waypoint_line_id"] == 330
+    assert exit_route["snapshot"]["ref"] == "save_slot:8"
+
+
+def test_snapshot_builder_selects_post_combat_exit_control_fallback(tmp_path):
+    trajectory = tmp_path / "post-combat-exit-control.jsonl"
+    _write_jsonl(
+        trajectory,
+        [
+            _trajectory_row(0, visible=False, shootable=False, kills=4),
+            _trajectory_row(1, visible=False, shootable=False, kills=5),
+            _trajectory_row(
+                2,
+                visible=False,
+                shootable=False,
+                kills=5,
+                skill="use_exit_assist_door",
+            ),
+        ],
+    )
+
+    manifest = build_snapshot_curriculum_from_trajectory(
+        trajectory,
+        output_path=tmp_path / "post-combat-exit-control.json",
+        name="e1m1-post-combat-exit-control",
+        auto_selectors=["post-combat-exit-route"],
+        snapshot_dir=Path("snapshots"),
+        save_slot_base=8,
+    )
+
+    stage = manifest["stages"][0]
+    assert stage["evidence"]["source_record_index"] == 2
+    assert stage["evidence"]["skill"] == "use_exit_assist_door"
+    assert stage["expected_state"]["kills"] == 5
+
+
+def test_snapshot_builder_respects_post_combat_kill_threshold(tmp_path):
+    trajectory = tmp_path / "post-combat-threshold.jsonl"
+    _write_jsonl(
+        trajectory,
+        [
+            _trajectory_row(0, visible=False, shootable=False, kills=5),
+            _trajectory_row(1, visible=False, shootable=False, kills=6),
+        ],
+    )
+
+    manifest = build_snapshot_curriculum_from_trajectory(
+        trajectory,
+        output_path=tmp_path / "post-combat-threshold.json",
+        name="e1m1-post-combat-threshold",
+        auto_selectors=["post-combat"],
+        snapshot_dir=Path("snapshots"),
+        post_combat_kills=6,
+    )
+
+    assert manifest["source"]["selection"]["post_combat_kills"] == 6
+    assert manifest["stages"][0]["evidence"]["source_record_index"] == 1
 
 
 def test_snapshot_validation_checks_required_artifacts_and_digests(tmp_path):
@@ -234,6 +332,40 @@ def test_native_snapshot_capture_tracker_groups_same_record_selectors():
     assert second == ["first-enemy-shootable", "first-damage"]
     assert tracker.complete is True
     assert third == []
+
+
+def test_native_snapshot_capture_tracker_matches_post_combat_selectors():
+    tracker = SnapshotMilestoneTracker(
+        ("post-combat", "post-combat-exit-route"),
+        post_combat_kills=6,
+    )
+
+    below_threshold = tracker.observe(
+        _trajectory_row(0, visible=False, shootable=False, kills=5)
+    )
+    visible_combat = tracker.observe(
+        _trajectory_row(1, visible=True, shootable=True, kills=6)
+    )
+    post_combat = tracker.observe(
+        _trajectory_row(2, visible=False, shootable=False, kills=6)
+    )
+    tracker.mark_captured(post_combat)
+    exit_route = tracker.observe(
+        _trajectory_row(
+            3,
+            visible=False,
+            shootable=False,
+            kills=6,
+            use_line_specials=[11],
+        )
+    )
+    tracker.mark_captured(exit_route)
+
+    assert below_threshold == []
+    assert visible_combat == []
+    assert post_combat == ["post-combat"]
+    assert exit_route == ["post-combat-exit-route"]
+    assert tracker.complete is True
 
 
 def test_snapshot_builder_first_enemy_shootable_skips_non_enemy_target(tmp_path):
@@ -439,6 +571,93 @@ def test_native_snapshot_load_verification_matches_progressed_state():
     )["valid"]
 
 
+def test_native_snapshot_load_verification_checks_exit_route_waypoint():
+    expected = {
+        "episode": 1,
+        "map": 1,
+        "route_waypoint_exit": True,
+        "route_waypoint_line_id": 330,
+    }
+    actual = {
+        "episode": 1,
+        "map": 1,
+        "navigation": {
+            "route_waypoint": {
+                "exit": True,
+                "line": {"line_id": 330},
+            }
+        },
+    }
+    wrong_route = {
+        "episode": 1,
+        "map": 1,
+        "navigation": {
+            "route_waypoint": {
+                "exit": False,
+                "line": {"line_id": 325},
+            }
+        },
+    }
+
+    ok = _verify_snapshot_restored_state(
+        actual=actual,
+        expected=expected,
+        raw_state=_state(combat=False),
+        enabled=True,
+        tick_tolerance=35,
+        verify_stream_tick=False,
+        position_tolerance_fp=160 * 65536,
+    )
+    bad = _verify_snapshot_restored_state(
+        actual=wrong_route,
+        expected=expected,
+        raw_state=_state(combat=False),
+        enabled=True,
+        tick_tolerance=35,
+        verify_stream_tick=False,
+        position_tolerance_fp=160 * 65536,
+    )
+
+    assert ok["valid"] is True
+    assert "route_waypoint_exit" in ok["compared_fields"]
+    assert "route_waypoint_line_id" in ok["compared_fields"]
+    assert bad["valid"] is False
+    assert any("route_waypoint_exit" in error for error in bad["errors"])
+
+
+def test_native_snapshot_load_verification_uses_raw_route_waypoint_fallback():
+    expected = {
+        "episode": 1,
+        "map": 1,
+        "route_waypoint_exit": True,
+        "route_waypoint_line_id": 330,
+    }
+    actual = {"episode": 1, "map": 1}
+
+    ok = _verify_snapshot_restored_state(
+        actual=actual,
+        expected=expected,
+        raw_state=_state(combat=False, route_exit=True, route_line_id=330),
+        enabled=True,
+        tick_tolerance=35,
+        verify_stream_tick=False,
+        position_tolerance_fp=160 * 65536,
+    )
+    bad = _verify_snapshot_restored_state(
+        actual=actual,
+        expected=expected,
+        raw_state=_state(combat=False, route_exit=True, route_line_id=325),
+        enabled=True,
+        tick_tolerance=35,
+        verify_stream_tick=False,
+        position_tolerance_fp=160 * 65536,
+    )
+
+    assert ok["valid"] is True
+    assert bad["valid"] is False
+    assert any("route_waypoint_line_id" in error for error in bad["errors"])
+
+
 class _FakeSnapshotClient:
     def __init__(self):
         self.save_requests = []
@@ -456,10 +675,17 @@ class _FakeSnapshotClient:
         )
 
 
-def _state(*, combat=False):
+def _state(*, combat=False, route_exit: bool | None = None, route_line_id: int | None = None):
+    line = SimpleNamespace(line_id=route_line_id) if route_line_id is not None else None
+    route = (
+        SimpleNamespace(exit=route_exit, line=line)
+        if route_exit is not None or line is not None
+        else None
+    )
     return SimpleNamespace(
         enemies=[],
         combat=SimpleNamespace(has_shootable_target=combat, target_is_enemy=combat),
+        navigation=SimpleNamespace(route_waypoint=route),
     )
 
 
@@ -479,9 +705,35 @@ def _trajectory_row(
     skill: str = "route_progression",
     damage_delta: int = 0,
     kill_delta: int = 0,
+    kills: int | None = None,
+    route_exit: bool = False,
+    route_line_id: int = 0,
+    use_line_specials: list[int] | None = None,
 ) -> dict:
     if target_is_enemy is None:
         target_is_enemy = bool(shootable)
+    state_kills = kill_delta if kills is None else kills
+    route_waypoint = (
+        {
+            "exit": route_exit,
+            "line": {
+                "line_id": route_line_id,
+                "distance_fp": 128 * 65536,
+                "nearest_distance_fp": 128 * 65536,
+            },
+        }
+        if route_exit or route_line_id
+        else {}
+    )
+    use_lines = [
+        {
+            "line_id": 1000 + offset,
+            "special": special,
+            "distance_fp": 128 * 65536,
+            "nearest_distance_fp": 128 * 65536,
+        }
+        for offset, special in enumerate(use_line_specials or [])
+    ]
     return {
         "index": index,
         "state": {
@@ -491,9 +743,13 @@ def _trajectory_row(
             "health": 100,
             "armor": 0,
             "ammo_bullets": 50,
-            "kills": kill_delta,
+            "kills": state_kills,
             "items": 0,
             "position_fp": [(100 + index) * 65536, -200 * 65536, 0],
+            "navigation": {
+                "route_waypoint": route_waypoint,
+                "use_lines": use_lines,
+            },
             "combat": {
                 "has_shootable_target": shootable,
                 "target_is_enemy": target_is_enemy,

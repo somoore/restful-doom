@@ -32,13 +32,16 @@ The punchline is:
 - Deterministic structured brain has completed E1M1 with multiple kills.
 - Behavior-cloned skill selector is trained from a successful trajectory, but
   this is supervised imitation rather than independent RL.
-- PPO combat-start curriculum can learn kills from reward feedback.
+- PPO can learn kills from a hand-placed combat-start reset, but not yet from
+  normal spawn.
 - Snapshot-backed curriculum contracts, manifest builder, artifact validator,
   PPO restore plumbing, and native agent save-slot restore are implemented.
 - Snapshot PPO summaries distinguish earned kill progress from absolute kill
   counters inherited from restored slots.
 - Checkpoint curriculum eval restores snapshot stages through the same native
   slot/external restore path and serializes start-vs-earned counters.
+- Post-combat exit-routing snapshot selectors and speed-aware checkpoint scoring
+  are implemented for the next bottleneck gate.
 - Full independent PPO level completion from E1M1 spawn is not proven yet.
 - Next major unlock: capture real Hellbox/Shrink progressed-map snapshots and
   train/evaluate PPO through the promotion gate.
@@ -638,7 +641,8 @@ PYTHONPATH=agent python -m restfuldoom_agent.snapshot_builder \
     --save-slot-base 3 \
     --auto first-visible \
     --auto first-enemy-shootable \
-    --auto first-damage
+    --auto first-damage \
+    --auto post-combat-exit-route
 ```
 
 The builder records the source row, selected milestone, expected first restored
@@ -647,6 +651,14 @@ save-slot refs such as `save_slot:3`. If a local capture command is available,
 add `--capture-command` with placeholders such as
 `{snapshot_path_sh}`, `{snapshot_id_sh}`, `{stage_name_sh}`, `{record_index}`,
 and `{tick}`. After capture, validate the manifest and artifact digests:
+
+For post-combat exit-routing gates, use `--auto post-combat` and
+`--auto post-combat-exit-route`. Both default to `--post-combat-kills 5` for
+E1M1; adjust that threshold for other maps or stricter gates. The
+`post-combat-exit-route` selector accepts either a live route waypoint with
+`exit=true` or older trajectory evidence from exit-control skills/use-lines, so
+older successful structured-brain traces can still seed a focused exit-routing
+curriculum.
 
 For native in-process curriculum, capture real save slots while the structured
 brain drives Doom:
@@ -667,6 +679,7 @@ PYTHONPATH=agent python -m restfuldoom_agent.snapshot_capture \
     --auto first-enemy-shootable \
     --auto first-damage \
     --auto first-kill \
+    --auto post-combat-exit-route \
     --verify-loads
 ```
 
@@ -735,9 +748,12 @@ commands using `SNAPSHOT_SLOT`.
 
 PPO rollout summaries include route diagnostics for spawn-to-contact work:
 `route_attempt_steps`, `route_reached_steps`, `route_failed_steps`,
-`route_progress_units`, and `route_action_reward`. These are the first numbers
-to inspect when a run moves through E1M1 but still never reaches a shootable
-target. First-contact curriculum runs also report `visible_enemy_steps`,
+`route_progress_units`, `exit_route_attempt_steps`, `exit_route_reached_steps`,
+`exit_route_failed_steps`, `exit_route_progress_units`, and
+`route_action_reward`. These are the first numbers to inspect when a run moves
+through E1M1 but still never reaches a shootable target or stalls after combat
+instead of pressing the exit. First-contact curriculum runs also report
+`visible_enemy_steps`,
 `first_visible_contacts`, `first_shootable_contacts`, and `contact_reward`.
 Snapshot-backed runs also report earned kill fields: `kill_delta`,
 `max_kill_gain`, `snapshot_kill_delta`, and `snapshot_max_kill_gain`. Use those
@@ -746,7 +762,12 @@ restoring from a slot that may already contain prior kills.
 Checkpoint curriculum eval uses the same rule: `mean_kills` is earned after the
 eval reset, while each serialized episode keeps `start_kills`, absolute
 `max_kills`, `kill_delta`, `max_kill_gain`, `reset_source`, start/end map, and
-item/secret deltas so snapshot-stage wins are auditable.
+item/secret deltas so snapshot-stage wins are auditable. Eval aggregates also
+include `reset_source_breakdown`, which separates `snapshot_restore` outcomes
+from fresh-reset outcomes. Checkpoint eval score schema
+`restfuldoom.ppo_checkpoint_eval_score.v3` adds an `exit_routing_speed` mode:
+once a stage reaches `level_complete`, selection favors reliable and faster
+exits with shaped reward capped as a tiebreaker.
 Topology-context runs report `topology_frontier_active_steps`,
 `mean_topology_current_cell_visits_norm`,
 `mean_topology_open_cell_min_visit_norm`, and

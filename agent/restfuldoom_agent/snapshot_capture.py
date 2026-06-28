@@ -24,11 +24,14 @@ from .rollout_config import safe_endpoint_host
 from .skill_policy import SkillPolicyModel
 from .snapshot_builder import (
     AUTO_SELECTORS,
+    POST_COMBAT_KILL_THRESHOLD,
     _damage_delta,
     _episode_map,
     _has_enemy_shootable_target,
     _has_shootable_target,
     _has_visible_enemy,
+    _is_post_combat,
+    _is_post_combat_exit_route,
     _int_or_none,
     _kill_delta,
     _record_state,
@@ -62,6 +65,7 @@ class SnapshotCaptureConfig:
         "first-enemy-shootable",
         "first-damage",
     )
+    post_combat_kills: int = POST_COMBAT_KILL_THRESHOLD
     save_slot_base: int = 0
     capsule: str = "agent-doom"
     microvm_id: str | None = None
@@ -86,7 +90,12 @@ class SnapshotCaptureConfig:
 class SnapshotMilestoneTracker:
     """Tracks first occurrence of requested milestone selectors."""
 
-    def __init__(self, selectors: tuple[str, ...]) -> None:
+    def __init__(
+        self,
+        selectors: tuple[str, ...],
+        *,
+        post_combat_kills: int = POST_COMBAT_KILL_THRESHOLD,
+    ) -> None:
         unknown = sorted(set(selectors) - AUTO_SELECTORS)
         if unknown:
             choices = ", ".join(sorted(AUTO_SELECTORS))
@@ -94,6 +103,7 @@ class SnapshotMilestoneTracker:
                 f"unknown snapshot selector(s): {', '.join(unknown)}; choose from {choices}"
             )
         self.selectors = tuple(dict.fromkeys(selectors))
+        self.post_combat_kills = int(post_combat_kills)
         self.captured: set[str] = set()
         self._start_episode_map: tuple[int | None, int | None] | None = None
         self._previous_kills: int | None = None
@@ -124,6 +134,19 @@ class SnapshotMilestoneTracker:
             elif selector == "first-damage" and _damage_delta(record) > 0:
                 matches.append(selector)
             elif selector == "first-kill" and self._matches_first_kill(record):
+                matches.append(selector)
+            elif selector == "post-combat" and _is_post_combat(
+                record,
+                min_kills=self.post_combat_kills,
+            ):
+                matches.append(selector)
+            elif (
+                selector == "post-combat-exit-route"
+                and _is_post_combat_exit_route(
+                    record,
+                    min_kills=self.post_combat_kills,
+                )
+            ):
                 matches.append(selector)
             elif (
                 selector == "level-transition"
@@ -164,7 +187,10 @@ async def capture_snapshot_curriculum(config: SnapshotCaptureConfig) -> dict[str
         tls=config.tls,
         authority=config.authority,
     )
-    tracker = SnapshotMilestoneTracker(config.auto_selectors)
+    tracker = SnapshotMilestoneTracker(
+        config.auto_selectors,
+        post_combat_kills=config.post_combat_kills,
+    )
     run_id = f"snapshot-capture-{uuid.uuid4().hex[:12]}"
     stages: list[dict[str, Any]] = []
     records_seen = 0
@@ -180,6 +206,7 @@ async def capture_snapshot_curriculum(config: SnapshotCaptureConfig) -> dict[str
         "endpoint_host": safe_endpoint_host(config.endpoint),
         "memory_path": str(config.memory_path),
         "selectors": list(config.auto_selectors),
+        "post_combat_kills": int(config.post_combat_kills),
         "save_slot_base": config.save_slot_base,
         "attempts": config.attempts,
         "reset_before_attempt": config.reset_before_attempt,
@@ -465,6 +492,7 @@ def _build_manifest(
         "trajectory_jsonl": str(config.trajectory_jsonl) if config.trajectory_jsonl else None,
         "selection": {
             "auto": list(config.auto_selectors),
+            "post_combat_kills": int(config.post_combat_kills),
         },
         "save_slot_base": config.save_slot_base,
         "records_seen": records_seen,
@@ -633,6 +661,8 @@ def _config_from_args(args: argparse.Namespace) -> SnapshotCaptureConfig:
         raise ValueError("choose at least one --auto selector")
     if args.attempts <= 0:
         raise ValueError("--attempts must be positive")
+    if args.post_combat_kills < 0:
+        raise ValueError("--post-combat-kills must be non-negative")
     max_requested_slot = int(args.save_slot_base) + len(selectors) - 1
     if args.save_slot_base < 0 or max_requested_slot > MAX_NATIVE_SAVE_SLOT:
         raise ValueError(
@@ -653,6 +683,7 @@ def _config_from_args(args: argparse.Namespace) -> SnapshotCaptureConfig:
         name=args.name,
         snapshot_dir=args.snapshot_dir,
         auto_selectors=selectors,
+        post_combat_kills=args.post_combat_kills,
         save_slot_base=args.save_slot_base,
         capsule=capsule or "agent-doom",
         microvm_id=microvm_id,
@@ -700,6 +731,12 @@ def _main(argv: list[str] | None = None) -> int:
         help="capture the first live state matching this milestone; may be repeated",
     )
     parser.add_argument("--save-slot-base", type=int, default=0)
+    parser.add_argument(
+        "--post-combat-kills",
+        type=int,
+        default=POST_COMBAT_KILL_THRESHOLD,
+        help="minimum absolute kill count for post-combat auto selectors",
+    )
     parser.add_argument("--capsule")
     parser.add_argument("--microvm-id")
     parser.add_argument("--goal-preset", default="combat")

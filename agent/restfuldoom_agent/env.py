@@ -2091,6 +2091,30 @@ def _verify_snapshot_restored_state(
                 f"{bool(expected.get('target_is_enemy'))!r} got {actual_target_is_enemy!r}"
             )
 
+    if "route_waypoint_exit" in expected:
+        compared.append("route_waypoint_exit")
+        actual_route_exit = _route_waypoint_flag(actual, raw_state, "exit")
+        if actual_route_exit is None:
+            errors.append(
+                "route_waypoint_exit expected "
+                f"{bool(expected.get('route_waypoint_exit'))!r} got None"
+            )
+        elif actual_route_exit != bool(expected.get("route_waypoint_exit")):
+            errors.append(
+                "route_waypoint_exit expected "
+                f"{bool(expected.get('route_waypoint_exit'))!r} got {actual_route_exit!r}"
+            )
+
+    if "route_waypoint_line_id" in expected:
+        compared.append("route_waypoint_line_id")
+        actual_line_id = _snapshot_route_waypoint_line_id(actual, raw_state)
+        expected_line_id = _optional_int(expected.get("route_waypoint_line_id"))
+        if actual_line_id != expected_line_id:
+            errors.append(
+                "route_waypoint_line_id expected "
+                f"{expected_line_id!r} got {actual_line_id!r}"
+            )
+
     verification["compared_fields"] = compared
     verification["errors"] = errors
     verification["valid"] = not errors
@@ -2105,6 +2129,37 @@ def _combat_flag(actual: dict[str, Any], raw_state: Any, key: str) -> bool | Non
     if raw_combat is not None and hasattr(raw_combat, key):
         return bool(getattr(raw_combat, key))
     return None
+
+
+def _route_waypoint_flag(actual: dict[str, Any], raw_state: Any, key: str) -> bool | None:
+    route = _route_waypoint_dict(actual)
+    if key in route:
+        return bool(route.get(key))
+    raw_route = getattr(getattr(raw_state, "navigation", None), "route_waypoint", None)
+    if raw_route is not None and hasattr(raw_route, key):
+        return bool(getattr(raw_route, key))
+    return None
+
+
+def _snapshot_route_waypoint_line_id(actual: dict[str, Any], raw_state: Any) -> int | None:
+    route = _route_waypoint_dict(actual)
+    line = route.get("line")
+    if isinstance(line, dict) and "line_id" in line:
+        return _optional_int(line.get("line_id"))
+    raw_route = getattr(getattr(raw_state, "navigation", None), "route_waypoint", None)
+    raw_line = getattr(raw_route, "line", None)
+    if raw_line is not None and hasattr(raw_line, "line_id"):
+        return _optional_int(getattr(raw_line, "line_id"))
+    return None
+
+
+def _route_waypoint_dict(actual: dict[str, Any]) -> dict[str, Any]:
+    navigation = actual.get("navigation")
+    if isinstance(navigation, dict):
+        route = navigation.get("route_waypoint")
+        if isinstance(route, dict):
+            return route
+    return {}
 
 
 def _optional_int(value: object) -> int | None:

@@ -24,9 +24,25 @@ AUTO_SELECTORS = frozenset(
         "first-enemy-shootable",
         "first-damage",
         "first-kill",
+        "post-combat",
+        "post-combat-exit-route",
         "level-transition",
     }
 )
+POST_COMBAT_KILL_THRESHOLD = 5
+EXIT_ROUTE_SKILLS = frozenset(
+    {
+        "backtrack_from_exit_switch",
+        "press_exit_switch",
+        "push_exit_switch",
+        "retry_exit_assist_door",
+        "turn_to_exit_assist_door",
+        "turn_to_exit_switch",
+        "turn_to_retry_exit_assist_door",
+        "use_exit_assist_door",
+    }
+)
+EXIT_LINE_SPECIALS = frozenset({11})
 
 
 def build_snapshot_curriculum_from_trajectory(
@@ -44,8 +60,11 @@ def build_snapshot_curriculum_from_trajectory(
     capture_cwd: str | Path | None = None,
     capture_timeout_seconds: float = 60.0,
     require_capture_artifacts: bool = False,
+    post_combat_kills: int = POST_COMBAT_KILL_THRESHOLD,
 ) -> dict[str, Any]:
     """Build a versioned snapshot curriculum from selected trajectory rows."""
+    if post_combat_kills < 0:
+        raise ValueError("post_combat_kills must be non-negative")
     trajectory = Path(trajectory_path)
     records = _read_jsonl_records(trajectory)
     if not records:
@@ -55,6 +74,7 @@ def build_snapshot_curriculum_from_trajectory(
         records,
         indexes=indexes or [],
         auto_selectors=auto_selectors or [],
+        post_combat_kills=post_combat_kills,
     )
     if not selected:
         raise ValueError("no snapshot stages selected")
@@ -66,7 +86,7 @@ def build_snapshot_curriculum_from_trajectory(
         line_index = selection["line_index"]
         record = selection["record"]
         selectors = selection["selectors"]
-        selector = selectors[0] if selectors else "explicit"
+        selector = _primary_selector(selectors)
         stage = _stage_from_record(
             record,
             line_index=line_index,
@@ -119,6 +139,7 @@ def build_snapshot_curriculum_from_trajectory(
             "selection": {
                 "indexes": indexes or [],
                 "auto": auto_selectors or [],
+                "post_combat_kills": int(post_combat_kills),
             },
             "generated_at_epoch_seconds": int(time.time()),
         },
@@ -150,6 +171,7 @@ def _select_records(
     *,
     indexes: list[int],
     auto_selectors: list[str],
+    post_combat_kills: int = POST_COMBAT_KILL_THRESHOLD,
 ) -> list[dict[str, Any]]:
     by_line = {int(entry["line_index"]): entry for entry in records}
     selected: dict[int, dict[str, Any]] = {}
@@ -166,7 +188,11 @@ def _select_records(
         if selector not in AUTO_SELECTORS:
             choices = ", ".join(sorted(AUTO_SELECTORS))
             raise ValueError(f"unknown auto selector {selector!r}; choose one of: {choices}")
-        entry = _first_matching_record(records, selector)
+        entry = _first_matching_record(
+            records,
+            selector,
+            post_combat_kills=post_combat_kills,
+        )
         if entry is None:
             raise ValueError(f"auto selector {selector!r} did not match any trajectory row")
         line_index = int(entry["line_index"])
@@ -181,9 +207,17 @@ def _select_records(
     return [selected[index] for index in sorted(selected)]
 
 
+def _primary_selector(selectors: list[str]) -> str:
+    if "post-combat-exit-route" in selectors:
+        return "post-combat-exit-route"
+    return selectors[0] if selectors else "explicit"
+
+
 def _first_matching_record(
     records: list[dict[str, Any]],
     selector: str,
+    *,
+    post_combat_kills: int = POST_COMBAT_KILL_THRESHOLD,
 ) -> dict[str, Any] | None:
     start_episode_map = _episode_map(_record_state(records[0]["record"]))
     previous_kills = _int_or_none(_record_state(records[0]["record"]).get("kills"))
@@ -206,6 +240,16 @@ def _first_matching_record(
                 return entry
             if kills is not None:
                 previous_kills = kills
+        if selector == "post-combat" and _is_post_combat(
+            record,
+            min_kills=post_combat_kills,
+        ):
+            return entry
+        if selector == "post-combat-exit-route" and _is_post_combat_exit_route(
+            record,
+            min_kills=post_combat_kills,
+        ):
+            return entry
         if selector == "level-transition" and _episode_map(state) != start_episode_map:
             return entry
     return None
@@ -420,6 +464,12 @@ def _expected_state(record: dict[str, Any]) -> dict[str, Any]:
     combat = state.get("combat")
     if isinstance(combat, dict) and "target_is_enemy" in combat:
         expected["target_is_enemy"] = bool(combat.get("target_is_enemy"))
+    route = _route_waypoint(record)
+    if route:
+        expected["route_waypoint_exit"] = bool(route.get("exit"))
+        line = route.get("line")
+        if isinstance(line, dict) and _int_or_none(line.get("line_id")) is not None:
+            expected["route_waypoint_line_id"] = int(line["line_id"])
     expected["damage_delta"] = _damage_delta(record)
     expected["kill_delta"] = _kill_delta(record)
     done_reason = _record_info(record).get("done_reason")
@@ -484,6 +534,71 @@ def _has_enemy_shootable_target(record: dict[str, Any]) -> bool:
     return False
 
 
+def _is_post_combat(
+    record: dict[str, Any],
+    *,
+    min_kills: int = POST_COMBAT_KILL_THRESHOLD,
+) -> bool:
+    kills = _int_or_none(_record_state(record).get("kills"))
+    return (
+        kills is not None
+        and kills >= int(min_kills)
+        and not _has_visible_enemy(record)
+        and not _has_shootable_target(record)
+    )
+
+
+def _is_post_combat_exit_route(
+    record: dict[str, Any],
+    *,
+    min_kills: int = POST_COMBAT_KILL_THRESHOLD,
+) -> bool:
+    if not _is_post_combat(record, min_kills=min_kills):
+        return False
+    return _has_exit_route_evidence(record)
+
+
+def _has_exit_route_evidence(record: dict[str, Any]) -> bool:
+    route = _route_waypoint(record)
+    if route and bool(route.get("exit")):
+        return True
+    skill = _policy_skill(record)
+    if skill in EXIT_ROUTE_SKILLS:
+        return True
+    return _has_exit_use_line(record)
+
+
+def _route_waypoint(record: dict[str, Any]) -> dict[str, Any]:
+    for navigation in _navigation_dicts(record):
+        route = navigation.get("route_waypoint")
+        if isinstance(route, dict):
+            return route
+    return {}
+
+
+def _navigation_dicts(record: dict[str, Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    state = _record_state(record)
+    navigation = state.get("navigation")
+    if isinstance(navigation, dict):
+        out.append(navigation)
+    decision_navigation = _policy_decision(record).get("navigation")
+    if isinstance(decision_navigation, dict):
+        out.append(decision_navigation)
+    return out
+
+
+def _has_exit_use_line(record: dict[str, Any]) -> bool:
+    for navigation in _navigation_dicts(record):
+        lines = navigation.get("use_lines")
+        if not isinstance(lines, list):
+            continue
+        for line in lines:
+            if isinstance(line, dict) and _int_or_none(line.get("special")) in EXIT_LINE_SPECIALS:
+                return True
+    return False
+
+
 def _damage_delta(record: dict[str, Any]) -> int:
     info_transition = _record_info(record).get("transition")
     if isinstance(info_transition, dict):
@@ -543,6 +658,10 @@ def _stage_note(selector: str) -> str:
         "first-enemy-shootable": "Restore the first trajectory state with a shootable enemy target.",
         "first-damage": "Restore the first trajectory state where the agent dealt damage.",
         "first-kill": "Restore the first trajectory state where the agent scored a kill.",
+        "post-combat": "Restore the first trajectory state after the post-combat kill threshold.",
+        "post-combat-exit-route": (
+            "Restore the first post-combat state with exit route or exit-control evidence."
+        ),
         "level-transition": "Restore the trajectory state around level transition.",
     }
     return notes.get(selector, notes["explicit"])
@@ -591,6 +710,12 @@ def _main(argv: list[str] | None = None) -> int:
         type=int,
         help="optional first Doom agent save slot assigned to generated stages",
     )
+    parser.add_argument(
+        "--post-combat-kills",
+        type=int,
+        default=POST_COMBAT_KILL_THRESHOLD,
+        help="minimum absolute kill count for post-combat auto selectors",
+    )
     parser.add_argument("--capsule", default="agent-doom")
     parser.add_argument("--microvm-id")
     parser.add_argument(
@@ -624,6 +749,7 @@ def _main(argv: list[str] | None = None) -> int:
         capture_cwd=args.capture_cwd,
         capture_timeout_seconds=args.capture_timeout_seconds,
         require_capture_artifacts=args.require_capture_artifacts,
+        post_combat_kills=args.post_combat_kills,
     )
     if args.validate:
         report = validate_snapshot_curriculum(

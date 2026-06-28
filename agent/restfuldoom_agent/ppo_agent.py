@@ -27,7 +27,7 @@ from .schemas import map_expert_skill_to_ppo_action, pad_observation_features
 from .snapshot_curriculum import load_snapshot_curriculum
 from .skill_policy import features_from_record
 
-CHECKPOINT_EVAL_SCORE_SCHEMA = "restfuldoom.ppo_checkpoint_eval_score.v2"
+CHECKPOINT_EVAL_SCORE_SCHEMA = "restfuldoom.ppo_checkpoint_eval_score.v3"
 
 
 async def train(args: argparse.Namespace) -> dict[str, object]:
@@ -1019,8 +1019,8 @@ async def _evaluate_checkpoint_curriculum(
         "selection_score": aggregate_score,
         "score_formula": (
             "0.7 * mean_stage_score + 0.3 * worst_stage_score; "
-            "required-kill stage scores use reliability + speed with shaped "
-            "reward capped as a tiebreaker"
+            "required-kill and exit-routing stage scores use reliability + "
+            "speed with shaped reward capped as a tiebreaker"
         ),
         "stages": stage_records,
     }
@@ -1035,10 +1035,36 @@ def _policy_eval_selection_components(eval_result: object) -> dict[str, object]:
     """Returns deterministic eval score components for resume selection."""
     result = getattr(eval_result, "result", eval_result)
     episodes = getattr(eval_result, "episodes", [])
+    exit_routing_components = _exit_routing_score_components(episodes)
     required_kill_components = _required_kill_score_components(episodes)
     completion_bonus = float(getattr(result, "level_completion_rate", 0.0)) * 500.0
     survival_bonus = float(getattr(result, "survival_rate", 0.0)) * 20.0
     stuck_penalty = -float(getattr(result, "mean_stuck_events", 0.0)) * 2.0
+    if exit_routing_components is not None:
+        score = round(
+            float(exit_routing_components["success_bonus"])
+            + float(exit_routing_components["speed_bonus"])
+            + float(exit_routing_components["reward_tiebreak"])
+            + survival_bonus
+            + stuck_penalty,
+            4,
+        )
+        return {
+            "schema": CHECKPOINT_EVAL_SCORE_SCHEMA,
+            "mode": "exit_routing_speed",
+            "selection_score": score,
+            "mean_reward": float(getattr(result, "mean_reward", 0.0)),
+            "reward_tiebreak": exit_routing_components["reward_tiebreak"],
+            "exit_success_bonus": exit_routing_components["success_bonus"],
+            "exit_speed_bonus": exit_routing_components["speed_bonus"],
+            "exit_success_rate": exit_routing_components["success_rate"],
+            "exit_speed_fraction": exit_routing_components["speed_fraction"],
+            "mean_steps_to_exit": exit_routing_components["mean_steps_to_exit"],
+            "completion_bonus": round(completion_bonus, 4),
+            "survival_bonus": round(survival_bonus, 4),
+            "stuck_penalty": round(stuck_penalty, 4),
+            "reward_tiebreak_cap": 20.0,
+        }
     if required_kill_components is not None:
         score = round(
             float(required_kill_components["earned_kill_bonus"])
@@ -1085,6 +1111,48 @@ def _policy_eval_selection_components(eval_result: object) -> dict[str, object]:
         "completion_bonus": round(completion_bonus, 4),
         "survival_bonus": round(survival_bonus, 4),
         "stuck_penalty": round(stuck_penalty, 4),
+    }
+
+
+def _exit_routing_score_components(episodes: object) -> dict[str, object] | None:
+    """Returns reliability and speed components for level-completion evals."""
+    if not isinstance(episodes, list) or not episodes:
+        return None
+    successful = [
+        episode
+        for episode in episodes
+        if getattr(episode, "done_reason", None) == "level_complete"
+        or bool(getattr(episode, "level_completed", False))
+    ]
+    if not successful:
+        return None
+    max_steps = max(
+        1,
+        *[
+            int(getattr(episode, "steps_to_exit", 0) or getattr(episode, "steps", 0) or 0)
+            for episode in episodes
+        ],
+    )
+    mean_steps = sum(
+        int(getattr(episode, "steps_to_exit", 0) or getattr(episode, "steps", 0))
+        for episode in successful
+    ) / len(successful)
+    success_rate = len(successful) / len(episodes)
+    reference_steps = max(700.0, float(max_steps))
+    speed_fraction = success_rate * max(
+        0.0,
+        min(1.0, (reference_steps - mean_steps) / reference_steps),
+    )
+    mean_reward = sum(float(getattr(episode, "total_reward", 0.0)) for episode in episodes)
+    mean_reward /= len(episodes)
+    reward_tiebreak = max(-20.0, min(20.0, mean_reward))
+    return {
+        "success_rate": round(success_rate, 4),
+        "speed_fraction": round(speed_fraction, 4),
+        "mean_steps_to_exit": round(mean_steps, 4),
+        "reward_tiebreak": round(reward_tiebreak, 4),
+        "success_bonus": round(success_rate * 200.0, 4),
+        "speed_bonus": round(speed_fraction * 160.0, 4),
     }
 
 
@@ -1416,6 +1484,7 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         for record in records
         if isinstance(record.info, dict) and isinstance(record.info.get("route_outcome", {}), dict)
     ]
+    exit_route_outcomes = [outcome for outcome in route_outcomes if outcome.get("exit")]
     contact_contexts = [
         context
         for record in records
@@ -1593,6 +1662,19 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
         "route_failed_steps": sum(1 for outcome in route_outcomes if outcome.get("failed")),
         "route_progress_units": round(
             sum(float(outcome.get("progress_units", 0.0)) for outcome in route_outcomes),
+            4,
+        ),
+        "exit_route_attempt_steps": sum(
+            1 for outcome in exit_route_outcomes if outcome.get("attempted")
+        ),
+        "exit_route_reached_steps": sum(
+            1 for outcome in exit_route_outcomes if outcome.get("reached")
+        ),
+        "exit_route_failed_steps": sum(
+            1 for outcome in exit_route_outcomes if outcome.get("failed")
+        ),
+        "exit_route_progress_units": round(
+            sum(float(outcome.get("progress_units", 0.0)) for outcome in exit_route_outcomes),
             4,
         ),
         "contact_context_active_steps": sum(
