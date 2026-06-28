@@ -491,9 +491,10 @@ reward and the promotion gate still decide whether the checkpoint is useful.
 `ppo_agent --resume-checkpoint <path>` loads a saved
 `restfuldoom.ppo_checkpoint.v1` checkpoint and continues live PPO collection
 with the model weights, optimizer state, observation schema, action schema, and
-update index from that file. The CLI validates that checkpoint observation and
-action dimensions match the current exported schemas before collecting more
-rollouts.
+update index from that file. The loader can expand appended observation
+features and appended actor actions, but it rejects checkpoints whose saved
+action prefix does not exactly match the current `ACTION_SCHEMA`. Reordered or
+renamed existing actions are not trusted.
 
 `ppo_agent --resume-best-checkpoint --memory-path agent_memory/e1m1.json`
 resolves `ppo_best_checkpoint.checkpoint_path` from memory and resumes that

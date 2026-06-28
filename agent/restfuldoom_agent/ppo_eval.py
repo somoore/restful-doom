@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from .env import ACTION_SCHEMA, DoomAgentEnv, DoomEnvConfig
+from .env import ACTION_SCHEMA, OBSERVATION_SCHEMA, DoomAgentEnv, DoomEnvConfig
 from .ppo import EvaluationResult, PPOTrainer, PromotionDecision, PromotionGate
 
 
@@ -88,7 +88,12 @@ async def evaluate_checkpoint(
     trace_path: str | Path | None = None,
 ) -> PolicyEval:
     """Evaluates a PPO checkpoint in the Doom skill environment."""
-    trainer = PPOTrainer.load_checkpoint(checkpoint_path, device=device)
+    trainer = PPOTrainer.load_checkpoint(
+        checkpoint_path,
+        device=device,
+        target_obs_dim=len(OBSERVATION_SCHEMA["feature_names"]),
+        target_action_dim=len(ACTION_SCHEMA["actions"]),
+    )
 
     def choose(obs: list[float], _env: DoomAgentEnv) -> int:
         action, _logprob, _value = trainer.model.act(
@@ -467,6 +472,10 @@ def _aggregate(policy_id: str, episodes: list[EpisodeEval]) -> PolicyEval:
         mean_stuck_events=sum(episode.stuck_events for episode in episodes) / count,
         episode_count=len(episodes),
         mean_reward=sum(episode.total_reward for episode in episodes) / count,
+        mean_items=sum(_episode_earned_items(episode) for episode in episodes) / count,
+        mean_item_gain=sum(int(episode.max_item_gain) for episode in episodes) / count,
+        mean_secrets=sum(_episode_earned_secrets(episode) for episode in episodes) / count,
+        mean_secret_gain=sum(int(episode.max_secret_gain) for episode in episodes) / count,
         snapshot_verification_failures=sum(
             int(episode.snapshot_verification_failures) for episode in episodes
         ),
@@ -506,6 +515,22 @@ def _reset_source_breakdown(episodes: list[EpisodeEval]) -> dict[str, dict[str, 
                 _episode_earned_kills(episode) for episode in source_episodes
             )
             / count,
+            "mean_items": sum(
+                _episode_earned_items(episode) for episode in source_episodes
+            )
+            / count,
+            "mean_item_gain": sum(
+                int(episode.max_item_gain) for episode in source_episodes
+            )
+            / count,
+            "mean_secrets": sum(
+                _episode_earned_secrets(episode) for episode in source_episodes
+            )
+            / count,
+            "mean_secret_gain": sum(
+                int(episode.max_secret_gain) for episode in source_episodes
+            )
+            / count,
             "mean_stuck_events": sum(
                 episode.stuck_events for episode in source_episodes
             )
@@ -522,6 +547,25 @@ def _episode_earned_kills(episode: EpisodeEval) -> int:
     """Returns kills earned after episode reset, excluding restored snapshot state."""
     absolute_gain = max(0, int(episode.max_kills) - int(getattr(episode, "start_kills", 0)))
     return max(int(getattr(episode, "kill_delta", 0)), int(episode.max_kill_gain), absolute_gain)
+
+
+def _episode_earned_items(episode: EpisodeEval) -> int:
+    """Returns items earned after episode reset, excluding restored snapshot state."""
+    absolute_gain = max(0, int(episode.max_items) - int(getattr(episode, "start_items", 0)))
+    return max(int(getattr(episode, "item_delta", 0)), int(episode.max_item_gain), absolute_gain)
+
+
+def _episode_earned_secrets(episode: EpisodeEval) -> int:
+    """Returns secrets earned after episode reset, excluding restored snapshot state."""
+    absolute_gain = max(
+        0,
+        int(episode.max_secrets) - int(getattr(episode, "start_secrets", 0)),
+    )
+    return max(
+        int(getattr(episode, "secret_delta", 0)),
+        int(episode.max_secret_gain),
+        absolute_gain,
+    )
 
 
 def _action_allowed(action_mask: list[bool], action_index: int) -> bool:

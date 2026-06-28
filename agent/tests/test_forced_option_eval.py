@@ -3,14 +3,17 @@ from pathlib import Path
 import pytest
 
 from restfuldoom_agent.curriculum import build_curriculum
+from restfuldoom_agent.env import SKILL_ACTIONS
 from restfuldoom_agent.forced_option_eval import (
     ForcedOptionEvalConfig,
     _comparison,
     _config_from_args,
+    _forced_option_stop_reason,
     _forced_summary,
     _selected_stages,
     _skill_action_index,
 )
+from restfuldoom_agent.ppo_agent import _summarize_buffer
 from restfuldoom_agent.ppo import RolloutBuffer
 
 
@@ -92,8 +95,12 @@ def test_forced_option_eval_summarizes_forced_rollout():
     assert summary["records"] == 3
     assert summary["forced_allowed_steps"] == 2
     assert summary["forced_disallowed_steps"] == 1
+    assert summary["forced_action_allowed_steps"] == 2
+    assert summary["forced_action_disallowed_steps"] == 1
     assert summary["selected_disallowed_steps"] == 0
+    assert summary["selected_action_disallowed_steps"] == 0
     assert summary["shootable_handoff_steps"] == 1
+    assert summary["forced_handoff_disallowed_steps"] == 1
     assert summary["unhandled_forced_disallowed_steps"] == 0
     assert summary["lost_visible_contact_steps"] == 1
     assert summary["first_shootable_step"] == 2
@@ -108,6 +115,18 @@ def test_forced_option_eval_summarizes_forced_rollout():
     }
     assert summary["first_contact_use_line_close_step"] == 1
     assert summary["stuck_steps"] == 1
+    assert _summarize_buffer(buffer)["invalid_action_steps"] == 0
+
+
+def test_forced_option_eval_classifies_close_contact_as_complete_when_fire_allowed():
+    action_mask = [False for _ in range(len(SKILL_ACTIONS))]
+    action_mask[_skill_action_index("fire")] = True
+
+    assert (
+        _forced_option_stop_reason("close_visible_contact", action_mask)
+        == "forced_option_completed_shootable"
+    )
+    assert _forced_option_stop_reason("seek_enemy", action_mask) == "forced_option_disallowed"
 
 
 def test_forced_option_eval_comparison_keeps_failure_visible():

@@ -128,7 +128,9 @@ The machine-readable definition is
 `restfuldoom_agent.schemas.ACTION_SCHEMA` (`restfuldoom.skill_action.v1`).
 Each checkpoint and rollout buffer carries the action schema, including index,
 name, controller entrypoint, role, primary signal, fallback, mask semantics,
-and evolution rule.
+and evolution rule. Checkpoint resume treats existing action indexes as a trust
+boundary: appended actions can be migrated, but the saved action prefix must
+match the current schema exactly or the checkpoint is rejected.
 
 The important rule: PPO learns the selector, not the primitive. A future skill
 may become config-backed or internally learned only if the same index/name

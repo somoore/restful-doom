@@ -471,6 +471,10 @@ class PPOTrainer:
         checkpoint_action_dim = int(
             checkpoint.get("action_dim") or len(checkpoint["action_schema"]["actions"])
         )
+        _validate_checkpoint_action_schema(
+            checkpoint.get("action_schema"),
+            checkpoint_action_dim=checkpoint_action_dim,
+        )
         obs_dim = target_obs_dim or checkpoint_obs_dim
         action_dim = target_action_dim or checkpoint_action_dim
         action_migrated = False
@@ -557,6 +561,26 @@ def _expand_observation_state_dict(
     return migrated
 
 
+def _validate_checkpoint_action_schema(
+    action_schema: dict[str, Any] | None,
+    *,
+    checkpoint_action_dim: int,
+) -> None:
+    """Ensure checkpoint logits still map to the same stable action prefix."""
+    actions = action_schema.get("actions") if isinstance(action_schema, dict) else None
+    if not isinstance(actions, list):
+        raise ValueError("checkpoint action schema is missing actions")
+    checkpoint_actions = [str(action) for action in actions[:checkpoint_action_dim]]
+    current_actions = [
+        str(action) for action in ACTION_SCHEMA["actions"][:checkpoint_action_dim]
+    ]
+    if checkpoint_actions != current_actions:
+        raise ValueError(
+            "checkpoint action schema is not a prefix of the current action schema: "
+            f"{checkpoint_actions!r} != {current_actions!r}"
+        )
+
+
 def _expand_action_state_dict(
     state_dict: dict[str, Any],
     *,
@@ -612,6 +636,10 @@ class EvaluationResult:
     mean_stuck_events: float
     episode_count: int
     mean_reward: float = 0.0
+    mean_items: float = 0.0
+    mean_item_gain: float = 0.0
+    mean_secrets: float = 0.0
+    mean_secret_gain: float = 0.0
     snapshot_verification_failures: int = 0
     reset_source_breakdown: dict[str, dict[str, Any]] = field(default_factory=dict)
 

@@ -341,6 +341,21 @@ def test_skill_controller_action_mask_uses_affordances():
     assert quiet_mask["route_progression"]
 
 
+def test_skill_controller_fire_masks_out_recent_contact_closure():
+    controller = SkillController()
+    first_visible = _state(tick=5, enemy=True, combat=False)
+    shootable_after_contact = _state(tick=20, enemy=False, combat=True)
+
+    controller.action_mask(first_visible)
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(shootable_after_contact)))
+
+    assert mask["fire"]
+    assert not mask["close_visible_contact"]
+    assert not mask["seek_enemy"]
+    assert not mask["open_use_line"]
+    assert not mask["route_progression"]
+
+
 def test_skill_controller_low_health_contact_forces_retreat():
     controller = SkillController()
     combat_state = _state(enemy=True, combat=True, health=30)
@@ -842,6 +857,7 @@ def test_skill_controller_recent_visible_contact_suppresses_generic_route():
     assert not contact_mask["seek_enemy"]
     assert not contact_mask["route_progression"]
     assert expired_mask["route_progression"]
+    assert not expired_mask["close_visible_contact"]
 
 
 def test_skill_controller_recent_contact_route_failures_suppress_progression_line():

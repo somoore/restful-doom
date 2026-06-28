@@ -37,6 +37,7 @@ from restfuldoom_agent.ppo_eval import (
     EpisodeEval,
     PolicyEval,
     _aggregate,
+    evaluate_checkpoint,
     _open_trace,
     _reset_context_snapshot_verification_failed,
     _write_trace_step,
@@ -127,6 +128,7 @@ def test_learning_trace_names_observation_mask_and_outcome():
     obs[feature_names.index("route_waypoint_distance_norm")] = 0.25
     obs[feature_names.index("remembered_enemies_norm")] = 0.5
     obs[feature_names.index("visible_enemy_seen_recently")] = 1.0
+    obs[feature_names.index("prev_skill_close_visible_contact")] = 1.0
     obs[feature_names.index("contact_use_line_active")] = 1.0
     obs[feature_names.index("contact_use_line_distance_norm")] = 0.4
     obs[feature_names.index("topology_frontier_active")] = 1.0
@@ -173,6 +175,10 @@ def test_learning_trace_names_observation_mask_and_outcome():
     assert trace["observation"]["groups"]["route"]["route_waypoint_distance_norm"] == 0.25
     assert trace["observation"]["groups"]["memory"]["remembered_enemies_norm"] == 0.5
     assert trace["observation"]["groups"]["temporal"]["visible_enemy_seen_recently"] == 1.0
+    assert (
+        trace["observation"]["groups"]["temporal"]["prev_skill_close_visible_contact"]
+        == 1.0
+    )
     assert trace["observation"]["groups"]["contact"]["contact_use_line_active"] == 1.0
     assert trace["observation"]["groups"]["contact"]["contact_use_line_distance_norm"] == 0.4
     assert trace["observation"]["groups"]["topology"]["topology_frontier_active"] == 1.0
@@ -1723,9 +1729,20 @@ def test_policy_eval_aggregates_earned_kills_not_restored_snapshot_kills():
     earned_eval = _aggregate("ppo:earned", [earned])
 
     assert inherited_eval.result.mean_kills == 0.0
+    assert inherited_eval.result.mean_items == 0.0
+    assert inherited_eval.result.mean_item_gain == 0.0
+    assert inherited_eval.result.mean_secrets == 0.0
+    assert inherited_eval.result.mean_secret_gain == 0.0
     assert inherited_eval.episodes[0].start_kills == 3
     assert inherited_eval.episodes[0].max_kill_gain == 0
     assert earned_eval.result.mean_kills == 1.0
+    assert earned_eval.result.mean_items == 1.0
+    assert earned_eval.result.mean_item_gain == 1.0
+    assert earned_eval.result.reset_source_breakdown["snapshot_restore"]["mean_items"] == 1.0
+    assert (
+        earned_eval.result.reset_source_breakdown["snapshot_restore"]["mean_item_gain"]
+        == 1.0
+    )
     assert earned_eval.to_dict()["episodes"][0]["start_items"] == 2
     assert earned_eval.to_dict()["episodes"][0]["max_item_gain"] == 1
     assert earned_eval.to_dict()["episodes"][0]["reset_source"] == "snapshot_restore"
@@ -2351,6 +2368,47 @@ def test_ppo_checkpoint_expands_appended_action_head(tmp_path):
     assert loaded.resume_migration["to_action_dim"] == 3
     assert loaded.resume_migration["action_expanded"] is True
     assert not loaded.resume_migration["optimizer_state_loaded"]
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")
+def test_ppo_checkpoint_rejects_reordered_action_prefix(tmp_path):
+    torch = pytest.importorskip("torch")
+    trainer = PPOTrainer(
+        obs_dim=2,
+        action_dim=2,
+        config=PPOConfig(update_epochs=1, minibatch_size=4, rollout_steps=8),
+    )
+    checkpoint = trainer.save_checkpoint(tmp_path / "reordered-actions.pt")
+    payload = torch.load(checkpoint, map_location="cpu")
+    actions = list(payload["action_schema"]["actions"])
+    actions[0], actions[1] = actions[1], actions[0]
+    payload["action_schema"] = dict(payload["action_schema"])
+    payload["action_schema"]["actions"] = actions
+    torch.save(payload, checkpoint)
+
+    with pytest.raises(ValueError, match="not a prefix"):
+        PPOTrainer.load_checkpoint(checkpoint)
+
+
+def test_evaluate_checkpoint_loads_checkpoint_against_current_schema(monkeypatch):
+    captured = {}
+
+    class StopEval(Exception):
+        pass
+
+    def fake_load_checkpoint(path, **kwargs):
+        captured["path"] = path
+        captured.update(kwargs)
+        raise StopEval
+
+    monkeypatch.setattr(PPOTrainer, "load_checkpoint", fake_load_checkpoint)
+
+    with pytest.raises(StopEval):
+        asyncio.run(evaluate_checkpoint("old.pt", object()))
+
+    assert captured["path"] == "old.pt"
+    assert captured["target_obs_dim"] == len(OBSERVATION_SCHEMA["feature_names"])
+    assert captured["target_action_dim"] == len(ACTION_SCHEMA["actions"])
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")

@@ -181,7 +181,10 @@ The stable action space is:
 The machine-readable definition is `ACTION_SCHEMA`
 (`restfuldoom.skill_action.v1`). Each descriptor includes the index, name,
 kind, learned flag, execution owner, controller entrypoint, primary signal, and
-fallback. Checkpoints and rollout buffers carry this schema.
+fallback. Checkpoints and rollout buffers carry this schema. Checkpoint resume
+treats existing action indexes as a trust boundary: appended actions can be
+migrated, but the saved action prefix must match the current schema exactly or
+the checkpoint is rejected.
 
 PPO learns selector weights:
 
@@ -383,10 +386,10 @@ Checkpoint curriculum eval follows the same contract. Each eval stage is reset
 through `_env_config_for_stage()`, so snapshot stages restore native save slots
 or external artifacts instead of falling back to teleport-like fresh starts.
 Serialized `EpisodeEval` rows include `reset_source`, start/end episode/map,
-`start_kills`, absolute `max_kills`, earned `kill_delta`/`max_kill_gain`, and
-item/secret deltas/gains. The aggregate `mean_kills` used for eval selection is
-earned after reset; inherited snapshot kills remain visible only as start-state
-metadata.
+start counters, absolute max counters, and earned kill/item/secret deltas and
+gains. Aggregate `mean_kills`, `mean_items`, and `mean_secrets` used for eval
+selection are earned after reset; inherited snapshot counters remain visible
+only as start-state metadata.
 
 The validator checks the schema, stage structure, local snapshot files, and
 `sha256:` digests. PPO experiments can load an unvalidated manifest for plumbing

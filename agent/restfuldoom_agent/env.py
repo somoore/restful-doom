@@ -551,6 +551,9 @@ class SkillController:
             return [mask[skill] for skill in SKILL_ACTIONS]
         if can_fire:
             mask["fire"] = True
+            if stuck:
+                mask["recover_stuck"] = True
+            return [mask[skill] for skill in SKILL_ACTIONS]
         elif self._contact_use_line_followthrough_active(features):
             mask["open_use_line"] = True
             if stuck:

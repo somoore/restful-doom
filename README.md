@@ -369,9 +369,11 @@ The training API is:
 - Rollout buffers and checkpoints also carry the decision-cycle and memory
   contracts, so a resumed cloud job can inspect how skills, masks, memory
   queries, and controller execution are meant to interact.
-- Older PPO checkpoints whose observation or action schema is a prefix of the
-  current schema can resume with zero-initialized weights for appended
-  observation features and mean-initialized rows for appended actor actions.
+- Older PPO checkpoints can resume when observation features are appended and
+  the saved action schema matches the current action prefix exactly. Observation
+  weights are expanded with zero-initialized new columns; appended actor actions
+  get initialized rows. Reordered or renamed existing actions are rejected so
+  old logits cannot silently map to different skills.
 
 Run a small PPO batch against a live gRPC Doom endpoint:
 
@@ -483,8 +485,10 @@ PYTHONPATH=agent python -m restfuldoom_agent.forced_option_eval \
 ```
 
 When the forced primitive reaches a shootable state, add a handoff skill to test
-the full bridge without counting the expected post-shootable mask transition as
-an invalid forced action:
+the full bridge. If `close_visible_contact` becomes disallowed because `fire` is
+now legal, the report classifies that stop as
+`forced_option_completed_shootable`; selected invalid-action counts remain
+separate from expected forced-option completion.
 
 ```
 PYTHONPATH=agent python -m restfuldoom_agent.forced_option_eval \
@@ -759,12 +763,13 @@ Snapshot-backed runs also report earned kill fields: `kill_delta`,
 `max_kill_gain`, `snapshot_kill_delta`, and `snapshot_max_kill_gain`. Use those
 fields, not absolute `max_kills`, when judging whether PPO earned a kill after
 restoring from a slot that may already contain prior kills.
-Checkpoint curriculum eval uses the same rule: `mean_kills` is earned after the
-eval reset, while each serialized episode keeps `start_kills`, absolute
-`max_kills`, `kill_delta`, `max_kill_gain`, `reset_source`, start/end map, and
-item/secret deltas so snapshot-stage wins are auditable. Eval aggregates also
-include `reset_source_breakdown`, which separates `snapshot_restore` outcomes
-from fresh-reset outcomes. Checkpoint eval score schema
+Checkpoint curriculum eval uses the same rule: `mean_kills`, `mean_items`, and
+`mean_secrets` are earned after the eval reset, while each serialized episode
+keeps start counters, absolute max counters, deltas/gains, `reset_source`,
+start/end map, and item/secret deltas so snapshot-stage wins are auditable.
+Eval aggregates also include `mean_item_gain`, `mean_secret_gain`, and
+`reset_source_breakdown`, which separates `snapshot_restore` outcomes from
+fresh-reset outcomes. Checkpoint eval score schema
 `restfuldoom.ppo_checkpoint_eval_score.v3` adds an `exit_routing_speed` mode:
 once a stage reaches `level_complete`, selection favors reliable and faster
 exits with shaped reward capped as a tiebreaker.

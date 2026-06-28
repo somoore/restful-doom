@@ -86,6 +86,7 @@ _FEATURE_GROUPS: dict[str, tuple[str, ...]] = {
         "prev_skill_retreat",
         "prev_skill_recover_stuck",
         "prev_skill_press_exit",
+        "prev_skill_close_visible_contact",
         "prev_had_shootable_target",
         "same_skill_streak_norm",
         "delta_x_norm",

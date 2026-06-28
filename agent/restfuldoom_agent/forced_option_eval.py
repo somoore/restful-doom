@@ -135,7 +135,10 @@ async def _run_one(
                     selected_skill = config.shootable_handoff_skill
                     handoff_applied = True
             if not forced_action_allowed and not handoff_applied:
-                termination_reason = "forced_option_disallowed"
+                termination_reason = _forced_option_stop_reason(
+                    forced_skill,
+                    action_mask,
+                )
                 termination_step = len(buffer.records)
                 break
             transition = await env.step(selected_action_index)
@@ -331,9 +334,14 @@ def _forced_summary(buffer: RolloutBuffer) -> dict[str, Any]:
         "records": len(records),
         "forced_allowed_steps": allowed_steps,
         "forced_disallowed_steps": len(records) - allowed_steps,
+        "forced_action_allowed_steps": allowed_steps,
+        "forced_action_disallowed_steps": len(records) - allowed_steps,
         "selected_allowed_steps": selected_allowed_steps,
         "selected_disallowed_steps": len(records) - selected_allowed_steps,
+        "selected_action_allowed_steps": selected_allowed_steps,
+        "selected_action_disallowed_steps": len(records) - selected_allowed_steps,
         "shootable_handoff_steps": handoff_steps,
+        "forced_handoff_disallowed_steps": handoff_steps,
         "unhandled_forced_disallowed_steps": len(records) - allowed_steps - handoff_steps,
         "actual_skill_counts": dict(sorted(actual_skills.items())),
         "decision_skill_counts": dict(sorted(decision_skills.items())),
@@ -343,6 +351,15 @@ def _forced_summary(buffer: RolloutBuffer) -> dict[str, Any]:
         "stuck_steps": stuck_steps,
         "recovery_steps": recovery_steps,
     }
+
+
+def _forced_option_stop_reason(forced_skill: str, action_mask: list[bool]) -> str:
+    """Classify pre-step stops so completed options are not reported as invalid."""
+    if forced_skill == "close_visible_contact":
+        fire_index = SKILL_ACTIONS.index("fire")
+        if _action_allowed(action_mask, fire_index):
+            return "forced_option_completed_shootable"
+    return "forced_option_disallowed"
 
 
 def _comparison(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
