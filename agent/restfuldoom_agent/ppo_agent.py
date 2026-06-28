@@ -441,19 +441,65 @@ def _build_training_curriculum(
             raise ValueError("--snapshot-curriculum cannot be combined with --curriculum")
         if reset_start:
             raise ValueError("--snapshot-curriculum cannot be combined with --reset-start-*")
-        return load_snapshot_curriculum(
+        curriculum = load_snapshot_curriculum(
             args.snapshot_curriculum,
             mode=args.curriculum_mode,
             start_index=args.curriculum_start_index,
             seed=args.seed,
         )
-    return build_curriculum(
+        return _append_true_spawn_stage(args, curriculum)
+    curriculum = build_curriculum(
         name=args.curriculum,
         manual_reset_start=reset_start,
         mode=args.curriculum_mode,
         start_index=args.curriculum_start_index,
         seed=args.seed,
     )
+    return _append_true_spawn_stage(args, curriculum)
+
+
+def _append_true_spawn_stage(
+    args: argparse.Namespace,
+    curriculum: dict[str, object],
+) -> dict[str, object]:
+    """Optionally appends a normal map-spawn stage to an existing curriculum."""
+    if not bool(getattr(args, "include_true_spawn_stage", False)):
+        return curriculum
+    stages = curriculum.get("stages", [])
+    if not isinstance(stages, list) or not stages:
+        raise ValueError("cannot append true-spawn stage to a curriculum with no stages")
+    next_index = len(stages)
+    stage_name = str(
+        getattr(args, "true_spawn_stage_name", "fresh_spawn_true_spawn_gate")
+        or "fresh_spawn_true_spawn_gate"
+    )
+    appended_stage: dict[str, object] = {
+        "index": next_index,
+        "name": stage_name,
+        "reset_start": {},
+        "note": (
+            "Normal episode start used to keep bottleneck training tied to the "
+            "true-spawn promotion gate. This stage has no snapshot, warmup, or "
+            "scripted reset override."
+        ),
+        "validated": True,
+        "requires_progressed_state": False,
+        "reset_mode": "episode",
+        "evidence": {
+            "true_spawn_promotion_stage": True,
+            "reset_source_required": "episode",
+            "snapshot_allowed": False,
+            "forced_skill_allowed": False,
+        },
+    }
+    updated = dict(curriculum)
+    updated["stages"] = [
+        *(dict(stage) if isinstance(stage, dict) else stage for stage in stages),
+        appended_stage,
+    ]
+    updated["includes_true_spawn_stage"] = True
+    updated["true_spawn_stage_name"] = stage_name
+    return updated
 
 
 def _reward_config_from_args(args: argparse.Namespace) -> dict[str, object]:
@@ -2306,6 +2352,19 @@ def main() -> None:
             "When stage mixing is enabled, cap each reset episode to this many Doom "
             "tics so short rollouts can include multiple stages. 0 uses --max-steps."
         ),
+    )
+    parser.add_argument(
+        "--include-true-spawn-stage",
+        action="store_true",
+        help=(
+            "Append a normal episode-start stage to the active curriculum. Useful "
+            "for mixing restored anchors with the true-spawn promotion surface."
+        ),
+    )
+    parser.add_argument(
+        "--true-spawn-stage-name",
+        default="fresh_spawn_true_spawn_gate",
+        help="Name for the appended true-spawn stage.",
     )
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("agent_models/ppo"))
     parser.add_argument("--buffer-dir", type=Path, default=Path("trajectories/ppo"))

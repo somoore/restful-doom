@@ -9,6 +9,7 @@ from restfuldoom_agent.env import EnvStep
 from restfuldoom_agent.brain import AgentMemory, _memory_ppo_checkpoint_paths
 from restfuldoom_agent.ppo_agent import (
     _annotate_buffer_curriculum,
+    _append_true_spawn_stage,
     _load_behavior_clone_samples,
     _checkpoint_selection_score,
     _checkpoint_resume_score,
@@ -1084,6 +1085,54 @@ def test_snapshot_curriculum_manifest_loads_progressed_stages(tmp_path):
     assert stage["requires_progressed_state"] is True
     assert stage["snapshot"]["id"] == "snap-1"
     assert stage["evidence"]["snapshot_backed"] is True
+
+
+def test_true_spawn_stage_can_be_appended_to_snapshot_curriculum(tmp_path):
+    manifest = tmp_path / "snapshots.json"
+    snapshot = tmp_path / "post-combat.snap"
+    snapshot.write_bytes(b"snapshot")
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": "restfuldoom.snapshot_curriculum.v1",
+                "name": "post-combat",
+                "stages": [
+                    {
+                        "name": "post_combat_snapshot",
+                        "snapshot": {
+                            "id": "post-combat",
+                            "path": str(snapshot),
+                        },
+                        "expected_state": {"kills": 6},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    curriculum = load_snapshot_curriculum(manifest)
+
+    mixed = _append_true_spawn_stage(
+        SimpleNamespace(
+            include_true_spawn_stage=True,
+            true_spawn_stage_name="fresh_spawn_gate",
+        ),
+        curriculum,
+    )
+
+    assert mixed["includes_true_spawn_stage"] is True
+    assert [stage["name"] for stage in mixed["stages"]] == [
+        "post_combat_snapshot",
+        "fresh_spawn_gate",
+    ]
+    snapshot_stage, true_spawn_stage = mixed["stages"]
+    assert snapshot_stage["reset_mode"] == "snapshot"
+    assert snapshot_stage["requires_progressed_state"] is True
+    assert true_spawn_stage["reset_mode"] == "episode"
+    assert true_spawn_stage["reset_start"] == {}
+    assert true_spawn_stage["requires_progressed_state"] is False
+    assert "snapshot" not in true_spawn_stage
+    assert true_spawn_stage["evidence"]["true_spawn_promotion_stage"] is True
 
 
 def test_snapshot_curriculum_manifest_rejects_bad_schema(tmp_path):
