@@ -38,6 +38,7 @@ from restfuldoom_agent.ppo_eval import (
     PolicyEval,
     _aggregate,
     _open_trace,
+    _reset_context_snapshot_verification_failed,
     _write_trace_step,
     decide_promotion,
 )
@@ -1001,6 +1002,21 @@ def test_rollout_summary_separates_inherited_snapshot_kills_from_earned_kills():
     assert summary["max_kill_gain"] == 1
     assert summary["snapshot_kill_delta"] == 1
     assert summary["snapshot_max_kill_gain"] == 1
+
+
+def test_eval_detects_current_snapshot_restore_verification_failure_key():
+    reset_context = {
+        "schema": "restfuldoom.reset_context.v1",
+        "source": "snapshot_restore",
+        "restored_state_verification": {
+            "schema": "restfuldoom.snapshot_restored_state_verification.v1",
+            "enabled": True,
+            "valid": False,
+            "mismatches": [{"field": "level_time", "expected": 500, "actual": 264}],
+        },
+    }
+
+    assert _reset_context_snapshot_verification_failed(reset_context) is True
 
 
 def test_rollout_summary_counts_route_outcomes():

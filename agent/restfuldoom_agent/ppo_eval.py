@@ -486,11 +486,15 @@ def _reset_context_snapshot_verification_failed(reset_context: Any) -> bool:
         return False
     verification = reset_context.get("verification")
     if not isinstance(verification, dict):
+        verification = reset_context.get("restored_state_verification")
+    if not isinstance(verification, dict):
         verification = reset_context.get("snapshot_verification")
     if not isinstance(verification, dict):
         verification = reset_context.get("snapshot_restored_state_verification")
     if not isinstance(verification, dict):
         return False
+    if "valid" in verification:
+        return not bool(verification.get("valid"))
     if "ok" in verification:
         return not bool(verification.get("ok"))
     if "verified" in verification:
