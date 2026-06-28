@@ -913,6 +913,29 @@ def test_exit_switch_decisions_do_not_trigger_stuck_recovery():
     assert "turn_to_exit_switch" in _NON_LOCOMOTION_SKILLS
 
 
+def test_unstick_turn_does_not_reset_recovery_phase():
+    controller = SkillController()
+    policy = controller.policy
+    initial = extract_features(_state(tick=10), controller.memory, controller.params)
+
+    assert not policy._is_stuck(initial)
+
+    stuck_features = extract_features(_state(tick=30), controller.memory, controller.params)
+    assert policy._is_stuck(stuck_features)
+    _action, decision = policy._recover_from_stuck(stuck_features)
+
+    assert decision["skill"] == "unstick_turn"
+    assert decision["stuck_phase"] == 2
+
+    policy.last_decision = decision
+    next_features = extract_features(_state(tick=46), controller.memory, controller.params)
+
+    assert policy._is_stuck(next_features)
+    assert policy._last_progress_tick == 10
+    _next_action, next_decision = policy._recover_from_stuck(next_features)
+    assert next_decision["stuck_phase"] == 4
+
+
 def test_progression_line_attempts_do_not_blacklist_route_target():
     controller = SkillController()
     controller.policy._start_kills = 0

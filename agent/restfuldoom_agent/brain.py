@@ -123,7 +123,6 @@ _NON_LOCOMOTION_SKILLS = {
     "strafe_cooldown",
     "turn_from_block",
     "turn_to_exit_switch",
-    "unstick_turn",
     "use_ahead",
     "use_blocking_line",
 }
