@@ -3122,7 +3122,9 @@ def export_training_job(
     if skill_model_path is not None and skill_model_path.exists():
         model_checkpoints.append(skill_model_path)
     ppo_checkpoints = _memory_ppo_checkpoint_paths(memory)
+    ppo_rollout_buffers = _memory_ppo_buffer_paths(memory)
     snapshot_artifacts = _memory_snapshot_artifacts(memory)
+    unbundled_snapshot_slots = _memory_unbundled_snapshot_slots(memory)
     ppo_policy = memory.data.get("ppo_policy")
     snapshot_curriculum = (
         ppo_policy.get("curriculum", {}).get("snapshot_curriculum", {})
@@ -3149,9 +3151,33 @@ def export_training_job(
         "model_checkpoints": [
             f"agent_models/{path.name}" for path in model_checkpoints
         ],
+        "model_checkpoint_artifacts": [
+            {
+                "source_path": str(path),
+                "bundle_path": f"agent_models/{path.name}",
+            }
+            for path in model_checkpoints
+        ],
         "ppo_policy": memory.data.get("ppo_policy"),
         "ppo_checkpoints": [
             f"agent_models/ppo/{path.name}" for path in ppo_checkpoints
+        ],
+        "ppo_checkpoint_artifacts": [
+            {
+                "source_path": str(path),
+                "bundle_path": f"agent_models/ppo/{path.name}",
+            }
+            for path in ppo_checkpoints
+        ],
+        "ppo_rollout_buffers": [
+            f"trajectories/ppo/{path.name}" for path in ppo_rollout_buffers
+        ],
+        "ppo_rollout_buffer_artifacts": [
+            {
+                "source_path": str(path),
+                "bundle_path": f"trajectories/ppo/{path.name}",
+            }
+            for path in ppo_rollout_buffers
         ],
         "observation_schema": OBSERVATION_SCHEMA,
         "action_schema": ACTION_SCHEMA,
@@ -3167,11 +3193,19 @@ def export_training_job(
             }
             for path in snapshot_artifacts
         ],
+        "unbundled_snapshot_slots": unbundled_snapshot_slots,
         "eval_history": memory.data.get("ppo_policy", {}).get("eval_history", [])
         if isinstance(memory.data.get("ppo_policy"), dict)
         else [],
         "successes": memory.data.get("successes", []),
         "trajectories": [f"trajectories/{path.name}" for path in trajectory_paths],
+        "trajectory_artifacts": [
+            {
+                "source_path": str(path),
+                "bundle_path": f"trajectories/{path.name}",
+            }
+            for path in trajectory_paths
+        ],
     }
 
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -3184,6 +3218,8 @@ def export_training_job(
             archive.add(checkpoint, arcname=f"agent_models/{checkpoint.name}")
         for checkpoint in ppo_checkpoints:
             archive.add(checkpoint, arcname=f"agent_models/ppo/{checkpoint.name}")
+        for buffer in ppo_rollout_buffers:
+            archive.add(buffer, arcname=f"trajectories/ppo/{buffer.name}")
         for snapshot in snapshot_artifacts:
             archive.add(snapshot, arcname=f"snapshots/{snapshot.name}")
         for trajectory in trajectory_paths:
@@ -3196,7 +3232,9 @@ def export_training_job(
         "trajectory_count": len(manifest["trajectories"]),
         "model_checkpoint_count": len(manifest["model_checkpoints"]),
         "ppo_checkpoint_count": len(manifest["ppo_checkpoints"]),
+        "ppo_rollout_buffer_count": len(manifest["ppo_rollout_buffers"]),
         "snapshot_artifact_count": len(manifest["snapshot_artifacts"]),
+        "unbundled_snapshot_slot_count": len(manifest["unbundled_snapshot_slots"]),
         "success_count": len(manifest["successes"]),
         "best_score": manifest["best_score"],
         "best_run_id": manifest["best_run_id"],
@@ -3254,14 +3292,37 @@ def import_training_job(
             if member.name == "manifest.json":
                 continue
             _safe_extract_member(archive, member, dest)
+    memory_path = dest / manifest["memory_path"]
+    path_rewrite_count = 0
+    if memory_path.exists():
+        memory = AgentMemory.load(memory_path)
+        path_rewrite_count = _rewrite_imported_training_job_memory_paths(
+            memory.data,
+            manifest=manifest,
+            destination=dest,
+        )
+        memory.data["training_job_import"] = {
+            "schema": "restfuldoom.training_job_import.v1",
+            "imported_at": _iso_now(),
+            "bundle_path": str(bundle),
+            "destination": str(dest),
+            "path_rewrite_count": path_rewrite_count,
+        }
+        memory.data["updated_at"] = _iso_now()
+        memory.save()
     return {
         "schema": manifest["schema"],
         "destination": str(dest),
-        "memory_path": str(dest / manifest["memory_path"]),
+        "memory_path": str(memory_path),
         "trajectory_count": len(manifest.get("trajectories", [])),
         "model_checkpoint_count": len(manifest.get("model_checkpoints", [])),
         "ppo_checkpoint_count": len(manifest.get("ppo_checkpoints", [])),
+        "ppo_rollout_buffer_count": len(manifest.get("ppo_rollout_buffers", [])),
         "snapshot_artifact_count": len(manifest.get("snapshot_artifacts", [])),
+        "unbundled_snapshot_slot_count": len(
+            manifest.get("unbundled_snapshot_slots", [])
+        ),
+        "path_rewrite_count": path_rewrite_count,
         "best_score": manifest.get("best_score"),
         "best_run_id": manifest.get("best_run_id"),
         "success_count": len(manifest.get("successes", [])),
@@ -3317,6 +3378,29 @@ def _memory_ppo_checkpoint_paths(memory: AgentMemory) -> list[Path]:
     return paths
 
 
+def _memory_ppo_buffer_paths(memory: AgentMemory) -> list[Path]:
+    paths: list[Path] = []
+    seen: set[Path] = set()
+    entries: list[Any] = [
+        memory.data.get("ppo_policy"),
+        memory.data.get("ppo_best_checkpoint"),
+    ]
+    checkpoints = memory.data.get("ppo_checkpoints", [])
+    if isinstance(checkpoints, list):
+        entries.extend(checkpoints)
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        buffer = entry.get("buffer_path")
+        if not isinstance(buffer, str) or not buffer:
+            continue
+        path = Path(buffer)
+        if path.exists() and path not in seen:
+            paths.append(path)
+            seen.add(path)
+    return paths
+
+
 def _memory_snapshot_artifacts(memory: AgentMemory) -> list[Path]:
     """Returns local snapshot artifact files referenced by PPO curriculum metadata."""
     paths: list[Path] = []
@@ -3334,6 +3418,161 @@ def _memory_snapshot_artifacts(memory: AgentMemory) -> list[Path]:
             _collect_snapshot_paths(entry.get("curriculum"), paths, seen)
             _collect_snapshot_paths(entry.get("curriculum_stage"), paths, seen)
     return paths
+
+
+def _memory_unbundled_snapshot_slots(memory: AgentMemory) -> list[dict[str, Any]]:
+    slots: list[dict[str, Any]] = []
+    seen: set[tuple[str, int, str]] = set()
+    policy = memory.data.get("ppo_policy")
+    if isinstance(policy, dict):
+        _collect_unbundled_snapshot_slots(policy.get("curriculum"), slots, seen)
+        _collect_unbundled_snapshot_slots(policy.get("curriculum_stage"), slots, seen)
+    best = memory.data.get("ppo_best_checkpoint")
+    if isinstance(best, dict):
+        _collect_unbundled_snapshot_slots(best.get("curriculum"), slots, seen)
+        _collect_unbundled_snapshot_slots(best.get("curriculum_stage"), slots, seen)
+    for entry in memory.data.get("ppo_checkpoints", []):
+        if isinstance(entry, dict):
+            _collect_unbundled_snapshot_slots(entry.get("curriculum"), slots, seen)
+            _collect_unbundled_snapshot_slots(
+                entry.get("curriculum_stage"), slots, seen
+            )
+    return slots
+
+
+def _collect_unbundled_snapshot_slots(
+    value: object,
+    slots: list[dict[str, Any]],
+    seen: set[tuple[str, int, str]],
+) -> None:
+    if isinstance(value, dict):
+        snapshot = value.get("snapshot")
+        if isinstance(snapshot, dict):
+            slot = _native_snapshot_slot(snapshot)
+            raw_path = snapshot.get("path")
+            path_exists = isinstance(raw_path, str) and Path(raw_path).exists()
+            if slot is not None and not path_exists:
+                stage_name = str(value.get("name") or snapshot.get("id") or "")
+                ref = str(snapshot.get("ref") or f"save_slot:{slot}")
+                key = (stage_name, slot, ref)
+                if key not in seen:
+                    slots.append(
+                        {
+                            "schema": "restfuldoom.unbundled_snapshot_slot.v1",
+                            "stage": stage_name or None,
+                            "snapshot_id": snapshot.get("id"),
+                            "slot": slot,
+                            "ref": ref,
+                            "reason": (
+                                "native Doom save slots live in the game "
+                                "server save directory and are not bundled"
+                            ),
+                        }
+                    )
+                    seen.add(key)
+        for key in ("stages",):
+            children = value.get(key)
+            if isinstance(children, list):
+                for child in children:
+                    _collect_unbundled_snapshot_slots(child, slots, seen)
+
+
+def _native_snapshot_slot(snapshot: dict[str, Any]) -> int | None:
+    value = snapshot.get("slot")
+    if value is None and isinstance(snapshot.get("ref"), str):
+        ref = snapshot["ref"]
+        if ref.startswith("save_slot:"):
+            value = ref.split(":", 1)[1]
+    try:
+        slot = int(value)
+    except (TypeError, ValueError):
+        return None
+    return slot if 0 <= slot <= 9 else None
+
+
+def _rewrite_imported_training_job_memory_paths(
+    memory_data: dict[str, Any],
+    *,
+    manifest: dict[str, Any],
+    destination: Path,
+) -> int:
+    path_map: dict[str, str] = {}
+    bundle_paths: list[str] = []
+
+    def add_bundle_path(bundle_path: object) -> None:
+        if isinstance(bundle_path, str) and bundle_path:
+            bundle_paths.append(bundle_path)
+
+    for bundle_path in manifest.get("model_checkpoints", []):
+        add_bundle_path(bundle_path)
+    for bundle_path in manifest.get("ppo_checkpoints", []):
+        add_bundle_path(bundle_path)
+    for bundle_path in manifest.get("ppo_rollout_buffers", []):
+        add_bundle_path(bundle_path)
+    for bundle_path in manifest.get("trajectories", []):
+        add_bundle_path(bundle_path)
+    for artifact_group in (
+        "model_checkpoint_artifacts",
+        "ppo_checkpoint_artifacts",
+        "ppo_rollout_buffer_artifacts",
+        "trajectory_artifacts",
+        "snapshot_artifacts",
+    ):
+        for artifact in manifest.get(artifact_group, []):
+            if not isinstance(artifact, dict):
+                continue
+            source = artifact.get("source_path")
+            bundle_path = artifact.get("bundle_path")
+            if isinstance(source, str) and isinstance(bundle_path, str):
+                path_map[source] = str(destination / bundle_path)
+            add_bundle_path(bundle_path)
+
+    unique_by_name: dict[str, str | None] = {}
+    for bundle_path in bundle_paths:
+        name = Path(bundle_path).name
+        rewritten = str(destination / bundle_path)
+        if name in unique_by_name and unique_by_name[name] != rewritten:
+            unique_by_name[name] = None
+        else:
+            unique_by_name[name] = rewritten
+
+    def rewrite_value(value: Any) -> tuple[Any, int]:
+        if isinstance(value, dict):
+            total = 0
+            updated: dict[str, Any] = {}
+            for key, child in value.items():
+                if isinstance(child, str) and key in {
+                    "checkpoint_path",
+                    "buffer_path",
+                    "trajectory_jsonl",
+                    "snapshot_path",
+                    "path",
+                }:
+                    rewritten = path_map.get(child)
+                    if rewritten is None:
+                        rewritten = unique_by_name.get(Path(child).name)
+                    if rewritten is not None and rewritten != child:
+                        updated[key] = rewritten
+                        total += 1
+                        continue
+                updated_child, child_count = rewrite_value(child)
+                updated[key] = updated_child
+                total += child_count
+            return updated, total
+        if isinstance(value, list):
+            total = 0
+            updated_list = []
+            for child in value:
+                updated_child, child_count = rewrite_value(child)
+                updated_list.append(updated_child)
+                total += child_count
+            return updated_list, total
+        return value, 0
+
+    rewritten, count = rewrite_value(memory_data)
+    memory_data.clear()
+    memory_data.update(rewritten)
+    return count
 
 
 def _collect_snapshot_paths(

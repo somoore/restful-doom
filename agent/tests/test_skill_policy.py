@@ -6,6 +6,7 @@ from restfuldoom_agent.brain import (
     BrainPolicy,
     BrainPolicyParams,
     export_training_job,
+    import_training_job,
     train_skill_policy_from_memory,
 )
 from restfuldoom_agent.skill_policy import (
@@ -99,12 +100,27 @@ def test_export_training_job_includes_ppo_checkpoint(tmp_path):
     checkpoint = tmp_path / "agent_models" / "ppo" / "ppo.pt"
     checkpoint.parent.mkdir(parents=True)
     checkpoint.write_bytes(b"fake torch checkpoint")
+    buffer = tmp_path / "trajectories" / "ppo" / "ppo-buffer.jsonl"
+    buffer.parent.mkdir(parents=True)
+    buffer.write_text('{"schema":"restfuldoom.ppo_rollout.v1"}\n')
+    trajectory = tmp_path / "trajectories" / "brain-success.jsonl"
+    trajectory.parent.mkdir(exist_ok=True)
+    trajectory.write_text('{"schema":"restfuldoom.trajectory.v1"}\n')
     snapshot = tmp_path / "snapshots" / "first-contact.snap"
     snapshot.parent.mkdir()
     snapshot.write_bytes(b"fake snapshot")
+    memory.data["episodes"].append(
+        {
+            "trajectory_jsonl": str(trajectory),
+            "success": True,
+            "level_completed": True,
+            "kill_delta": 1,
+        }
+    )
     memory.data["ppo_policy"] = {
         "schema": "restfuldoom.ppo_policy.v1",
         "checkpoint_path": str(checkpoint),
+        "buffer_path": str(buffer),
         "reward_config": {"goal_preset": "combat"},
         "eval_history": [{"policy_id": "ppo", "mean_kills": 1.0}],
         "rollout_summary": {"snapshot_restore_count": 1},
@@ -141,8 +157,23 @@ def test_export_training_job_includes_ppo_checkpoint(tmp_path):
         manifest = json.loads(archive.extractfile("manifest.json").read().decode())
 
     assert "agent_models/ppo/ppo.pt" in names
+    assert "trajectories/ppo/ppo-buffer.jsonl" in names
+    assert "trajectories/brain-success.jsonl" in names
     assert "snapshots/first-contact.snap" in names
     assert manifest["ppo_checkpoints"] == ["agent_models/ppo/ppo.pt"]
+    assert manifest["ppo_checkpoint_artifacts"] == [
+        {
+            "source_path": str(checkpoint),
+            "bundle_path": "agent_models/ppo/ppo.pt",
+        }
+    ]
+    assert manifest["ppo_rollout_buffers"] == ["trajectories/ppo/ppo-buffer.jsonl"]
+    assert manifest["ppo_rollout_buffer_artifacts"] == [
+        {
+            "source_path": str(buffer),
+            "bundle_path": "trajectories/ppo/ppo-buffer.jsonl",
+        }
+    ]
     assert manifest["ppo_policy"]["checkpoint_path"] == str(checkpoint)
     assert manifest["observation_schema"]["schema"] == "restfuldoom.observation.v1"
     assert manifest["action_schema"]["schema"] == "restfuldoom.skill_action.v1"
@@ -150,10 +181,95 @@ def test_export_training_job_includes_ppo_checkpoint(tmp_path):
     assert manifest["eval_history"] == [{"policy_id": "ppo", "mean_kills": 1.0}]
     assert manifest["snapshot_curriculum"]["name"] == "progressed-e1m1"
     assert manifest["snapshot_restore_context"]["rollout_summary"]["snapshot_restore_count"] == 1
+    assert manifest["trajectory_artifacts"] == [
+        {
+            "source_path": str(trajectory),
+            "bundle_path": "trajectories/brain-success.jsonl",
+        }
+    ]
     assert manifest["snapshot_artifacts"] == [
         {
             "source_path": str(snapshot),
             "bundle_path": "snapshots/first-contact.snap",
+        }
+    ]
+
+    import_summary = import_training_job(bundle, destination=tmp_path / "imported")
+    imported_memory = json.loads(
+        (tmp_path / "imported" / "agent_memory" / "e1m1.json").read_text()
+    )
+
+    assert import_summary["ppo_rollout_buffer_count"] == 1
+    assert import_summary["path_rewrite_count"] >= 4
+    assert imported_memory["ppo_policy"]["checkpoint_path"] == str(
+        tmp_path / "imported" / "agent_models" / "ppo" / "ppo.pt"
+    )
+    assert imported_memory["ppo_policy"]["buffer_path"] == str(
+        tmp_path / "imported" / "trajectories" / "ppo" / "ppo-buffer.jsonl"
+    )
+    assert imported_memory["episodes"][0]["trajectory_jsonl"] == str(
+        tmp_path / "imported" / "trajectories" / "brain-success.jsonl"
+    )
+    imported_snapshot = imported_memory["ppo_policy"]["curriculum"]["stages"][0][
+        "snapshot"
+    ]
+    assert imported_snapshot["path"] == str(
+        tmp_path / "imported" / "snapshots" / "first-contact.snap"
+    )
+    assert imported_memory["training_job_import"]["schema"] == (
+        "restfuldoom.training_job_import.v1"
+    )
+
+
+def test_export_training_job_flags_unbundled_native_snapshot_slots(tmp_path):
+    memory_path = tmp_path / "agent_memory" / "e1m1.json"
+    memory = AgentMemory.load(memory_path)
+    memory.data["ppo_policy"] = {
+        "schema": "restfuldoom.ppo_policy.v1",
+        "curriculum": {
+            "schema": "restfuldoom.ppo_curriculum.v1",
+            "stages": [
+                {
+                    "name": "first_visible_native_slot",
+                    "reset_mode": "snapshot",
+                    "snapshot": {
+                        "id": "slot-3",
+                        "slot": 3,
+                        "ref": "save_slot:3",
+                    },
+                }
+            ],
+        },
+    }
+    memory.save()
+
+    bundle = tmp_path / "training.tar.gz"
+    export_summary = export_training_job(
+        bundle,
+        memory_path=memory_path,
+        notes_path=tmp_path / "missing-notes.md",
+    )
+
+    import tarfile
+
+    with tarfile.open(bundle, "r:gz") as archive:
+        names = {member.name for member in archive.getmembers()}
+        manifest = json.loads(archive.extractfile("manifest.json").read().decode())
+
+    assert export_summary["unbundled_snapshot_slot_count"] == 1
+    assert "snapshots/agentdoom3.dsg" not in names
+    assert manifest["snapshot_artifacts"] == []
+    assert manifest["unbundled_snapshot_slots"] == [
+        {
+            "schema": "restfuldoom.unbundled_snapshot_slot.v1",
+            "stage": "first_visible_native_slot",
+            "snapshot_id": "slot-3",
+            "slot": 3,
+            "ref": "save_slot:3",
+            "reason": (
+                "native Doom save slots live in the game server save directory "
+                "and are not bundled"
+            ),
         }
     ]
 

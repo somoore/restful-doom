@@ -120,7 +120,7 @@ def test_snapshot_validation_checks_required_artifacts_and_digests(tmp_path):
     assert "digest mismatch" in validation["errors"][0]
 
 
-def test_snapshot_validation_allows_native_slots_when_requiring_artifacts(tmp_path):
+def test_snapshot_validation_flags_native_slots_when_requiring_artifacts(tmp_path):
     manifest = tmp_path / "manifest.json"
     manifest.write_text(
         json.dumps(
@@ -145,9 +145,10 @@ def test_snapshot_validation_allows_native_slots_when_requiring_artifacts(tmp_pa
 
     validation = validate_snapshot_curriculum(manifest, require_artifacts=True)
 
-    assert validation["valid"] is True
+    assert validation["valid"] is False
     assert validation["stages"][0]["snapshot_slot"] == 3
     assert validation["missing_artifacts"] == []
+    assert "portable only on the originating Doom server" in validation["errors"][0]
 
 
 def test_snapshot_builder_capture_command_populates_digest(tmp_path):

@@ -260,9 +260,14 @@ The bundle uses schema `restfuldoom.training_job.v1` and includes a manifest,
 memory, promoted parameters, `agent-notes.md`, learned model checkpoints, and
 referenced JSONL trajectories. When PPO checkpoints exist in memory, the same
 bundle also includes `agent_models/ppo/*.pt`, optimizer state, observation
-schema, action schema, reward config, eval history, and the best PPO resume
-candidate recorded in `ppo_best_checkpoint`. A cloud worker can import it and
-continue training against a new gRPC endpoint:
+schema, action schema, reward config, eval history, referenced PPO rollout
+buffers, and the best PPO resume candidate recorded in `ppo_best_checkpoint`.
+Import rewrites extracted memory paths to the destination-local checkpoints,
+buffers, trajectories, and snapshot artifacts so a cloud worker can continue
+training against a new gRPC endpoint. Native `save_slot:N` curricula are
+reported as unbundled in the manifest unless their underlying savegame bytes
+are exported separately; those slots are portable only on the originating Doom
+server for now:
 
 ```
 PYTHONPATH=agent python -m restfuldoom_agent.brain_agent \

@@ -245,7 +245,17 @@ def _validate_stage(
                 stage_report["errors"].append(message)
             else:
                 stage_report["warnings"].append(message)
-    elif require_artifacts and stage_report["snapshot_slot"] is None:
+    elif stage_report["snapshot_slot"] is not None:
+        message = (
+            f"stage {index} uses native save slot {stage_report['snapshot_slot']} "
+            "without a bundled snapshot.path; it is portable only on the "
+            "originating Doom server"
+        )
+        if require_artifacts:
+            stage_report["errors"].append(message)
+        else:
+            stage_report["warnings"].append(message)
+    elif require_artifacts:
         stage_report["errors"].append(
             f"stage {index} has no local snapshot.path to validate"
         )
