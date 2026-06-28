@@ -820,6 +820,63 @@ def test_rollout_summary_splits_exit_route_outcomes():
     assert summary["exit_route_progress_units"] == 9.0
 
 
+def test_rollout_summary_counts_exit_ready_handoff_choices():
+    buffer = SimpleNamespace(
+        records=[
+            SimpleNamespace(
+                reward=1.25,
+                done=False,
+                action=7,
+                action_mask=[False, False, False, False, True, False, False, True],
+                info={
+                    "skill": "press_exit",
+                    "exit_ready_press_available": True,
+                    "exit_ready_switch_attempt": True,
+                    "exit_ready_action_reward": 1.25,
+                    "transition": {},
+                    "state": {"health": 100, "kills": 6},
+                },
+            ),
+            SimpleNamespace(
+                reward=-0.6,
+                done=False,
+                action=4,
+                action_mask=[False, False, False, False, True, False, False, True],
+                info={
+                    "skill": "route_progression",
+                    "exit_ready_press_available": True,
+                    "exit_ready_switch_attempt": True,
+                    "exit_ready_action_reward": -0.6,
+                    "transition": {},
+                    "state": {"health": 100, "kills": 6},
+                },
+            ),
+            SimpleNamespace(
+                reward=0.0,
+                done=False,
+                action=4,
+                action_mask=[False, False, False, False, True, False, False, False],
+                info={
+                    "skill": "route_progression",
+                    "exit_ready_press_available": False,
+                    "exit_ready_switch_attempt": False,
+                    "exit_ready_action_reward": 0.0,
+                    "transition": {},
+                    "state": {"health": 100, "kills": 6},
+                },
+            ),
+        ]
+    )
+
+    summary = _summarize_buffer(buffer)
+
+    assert summary["exit_ready_press_available_steps"] == 2
+    assert summary["exit_ready_press_selected_steps"] == 1
+    assert summary["exit_ready_route_selected_steps"] == 1
+    assert summary["exit_ready_switch_attempt_steps"] == 2
+    assert summary["exit_ready_action_reward"] == pytest.approx(0.65)
+
+
 def test_reset_start_from_trajectory_row(tmp_path):
     trajectory = tmp_path / "combat.jsonl"
     trajectory.write_text(

@@ -1922,6 +1922,78 @@ def test_doom_agent_env_penalizes_route_progression_before_first_shootable():
     assert step.reward == pytest.approx(-0.4)
 
 
+def test_doom_agent_env_shapes_exit_ready_handoff_without_forcing_skill():
+    def exit_ready_state(tick):
+        state = _state(tick=tick, kills=1)
+        exit_line = SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=80 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=80 * 65536, y_fp=32 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=80 * 65536, y_fp=-32 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=80 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=80 * 65536,
+            nearest_distance_fp=80 * 65536,
+        )
+        state.navigation.use_lines.append(exit_line)
+        state.navigation.route_waypoint = SimpleNamespace(
+            line=exit_line,
+            priority=0,
+            exit=True,
+            walk_trigger=False,
+        )
+        return state
+
+    async def run(action_name):
+        first = exit_ready_state(1)
+        second = exit_ready_state(2)
+        client = _DurationAwareFakeClient([first, second])
+        controller = SkillController()
+        controller.policy._start_kills = 0
+        env = DoomAgentEnv(
+            DoomEnvConfig(
+                max_steps=10,
+                goal_preset="custom",
+                max_action_tics=1,
+                route_progress_reward=0.0,
+                route_reached_reward=0.0,
+                route_failure_penalty=0.0,
+                exit_route_progress_reward=0.0,
+                exit_route_reached_reward=0.0,
+                exit_route_failure_penalty=0.0,
+                exit_ready_press_reward=1.25,
+                exit_ready_route_penalty=0.6,
+            ),
+            client=client,
+            controller=controller,
+        )
+        await env.reset(seed=5)
+        controller.policy._start_kills = 0
+        mask = dict(zip(SKILL_ACTIONS, env.action_mask()))
+        step = await env.step(SKILL_ACTIONS.index(action_name))
+        await env.close()
+        return mask, step
+
+    route_mask, route_step = asyncio.run(run("route_progression"))
+    press_mask, press_step = asyncio.run(run("press_exit"))
+
+    assert route_mask["route_progression"]
+    assert route_mask["press_exit"]
+    assert press_mask["route_progression"]
+    assert press_mask["press_exit"]
+    assert route_step.info["skill"] == "route_progression"
+    assert route_step.info["exit_ready_press_available"] is True
+    assert route_step.info["exit_ready_switch_attempt"] is True
+    assert route_step.info["exit_ready_action_reward"] == pytest.approx(-0.6)
+    assert route_step.reward == pytest.approx(-0.6)
+    assert press_step.info["skill"] == "press_exit"
+    assert press_step.info["exit_ready_press_available"] is True
+    assert press_step.info["exit_ready_switch_attempt"] is True
+    assert press_step.info["exit_ready_action_reward"] == pytest.approx(1.25)
+    assert press_step.reward == pytest.approx(1.25)
+
+
 def test_doom_agent_env_records_route_outcome_and_reward():
     first = _state(tick=1, route=True, x_units=0)
     second = _state(tick=2, route=True, x_units=128)

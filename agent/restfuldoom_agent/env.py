@@ -55,6 +55,13 @@ def _line_is_exit(line: dict[str, Any] | None) -> bool:
     return int(line.get("special", 0)) in EXIT_LINE_SPECIALS
 
 
+def _exit_ready_switch_attempt(decision: dict[str, Any] | None) -> bool:
+    """Returns whether a low-level decision is an actual exit switch use."""
+    if not isinstance(decision, dict):
+        return False
+    return str(decision.get("skill", "")) in {"push_exit_switch", "press_exit_switch"}
+
+
 @dataclass(frozen=True)
 class DoomEnvConfig:
     """Configuration for one resettable Doom training environment."""
@@ -100,6 +107,8 @@ class DoomEnvConfig:
     exit_route_progress_reward: float = 0.01
     exit_route_reached_reward: float = 0.5
     exit_route_failure_penalty: float = 0.05
+    exit_ready_press_reward: float = 0.0
+    exit_ready_route_penalty: float = 0.0
     first_visible_bonus: float = 0.0
     first_shootable_bonus: float = 0.0
     visible_contact_progress_reward: float = 0.0
@@ -1544,6 +1553,8 @@ class DoomAgentEnv:
         visible_contact_distance_delta = 0.0
         visible_contact_progress_reward = 0.0
         visible_contact_loss_penalty = 0.0
+        exit_ready_press_available = self._press_exit_available(previous)
+        exit_ready_action_reward = 0.0
         transition_summaries: list[dict[str, Any]] = []
         for _ in range(action_tics):
             tick_previous = current
@@ -1590,8 +1601,13 @@ class DoomAgentEnv:
             route_outcome,
             had_shootable_target=had_shootable_target,
         )
+        exit_ready_action_reward = self._exit_ready_action_reward(
+            skill,
+            decision=decision,
+            press_exit_available=exit_ready_press_available,
+        )
         route_action_reward = self._route_action_reward(route_outcome) + pre_shootable_route_penalty
-        action_reward = combat_action_reward + route_action_reward
+        action_reward = combat_action_reward + route_action_reward + exit_ready_action_reward
         total_reward += action_reward
         self._current_state = current
         if hasattr(self.controller, "record_action_history"):
@@ -1631,6 +1647,9 @@ class DoomAgentEnv:
             "visible_contact_progress_reward": round(visible_contact_progress_reward, 4),
             "visible_contact_loss_penalty": round(visible_contact_loss_penalty, 4),
             "pre_shootable_route_penalty": round(pre_shootable_route_penalty, 4),
+            "exit_ready_press_available": exit_ready_press_available,
+            "exit_ready_switch_attempt": _exit_ready_switch_attempt(decision),
+            "exit_ready_action_reward": round(exit_ready_action_reward, 4),
             "had_visible_enemy": had_visible_enemy,
             "route_outcome": route_outcome,
             "had_shootable_target": had_shootable_target,
@@ -1853,6 +1872,44 @@ class DoomAgentEnv:
         if had_shootable_target or self._episode_seen_shootable_enemy:
             return 0.0
         return -abs(float(self.config.pre_shootable_route_penalty))
+
+    def _press_exit_available(self, state: Any) -> bool:
+        """Returns whether the pre-action state offers an executable exit press."""
+        if not all(
+            hasattr(self.controller, name)
+            for name in ("memory", "params", "policy")
+        ):
+            return False
+        features = extract_features(
+            state,
+            self.controller.memory,
+            self.controller.params,
+        )
+        policy = self.controller.policy
+        if policy._shootable_enemy(features) is not None:
+            return False
+        local_exit = policy._select_local_exit_line(features)
+        return (
+            local_exit is not None
+            and hasattr(self.controller, "_exit_press_ready")
+            and self.controller._exit_press_ready(features, local_exit)
+        )
+
+    def _exit_ready_action_reward(
+        self,
+        skill: str,
+        *,
+        decision: dict[str, Any],
+        press_exit_available: bool,
+    ) -> float:
+        """Shapes the final handoff without overriding the PPO-selected skill."""
+        if not press_exit_available:
+            return 0.0
+        if skill == "press_exit" and _exit_ready_switch_attempt(decision):
+            return max(0.0, float(self.config.exit_ready_press_reward))
+        if skill == "route_progression":
+            return -abs(float(self.config.exit_ready_route_penalty))
+        return 0.0
 
     async def _ensure_stream(self) -> None:
         await self._ensure_client()

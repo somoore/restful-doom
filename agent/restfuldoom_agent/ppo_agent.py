@@ -275,6 +275,12 @@ async def evaluate(args: argparse.Namespace) -> dict[str, object]:
         exit_route_failure_penalty=float(
             getattr(args, "exit_route_failure_penalty", 0.05)
         ),
+        exit_ready_press_reward=float(
+            getattr(args, "exit_ready_press_reward", 0.0)
+        ),
+        exit_ready_route_penalty=float(
+            getattr(args, "exit_ready_route_penalty", 0.0)
+        ),
         terminate_on_first_visible=args.terminate_on_first_visible,
         terminate_on_first_shootable=args.terminate_on_first_shootable,
         terminate_on_required_kills=bool(
@@ -410,6 +416,12 @@ def _env_config_for_start(
         exit_route_failure_penalty=float(
             getattr(args, "exit_route_failure_penalty", 0.05)
         ),
+        exit_ready_press_reward=float(
+            getattr(args, "exit_ready_press_reward", 0.0)
+        ),
+        exit_ready_route_penalty=float(
+            getattr(args, "exit_ready_route_penalty", 0.0)
+        ),
         terminate_on_first_visible=args.terminate_on_first_visible,
         terminate_on_first_shootable=args.terminate_on_first_shootable,
         terminate_on_required_kills=bool(
@@ -470,6 +482,12 @@ def _reward_config_from_args(args: argparse.Namespace) -> dict[str, object]:
         ),
         "exit_route_failure_penalty": float(
             getattr(args, "exit_route_failure_penalty", 0.05)
+        ),
+        "exit_ready_press_reward": float(
+            getattr(args, "exit_ready_press_reward", 0.0)
+        ),
+        "exit_ready_route_penalty": float(
+            getattr(args, "exit_ready_route_penalty", 0.0)
         ),
         "terminate_on_first_visible": args.terminate_on_first_visible,
         "terminate_on_first_shootable": args.terminate_on_first_shootable,
@@ -1851,6 +1869,31 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
             sum(float(outcome.get("progress_units", 0.0)) for outcome in exit_route_outcomes),
             4,
         ),
+        "exit_ready_press_available_steps": sum(
+            1 for record in records if bool(record.info.get("exit_ready_press_available"))
+        ),
+        "exit_ready_press_selected_steps": sum(
+            1
+            for record in records
+            if bool(record.info.get("exit_ready_press_available"))
+            and record.info.get("skill") == "press_exit"
+        ),
+        "exit_ready_route_selected_steps": sum(
+            1
+            for record in records
+            if bool(record.info.get("exit_ready_press_available"))
+            and record.info.get("skill") == "route_progression"
+        ),
+        "exit_ready_switch_attempt_steps": sum(
+            1
+            for record in records
+            if bool(record.info.get("exit_ready_press_available"))
+            and bool(record.info.get("exit_ready_switch_attempt"))
+        ),
+        "exit_ready_action_reward": round(
+            sum(float(record.info.get("exit_ready_action_reward", 0.0)) for record in records),
+            4,
+        ),
         "contact_context_active_steps": sum(
             1 for context in contact_contexts if context.get("recent_contact_active")
         ),
@@ -2202,6 +2245,8 @@ def main() -> None:
     parser.add_argument("--exit-route-progress-reward", type=float, default=0.01)
     parser.add_argument("--exit-route-reached-reward", type=float, default=0.5)
     parser.add_argument("--exit-route-failure-penalty", type=float, default=0.05)
+    parser.add_argument("--exit-ready-press-reward", type=float, default=0.0)
+    parser.add_argument("--exit-ready-route-penalty", type=float, default=0.0)
     parser.add_argument("--terminate-on-first-visible", action="store_true")
     parser.add_argument("--terminate-on-first-shootable", action="store_true")
     parser.add_argument(
