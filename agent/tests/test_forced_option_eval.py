@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from restfuldoom_agent.forced_option_eval import (
     _forced_summary,
     _selected_stages,
     _skill_action_index,
+    _write_jsonl_record,
 )
 from restfuldoom_agent.ppo_agent import _summarize_buffer
 from restfuldoom_agent.ppo import RolloutBuffer
@@ -116,6 +118,34 @@ def test_forced_option_eval_summarizes_forced_rollout():
     assert summary["first_contact_use_line_close_step"] == 1
     assert summary["stuck_steps"] == 1
     assert _summarize_buffer(buffer)["invalid_action_steps"] == 0
+
+
+def test_forced_option_eval_jsonl_records_include_observations(tmp_path):
+    buffer = RolloutBuffer()
+    buffer.add(
+        obs=[0.1, 0.2],
+        action_mask=[False, True],
+        action=1,
+        reward=2.0,
+        done=False,
+        value=0.0,
+        logprob=0.0,
+        info={"selected_action_allowed": True},
+    )
+    config = ForcedOptionEvalConfig(jsonl_path=tmp_path / "forced.jsonl")
+
+    _write_jsonl_record(
+        config,
+        {"name": "visible_contact_fast", "index": 1},
+        "close_visible_contact",
+        buffer.records[0],
+    )
+
+    row = json.loads(config.jsonl_path.read_text(encoding="utf-8"))
+    assert row["schema"] == "restfuldoom.forced_option_eval_record.v1"
+    assert row["record"]["obs"] == [0.1, 0.2]
+    assert row["record"]["action"] == 1
+    assert row["stage"]["name"] == "visible_contact_fast"
 
 
 def test_forced_option_eval_classifies_close_contact_as_complete_when_fire_allowed():

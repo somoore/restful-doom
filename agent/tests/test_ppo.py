@@ -9,6 +9,7 @@ from restfuldoom_agent.env import EnvStep
 from restfuldoom_agent.brain import AgentMemory, _memory_ppo_checkpoint_paths
 from restfuldoom_agent.ppo_agent import (
     _annotate_buffer_curriculum,
+    _load_behavior_clone_samples,
     _checkpoint_selection_score,
     _checkpoint_resume_score,
     _checkpoint_resume_score_source,
@@ -891,6 +892,67 @@ def test_named_curriculum_selects_contact_to_combat_stages():
     assert visible["reset_start"]["face_nearest_enemy"] is True
     assert combat["name"] == "combat_start"
     assert combat["evidence"]["shootable_target_on_reset"] is True
+
+
+def test_named_curriculum_selects_true_spawn_contact_bridge_stages():
+    curriculum = build_curriculum(
+        name="e1m1-true-spawn-contact-bridge",
+        manual_reset_start={},
+        mode="round_robin",
+        start_index=0,
+        seed=7,
+    )
+
+    spawn = stage_for_update(curriculum, 0)
+    visible = stage_for_update(curriculum, 1)
+    combat = stage_for_update(curriculum, 4)
+
+    assert curriculum["schema"] == "restfuldoom.ppo_curriculum.v1"
+    assert spawn["name"] == "fresh_spawn"
+    assert spawn["reset_start"] == {}
+    assert spawn["evidence"]["true_spawn_gate_bottleneck"] == "first_contact"
+    assert spawn["evidence"]["latest_true_spawn_gate"]["first_shootable_contacts"] == 0
+    assert visible["name"] == "visible_contact_fast"
+    assert visible["evidence"]["visible_enemy_on_reset"] is True
+    assert visible["evidence"]["shootable_target_on_reset"] is False
+    assert combat["name"] == "combat_start"
+    assert combat["evidence"]["shootable_target_on_reset"] is True
+
+
+def test_behavior_clone_loader_accepts_forced_option_records(tmp_path):
+    trajectory = tmp_path / "forced.jsonl"
+    trajectory.write_text(
+        json.dumps(
+            {
+                "schema": "restfuldoom.forced_option_eval_record.v1",
+                "forced_skill": "close_visible_contact",
+                "record": {
+                    "obs": [0.25 for _ in OBSERVATION_SCHEMA["feature_names"]],
+                    "action": 8,
+                    "action_mask": [False, False, False, False, False, False, False, False, True],
+                    "reward": 1.0,
+                    "done": False,
+                    "info": {
+                        "selected_action_allowed": True,
+                        "selected_forced_skill": "close_visible_contact",
+                    },
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    samples, summary = _load_behavior_clone_samples(
+        SimpleNamespace(bc_trajectory=[trajectory], bc_max_samples=16)
+    )
+
+    assert len(samples) == 1
+    assert samples[0][1] == 8
+    assert len(samples[0][0]) == len(OBSERVATION_SCHEMA["feature_names"])
+    assert summary["samples"] == 1
+    assert summary["expert_skill_counts"] == {"close_visible_contact": 1}
+    assert summary["ppo_skill_counts"] == {"close_visible_contact": 1}
 
 
 def test_curriculum_fixed_mode_repeats_start_index_stage():

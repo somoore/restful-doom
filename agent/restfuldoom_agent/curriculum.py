@@ -181,9 +181,65 @@ E1M1_CONTACT_TO_COMBAT_STAGES: list[CurriculumStage] = [
     ),
 ]
 
+E1M1_TRUE_SPAWN_CONTACT_BRIDGE_STAGES: list[CurriculumStage] = [
+    CurriculumStage(
+        index=0,
+        name="fresh_spawn",
+        reset_start={},
+        note=(
+            "Real E1M1 spawn included in the contact bridge after the "
+            "true-spawn gate found visible-but-not-shootable contact as the "
+            "first bottleneck."
+        ),
+        evidence={
+            "fresh_reset_validated": True,
+            "true_spawn_gate_bottleneck": "first_contact",
+            "shootable_target_on_reset": False,
+            "latest_true_spawn_gate": {
+                "seeds": [7, 8, 9, 10, 11],
+                "first_visible_contacts": 5,
+                "first_shootable_contacts": 0,
+                "level_completions": 0,
+            },
+        },
+    ),
+    CurriculumStage(
+        index=1,
+        name="visible_contact_fast",
+        reset_start=E1M1_CONTACT_TO_COMBAT_STAGES[0].reset_start,
+        note=E1M1_CONTACT_TO_COMBAT_STAGES[0].note,
+        evidence=E1M1_CONTACT_TO_COMBAT_STAGES[0].evidence,
+    ),
+    CurriculumStage(
+        index=2,
+        name="visible_contact_route",
+        reset_start=E1M1_CONTACT_TO_COMBAT_STAGES[1].reset_start,
+        note=E1M1_CONTACT_TO_COMBAT_STAGES[1].note,
+        evidence=E1M1_CONTACT_TO_COMBAT_STAGES[1].evidence,
+    ),
+    CurriculumStage(
+        index=3,
+        name="visible_contact_seek",
+        reset_start=E1M1_CONTACT_TO_COMBAT_STAGES[2].reset_start,
+        note=E1M1_CONTACT_TO_COMBAT_STAGES[2].note,
+        evidence=E1M1_CONTACT_TO_COMBAT_STAGES[2].evidence,
+    ),
+    CurriculumStage(
+        index=4,
+        name="combat_start",
+        reset_start=E1M1_SPAWN_TO_COMBAT_STAGES[0].reset_start,
+        note="Known shootable combat start kept as the bridge target.",
+        evidence={
+            **(E1M1_SPAWN_TO_COMBAT_STAGES[0].evidence or {}),
+            "bridge_target": "shootable combat",
+        },
+    ),
+]
+
 CURRICULUM_PRESETS: dict[str, list[CurriculumStage]] = {
     "e1m1-contact-to-combat": E1M1_CONTACT_TO_COMBAT_STAGES,
     "e1m1-spawn-to-combat": E1M1_SPAWN_TO_COMBAT_STAGES,
+    "e1m1-true-spawn-contact-bridge": E1M1_TRUE_SPAWN_CONTACT_BRIDGE_STAGES,
 }
 
 CURRICULUM_MODES = {"fixed", "round_robin", "progressive", "random"}

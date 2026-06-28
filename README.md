@@ -574,6 +574,67 @@ PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
     --visible-contact-progress-reward 0.01
 ```
 
+After a true-spawn gate failure classified as `first_contact`, use
+`e1m1-true-spawn-contact-bridge`. It keeps real `fresh_spawn` in the training
+mix, adds the visible-contact starts that isolate the contact-to-shootable
+boundary, and keeps the known shootable combat start as the bridge target. This
+is still bottleneck training: promote only with `true_spawn_e2e_gate`, then
+rerun the restored contact/post-combat gates to catch regressions.
+
+```
+PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
+    --endpoint 127.0.0.1:50051 \
+    --goal-preset navigation \
+    --run-id ppo-true-spawn-contact-bridge \
+    --updates 2 \
+    --rollout-steps 512 \
+    --max-steps 640 \
+    --checkpoint-dir agent_models/ppo \
+    --buffer-dir trajectories/ppo \
+    --memory-path agent_memory/e1m1.json \
+    --resume-checkpoint agent_models/ppo/ppo-postcombat2-exitshape-wave3-20260627-a-ppo-0001.pt \
+    --curriculum e1m1-true-spawn-contact-bridge \
+    --curriculum-mode round_robin \
+    --rollout-stage-mix round_robin \
+    --rollout-stage-segment-tics 192 \
+    --first-shootable-bonus 20 \
+    --visible-contact-progress-reward 0.02 \
+    --terminate-on-first-shootable \
+    --allowed-skill engage \
+    --allowed-skill fire \
+    --allowed-skill seek_enemy \
+    --allowed-skill open_use_line \
+    --allowed-skill route_progression \
+    --allowed-skill retreat \
+    --allowed-skill recover_stuck \
+    --allowed-skill press_exit \
+    --allowed-skill close_visible_contact \
+    --strict-allowed-skills \
+    --checkpoint-eval-curriculum \
+    --checkpoint-eval-max-steps 192
+```
+
+Then evaluate the resulting checkpoint from true spawn without
+`--terminate-on-first-shootable`, snapshots, forced skills, or scripted reset
+state, and validate it with `true_spawn_e2e_gate`.
+
+Forced-option JSONL records can now be used as behavior-cloning input when a
+primitive is known to bridge the failing boundary. For example, if
+`close_visible_contact` reaches a shootable enemy from `visible_contact_fast`,
+write the forced rollout with `forced_option_eval --jsonl ...`, then add that
+file to the PPO command with `--bc-trajectory ... --bc-epochs 6`. Treat this as
+a warm start only; the checkpoint still must pass `true_spawn_e2e_gate`.
+
+When the true-spawn gate advances past contact and combat but reports
+`post_combat_route`, stop optimizing contact closure and train the exit-routing
+rung. Use a verified post-combat snapshot/native save-slot curriculum or a
+fresh-run demonstration that reaches a real exit-route waypoint, train with
+`goal-preset exit_seeking`, `route_progression`, `open_use_line`, and
+`press_exit` under strict skill filtering, then stitch the resulting checkpoint
+back through the no-snapshot true-spawn gate. A coordinate reset from the trace
+is useful for route shaping, but it is not enough by itself because it does not
+preserve killed enemies or progressed map state.
+
 Continue from an existing PPO checkpoint:
 
 ```

@@ -437,6 +437,7 @@ def _write_jsonl_record(
         "stage": _compact_stage(stage),
         "forced_skill": forced_skill,
         "record": {
+            "obs": list(record.obs),
             "action": record.action,
             "action_mask": list(record.action_mask),
             "reward": record.reward,

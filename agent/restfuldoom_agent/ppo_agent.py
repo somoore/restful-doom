@@ -1444,20 +1444,13 @@ def _load_behavior_clone_samples(
                 if not line.strip():
                     continue
                 record = json.loads(line)
-                decision = record.get("metadata", {}).get("policy_decision", {})
-                if not isinstance(decision, dict):
+                sample = _behavior_clone_sample_from_record(record)
+                if sample is None:
                     skipped += 1
                     continue
-                skill = decision.get("skill")
-                if not isinstance(skill, str):
-                    skipped += 1
-                    continue
+                obs, action, skill = sample
                 label_counts[skill] += 1
-                action = map_expert_skill_to_ppo_action(skill)
-                if action is None:
-                    skipped += 1
-                    continue
-                samples.append((pad_observation_features(features_from_record(record)), action))
+                samples.append((pad_observation_features(obs), action))
                 mapped_counts[ACTION_SCHEMA["actions"][action]] += 1
         if len(samples) >= max_samples:
             break
@@ -1471,6 +1464,50 @@ def _load_behavior_clone_samples(
         "expert_skill_counts": dict(sorted(label_counts.items())),
         "ppo_skill_counts": dict(sorted(mapped_counts.items())),
     }
+
+
+def _behavior_clone_sample_from_record(
+    record: dict[str, object],
+) -> tuple[list[float], int, str] | None:
+    """Returns a BC sample from supported trajectory/rollout record shapes."""
+    if record.get("schema") == "restfuldoom.forced_option_eval_record.v1":
+        wrapped = record.get("record")
+        if not isinstance(wrapped, dict):
+            return None
+        obs = wrapped.get("obs")
+        if not isinstance(obs, list) or not obs:
+            return None
+        action = _int_or_none(wrapped.get("action"))
+        if action is None or action < 0 or action >= len(ACTION_SCHEMA["actions"]):
+            return None
+        info = wrapped.get("info", {})
+        if not isinstance(info, dict):
+            info = {}
+        if info.get("selected_action_allowed") is False:
+            return None
+        skill = info.get("selected_forced_skill") or info.get("skill") or record.get(
+            "forced_skill"
+        )
+        label = str(skill) if skill else ACTION_SCHEMA["actions"][action]
+        return ([float(value) for value in obs], action, label)
+
+    decision = record.get("metadata", {}).get("policy_decision", {})
+    if not isinstance(decision, dict):
+        return None
+    skill = decision.get("skill")
+    if not isinstance(skill, str):
+        return None
+    action = map_expert_skill_to_ppo_action(skill)
+    if action is None:
+        return None
+    return (features_from_record(record), action, skill)
+
+
+def _int_or_none(value: object) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _resolve_reset_start(args: argparse.Namespace) -> dict[str, object]:
