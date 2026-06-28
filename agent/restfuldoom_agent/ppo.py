@@ -641,6 +641,15 @@ class EvaluationResult:
     mean_secrets: float = 0.0
     mean_secret_gain: float = 0.0
     snapshot_verification_failures: int = 0
+    route_action_reward: float = 0.0
+    route_attempt_steps: int = 0
+    route_reached_steps: int = 0
+    route_failed_steps: int = 0
+    route_progress_units: float = 0.0
+    exit_route_attempt_steps: int = 0
+    exit_route_reached_steps: int = 0
+    exit_route_failed_steps: int = 0
+    exit_route_progress_units: float = 0.0
     reset_source_breakdown: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 

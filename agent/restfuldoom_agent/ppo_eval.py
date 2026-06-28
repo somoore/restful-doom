@@ -58,6 +58,15 @@ class EpisodeEval:
     strict_allowed_skill_fallback_steps: int = 0
     allowed_skill_filter_fallback_skills: dict[str, int] = field(default_factory=dict)
     snapshot_verification_failures: int = 0
+    route_action_reward: float = 0.0
+    route_attempt_steps: int = 0
+    route_reached_steps: int = 0
+    route_failed_steps: int = 0
+    route_progress_units: float = 0.0
+    exit_route_attempt_steps: int = 0
+    exit_route_reached_steps: int = 0
+    exit_route_failed_steps: int = 0
+    exit_route_progress_units: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -235,6 +244,15 @@ async def evaluate_skill_policy(
             allowed_skill_filter_fallback_steps = 0
             strict_allowed_skill_fallback_steps = 0
             allowed_skill_filter_fallback_skills: dict[str, int] = {}
+            route_action_reward = 0.0
+            route_attempt_steps = 0
+            route_reached_steps = 0
+            route_failed_steps = 0
+            route_progress_units = 0.0
+            exit_route_attempt_steps = 0
+            exit_route_reached_steps = 0
+            exit_route_failed_steps = 0
+            exit_route_progress_units = 0.0
             step_limit = max_steps or env_config.max_steps
             for steps in range(1, step_limit + 1):
                 action_mask = env.action_mask()
@@ -284,6 +302,25 @@ async def evaluate_skill_policy(
                     item_delta += _int_field(transition, "item_delta")
                     secret_delta += _int_field(transition, "secret_delta")
                     damage_delta += _int_field(transition, "damage_delta")
+                route_action_reward += float(step.info.get("route_action_reward", 0.0))
+                route_outcome = step.info.get("route_outcome", {})
+                if isinstance(route_outcome, dict):
+                    if route_outcome.get("attempted"):
+                        route_attempt_steps += 1
+                        if route_outcome.get("exit"):
+                            exit_route_attempt_steps += 1
+                    if route_outcome.get("reached"):
+                        route_reached_steps += 1
+                        if route_outcome.get("exit"):
+                            exit_route_reached_steps += 1
+                    if route_outcome.get("failed"):
+                        route_failed_steps += 1
+                        if route_outcome.get("exit"):
+                            exit_route_failed_steps += 1
+                    progress_units = float(route_outcome.get("progress_units", 0.0))
+                    route_progress_units += progress_units
+                    if route_outcome.get("exit"):
+                        exit_route_progress_units += progress_units
                 min_health = min(min_health, int(state.get("health", 0)))
                 if decision.get("stuck") and step.info.get("skill") == "recover_stuck":
                     stuck_events += 1
@@ -363,6 +400,15 @@ async def evaluate_skill_policy(
                         sorted(allowed_skill_filter_fallback_skills.items())
                     ),
                     snapshot_verification_failures=snapshot_verification_failures,
+                    route_action_reward=round(route_action_reward, 4),
+                    route_attempt_steps=route_attempt_steps,
+                    route_reached_steps=route_reached_steps,
+                    route_failed_steps=route_failed_steps,
+                    route_progress_units=round(route_progress_units, 4),
+                    exit_route_attempt_steps=exit_route_attempt_steps,
+                    exit_route_reached_steps=exit_route_reached_steps,
+                    exit_route_failed_steps=exit_route_failed_steps,
+                    exit_route_progress_units=round(exit_route_progress_units, 4),
                 )
             )
     finally:
@@ -479,6 +525,30 @@ def _aggregate(policy_id: str, episodes: list[EpisodeEval]) -> PolicyEval:
         snapshot_verification_failures=sum(
             int(episode.snapshot_verification_failures) for episode in episodes
         ),
+        route_action_reward=round(
+            sum(float(episode.route_action_reward) for episode in episodes),
+            4,
+        ),
+        route_attempt_steps=sum(int(episode.route_attempt_steps) for episode in episodes),
+        route_reached_steps=sum(int(episode.route_reached_steps) for episode in episodes),
+        route_failed_steps=sum(int(episode.route_failed_steps) for episode in episodes),
+        route_progress_units=round(
+            sum(float(episode.route_progress_units) for episode in episodes),
+            4,
+        ),
+        exit_route_attempt_steps=sum(
+            int(episode.exit_route_attempt_steps) for episode in episodes
+        ),
+        exit_route_reached_steps=sum(
+            int(episode.exit_route_reached_steps) for episode in episodes
+        ),
+        exit_route_failed_steps=sum(
+            int(episode.exit_route_failed_steps) for episode in episodes
+        ),
+        exit_route_progress_units=round(
+            sum(float(episode.exit_route_progress_units) for episode in episodes),
+            4,
+        ),
         reset_source_breakdown=_reset_source_breakdown(episodes),
     )
     return PolicyEval(result=result, episodes=episodes)
@@ -538,6 +608,39 @@ def _reset_source_breakdown(episodes: list[EpisodeEval]) -> dict[str, dict[str, 
             "snapshot_verification_failures": sum(
                 int(episode.snapshot_verification_failures)
                 for episode in source_episodes
+            ),
+            "route_action_reward": round(
+                sum(float(episode.route_action_reward) for episode in source_episodes),
+                4,
+            ),
+            "route_attempt_steps": sum(
+                int(episode.route_attempt_steps) for episode in source_episodes
+            ),
+            "route_reached_steps": sum(
+                int(episode.route_reached_steps) for episode in source_episodes
+            ),
+            "route_failed_steps": sum(
+                int(episode.route_failed_steps) for episode in source_episodes
+            ),
+            "route_progress_units": round(
+                sum(float(episode.route_progress_units) for episode in source_episodes),
+                4,
+            ),
+            "exit_route_attempt_steps": sum(
+                int(episode.exit_route_attempt_steps) for episode in source_episodes
+            ),
+            "exit_route_reached_steps": sum(
+                int(episode.exit_route_reached_steps) for episode in source_episodes
+            ),
+            "exit_route_failed_steps": sum(
+                int(episode.exit_route_failed_steps) for episode in source_episodes
+            ),
+            "exit_route_progress_units": round(
+                sum(
+                    float(episode.exit_route_progress_units)
+                    for episode in source_episodes
+                ),
+                4,
             ),
         }
     return breakdown

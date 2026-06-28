@@ -131,7 +131,7 @@ def test_snapshot_builder_selects_post_combat_exit_route(tmp_path):
     assert exit_route["snapshot"]["ref"] == "save_slot:8"
 
 
-def test_snapshot_builder_selects_post_combat_exit_control_fallback(tmp_path):
+def test_snapshot_builder_rejects_exit_control_without_exit_route_waypoint(tmp_path):
     trajectory = tmp_path / "post-combat-exit-control.jsonl"
     _write_jsonl(
         trajectory,
@@ -148,19 +148,43 @@ def test_snapshot_builder_selects_post_combat_exit_control_fallback(tmp_path):
         ],
     )
 
-    manifest = build_snapshot_curriculum_from_trajectory(
+    with pytest.raises(ValueError, match="post-combat-exit-route"):
+        build_snapshot_curriculum_from_trajectory(
+            trajectory,
+            output_path=tmp_path / "post-combat-exit-control.json",
+            name="e1m1-post-combat-exit-control",
+            auto_selectors=["post-combat-exit-route"],
+            snapshot_dir=Path("snapshots"),
+            save_slot_base=8,
+        )
+
+
+def test_snapshot_builder_rejects_exit_route_without_line_id(tmp_path):
+    trajectory = tmp_path / "post-combat-exit-no-line.jsonl"
+    _write_jsonl(
         trajectory,
-        output_path=tmp_path / "post-combat-exit-control.json",
-        name="e1m1-post-combat-exit-control",
-        auto_selectors=["post-combat-exit-route"],
-        snapshot_dir=Path("snapshots"),
-        save_slot_base=8,
+        [
+            _trajectory_row(0, visible=False, shootable=False, kills=5),
+            _trajectory_row(
+                1,
+                visible=False,
+                shootable=False,
+                kills=5,
+                route_exit=True,
+                route_line_id=0,
+            ),
+        ],
     )
 
-    stage = manifest["stages"][0]
-    assert stage["evidence"]["source_record_index"] == 2
-    assert stage["evidence"]["skill"] == "use_exit_assist_door"
-    assert stage["expected_state"]["kills"] == 5
+    with pytest.raises(ValueError, match="post-combat-exit-route"):
+        build_snapshot_curriculum_from_trajectory(
+            trajectory,
+            output_path=tmp_path / "post-combat-exit-no-line.json",
+            name="e1m1-post-combat-exit-no-line",
+            auto_selectors=["post-combat-exit-route"],
+            snapshot_dir=Path("snapshots"),
+            save_slot_base=8,
+        )
 
 
 def test_snapshot_builder_respects_post_combat_kill_threshold(tmp_path):
@@ -350,7 +374,7 @@ def test_native_snapshot_capture_tracker_matches_post_combat_selectors():
         _trajectory_row(2, visible=False, shootable=False, kills=6)
     )
     tracker.mark_captured(post_combat)
-    exit_route = tracker.observe(
+    exit_control = tracker.observe(
         _trajectory_row(
             3,
             visible=False,
@@ -359,11 +383,22 @@ def test_native_snapshot_capture_tracker_matches_post_combat_selectors():
             use_line_specials=[11],
         )
     )
+    exit_route = tracker.observe(
+        _trajectory_row(
+            4,
+            visible=False,
+            shootable=False,
+            kills=6,
+            route_exit=True,
+            route_line_id=330,
+        )
+    )
     tracker.mark_captured(exit_route)
 
     assert below_threshold == []
     assert visible_combat == []
     assert post_combat == ["post-combat"]
+    assert exit_control == []
     assert exit_route == ["post-combat-exit-route"]
     assert tracker.complete is True
 

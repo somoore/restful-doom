@@ -18,6 +18,7 @@ from .brain import (
     AgentMemory,
     BrainPolicy,
     BrainPolicyParams,
+    EXIT_LINE_SPECIALS,
     MANUAL_USE_LINE_SPECIALS,
     cell_key,
     extract_features,
@@ -43,6 +44,13 @@ from .skill_policy import features_from_tactical
 
 SKILL_ACTIONS = PPO_SKILL_ACTIONS
 LOW_HEALTH_RETREAT_STREAK_LIMIT = 96
+
+
+def _line_is_exit(line: dict[str, Any] | None) -> bool:
+    """Returns whether a summarized navigation line is an exit trigger."""
+    if not isinstance(line, dict):
+        return False
+    return int(line.get("special", 0)) in EXIT_LINE_SPECIALS
 
 
 @dataclass(frozen=True)
@@ -606,6 +614,8 @@ class SkillController:
         ):
             mask["seek_enemy"] = True
 
+        progression_line = self.policy._select_progression_line(features)
+
         if (
             not can_fire
             and not recent_contact_active
@@ -625,9 +635,12 @@ class SkillController:
         ):
             mask["open_use_line"] = True
 
-        progression_line = self.policy._select_progression_line(features)
         if not can_fire and progression_line is not None:
-            if not self._suppress_route_after_contact_failures(features, recent_contact_active):
+            if not self._suppress_route_after_contact_failures(
+                features,
+                recent_contact_active,
+                progression_line=progression_line,
+            ):
                 mask["route_progression"] = True
         elif not can_fire and not features.visible_enemies and not recent_contact_active:
             mask["route_progression"] = True
@@ -1119,9 +1132,13 @@ class SkillController:
         self,
         features: Any,
         recent_contact_active: bool,
+        *,
+        progression_line: dict[str, Any] | None = None,
     ) -> bool:
         """Avoid re-sampling route when it has repeatedly failed after contact."""
         if not recent_contact_active:
+            return False
+        if _line_is_exit(progression_line):
             return False
         if features.visible_enemies:
             return False
@@ -1447,7 +1464,7 @@ class DoomAgentEnv:
                 reason = str(contact["reason"])
                 break
         skill = SKILL_ACTIONS[action_index]
-        route_outcome = _route_outcome(skill, previous, current)
+        route_outcome = _route_outcome(skill, previous, current, decision=decision)
         combat_action_reward = self._combat_action_reward(skill, had_shootable_target)
         route_action_reward = self._route_action_reward(route_outcome)
         action_reward = combat_action_reward + route_action_reward
@@ -1904,10 +1921,16 @@ def _enemy_distance_units(state: Any, enemy: Any) -> float:
     return ((player_x - enemy_x) ** 2 + (player_y - enemy_y) ** 2) ** 0.5
 
 
-def _route_outcome(skill: str, previous: Any, current: Any) -> dict[str, Any]:
+def _route_outcome(
+    skill: str,
+    previous: Any,
+    current: Any,
+    *,
+    decision: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Summarizes whether a route-progression macro-step helped."""
-    route, line = _route_waypoint(previous)
-    line_id = int(getattr(line, "line_id", 0)) if line is not None else 0
+    route, line = _route_target_for_outcome(previous, decision)
+    line_id = int(_line_value(line, "line_id", 0)) if line is not None else 0
     outcome: dict[str, Any] = {
         "attempted": skill == "route_progression" and line is not None,
         "line_id": line_id,
@@ -1916,9 +1939,14 @@ def _route_outcome(skill: str, previous: Any, current: Any) -> dict[str, Any]:
         "progress_units": 0.0,
         "reached": False,
         "failed": False,
-        "priority": int(getattr(route, "priority", 0)) if route is not None else 0,
-        "exit": bool(getattr(route, "exit", False)) if route is not None else False,
-        "walk_trigger": bool(getattr(route, "walk_trigger", False)) if route is not None else False,
+        "priority": int(_line_value(route, "priority", 0)) if route is not None else 0,
+        "exit": bool(_line_value(route, "exit", False)) if route is not None else False,
+        "walk_trigger": (
+            bool(_line_value(route, "walk_trigger", False)) if route is not None else False
+        ),
+        "target_source": _line_value(route, "source", "route_waypoint")
+        if route is not None
+        else "",
     }
     if not outcome["attempted"]:
         return outcome
@@ -1929,9 +1957,15 @@ def _route_outcome(skill: str, previous: Any, current: Any) -> dict[str, Any]:
         line,
         previous_x,
         previous_y,
-        fallback_fp=getattr(line, "nearest_distance_fp", 0),
+        fallback_fp=_line_value(line, "nearest_distance_fp", 0),
+        fallback_units=_line_value(line, "distance", 0.0),
     )
-    current_distance = _distance_to_line_units(line, current_x, current_y)
+    current_distance = _distance_to_line_units(
+        line,
+        current_x,
+        current_y,
+        fallback_units=_line_value(line, "distance", 0.0),
+    )
     progress = previous_distance - current_distance
     current_line_id = _route_waypoint_line_id(current)
     line_changed = current_line_id not in (0, line_id)
@@ -1949,6 +1983,39 @@ def _route_outcome(skill: str, previous: Any, current: Any) -> dict[str, Any]:
         }
     )
     return outcome
+
+
+def _route_target_for_outcome(
+    state: Any,
+    decision: dict[str, Any] | None,
+) -> tuple[Any | None, Any | None]:
+    if isinstance(decision, dict):
+        selected_line = decision.get("use_line")
+        if isinstance(selected_line, dict) and int(selected_line.get("line_id", 0)) > 0:
+            selected_line_id = int(selected_line["line_id"])
+            waypoint_route, waypoint_line = _route_waypoint(state)
+            full_line = _find_navigation_line(state, selected_line_id)
+            if (
+                waypoint_line is not None
+                and int(_line_value(waypoint_line, "line_id", 0)) == selected_line_id
+            ):
+                return waypoint_route, full_line if full_line is not None else waypoint_line
+            route = {
+                "priority": 0,
+                "exit": _line_is_exit(selected_line),
+                "walk_trigger": int(selected_line.get("special", 0)) not in EXIT_LINE_SPECIALS,
+                "source": "decision_line",
+            }
+            return route, full_line if full_line is not None else selected_line
+    return _route_waypoint(state)
+
+
+def _find_navigation_line(state: Any, line_id: int) -> Any | None:
+    navigation = getattr(state, "navigation", None)
+    for line in getattr(navigation, "use_lines", []) or []:
+        if int(_line_value(line, "line_id", 0)) == int(line_id):
+            return line
+    return None
 
 
 def _route_waypoint(state: Any) -> tuple[Any | None, Any | None]:
@@ -2191,25 +2258,29 @@ def _distance_to_line_units(
     y_units: float,
     *,
     fallback_fp: int | float = 0,
+    fallback_units: int | float = 0,
 ) -> float:
-    start = getattr(line, "start", None)
-    end = getattr(line, "end", None)
+    start = _line_value(line, "start")
+    end = _line_value(line, "end")
     if start is None or end is None:
+        units = float(fallback_units or 0.0)
+        if units > 0.0:
+            return units
         fallback = float(fallback_fp or 0.0) / 65536.0
         if fallback > 0.0:
             return fallback
-        midpoint = getattr(line, "midpoint", None)
+        midpoint = _line_value(line, "midpoint")
         if midpoint is None:
             return 0.0
         return (
-            (x_units - float(getattr(midpoint, "x_fp", 0)) / 65536.0) ** 2
-            + (y_units - float(getattr(midpoint, "y_fp", 0)) / 65536.0) ** 2
+            (x_units - float(_line_value(midpoint, "x_fp", 0)) / 65536.0) ** 2
+            + (y_units - float(_line_value(midpoint, "y_fp", 0)) / 65536.0) ** 2
         ) ** 0.5
 
-    x1 = float(getattr(start, "x_fp", 0)) / 65536.0
-    y1 = float(getattr(start, "y_fp", 0)) / 65536.0
-    x2 = float(getattr(end, "x_fp", 0)) / 65536.0
-    y2 = float(getattr(end, "y_fp", 0)) / 65536.0
+    x1 = float(_line_value(start, "x_fp", 0)) / 65536.0
+    y1 = float(_line_value(start, "y_fp", 0)) / 65536.0
+    x2 = float(_line_value(end, "x_fp", 0)) / 65536.0
+    y2 = float(_line_value(end, "y_fp", 0)) / 65536.0
     dx = x2 - x1
     dy = y2 - y1
     length_sq = dx * dx + dy * dy
@@ -2220,3 +2291,9 @@ def _distance_to_line_units(
     nearest_x = x1 + t * dx
     nearest_y = y1 + t * dy
     return ((x_units - nearest_x) ** 2 + (y_units - nearest_y) ** 2) ** 0.5
+
+
+def _line_value(line: Any, key: str, default: Any = None) -> Any:
+    if isinstance(line, dict):
+        return line.get(key, default)
+    return getattr(line, key, default)

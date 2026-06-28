@@ -19,6 +19,7 @@ from restfuldoom_agent.env import (
     LOW_HEALTH_RETREAT_STREAK_LIMIT,
     SKILL_ACTIONS,
     SkillController,
+    _route_outcome,
 )
 from restfuldoom_agent.schemas import OBSERVATION_SCHEMA
 
@@ -906,6 +907,45 @@ def test_skill_controller_recent_contact_route_failures_suppress_progression_lin
     assert not combat_mask["route_progression"]
 
 
+def test_skill_controller_recent_contact_does_not_suppress_exit_route():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    first = _state(tick=5, kills=1, enemy=True, combat=False)
+    active = _state(
+        tick=20,
+        kills=2,
+        enemy=True,
+        enemy_line_of_sight=False,
+        combat=False,
+        route=True,
+        route_exit=True,
+        x_units=-1400,
+    )
+    line = active.navigation.route_waypoint.line
+    line.line_id = 330
+    line.special = 11
+    active.navigation.route_waypoint.exit = True
+    active.navigation.route_waypoint.walk_trigger = False
+    route_index = SKILL_ACTIONS.index("route_progression")
+
+    controller.action_mask(first)
+    controller.record_action_history(
+        action_index=route_index,
+        had_shootable_target=False,
+        route_outcome={
+            "attempted": True,
+            "progress_units": -8.0,
+            "reached": False,
+            "failed": True,
+        },
+    )
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(active)))
+
+    assert mask["close_visible_contact"]
+    assert mask["route_progression"]
+    assert not mask["press_exit"]
+
+
 def test_exit_switch_decisions_do_not_trigger_stuck_recovery():
     assert "push_exit_switch" in _NON_LOCOMOTION_SKILLS
     assert "press_exit_switch" in _NON_LOCOMOTION_SKILLS
@@ -1466,6 +1506,74 @@ def test_doom_agent_env_boosts_exit_route_outcome_reward():
     assert step.info["route_outcome"]["reached"]
     assert step.info["route_action_reward"] == pytest.approx(2.75)
     assert step.reward >= step.info["route_action_reward"]
+
+
+def test_route_outcome_uses_decision_line_and_preserves_waypoint_exit():
+    previous = _state(tick=1, route=True, route_exit=True, x_units=0)
+    current = _state(tick=2, route=True, route_exit=True, x_units=256)
+    line = previous.navigation.route_waypoint.line
+    line.line_id = 330
+    line.special = 88
+    previous.navigation.route_waypoint.exit = True
+    previous.navigation.route_waypoint.walk_trigger = False
+
+    outcome = _route_outcome(
+        "route_progression",
+        previous,
+        current,
+        decision={
+            "skill": "route_to_progression_line",
+            "use_line": {
+                "line_id": 330,
+                "special": 88,
+                "distance": 512.0,
+                "angle_delta": 0.0,
+            },
+        },
+    )
+
+    assert outcome["attempted"]
+    assert outcome["line_id"] == 330
+    assert outcome["exit"] is True
+    assert outcome["walk_trigger"] is False
+    assert outcome["target_source"] == "route_waypoint"
+
+
+def test_route_outcome_marks_unmatched_exit_special_as_decision_line():
+    previous = _state(tick=1, route=True, route_exit=False, x_units=0)
+    current = _state(tick=2, route=True, route_exit=False, x_units=128)
+    exit_line = SimpleNamespace(
+        line_id=330,
+        midpoint=SimpleNamespace(x_fp=512 * 65536, y_fp=128 * 65536, z_fp=0),
+        start=SimpleNamespace(x_fp=512 * 65536, y_fp=64 * 65536, z_fp=0),
+        end=SimpleNamespace(x_fp=512 * 65536, y_fp=192 * 65536, z_fp=0),
+        nearest_point=SimpleNamespace(x_fp=512 * 65536, y_fp=128 * 65536, z_fp=0),
+        special=11,
+        tag=0,
+        distance_fp=512 * 65536,
+        nearest_distance_fp=512 * 65536,
+    )
+    previous.navigation.use_lines.append(exit_line)
+
+    outcome = _route_outcome(
+        "route_progression",
+        previous,
+        current,
+        decision={
+            "skill": "route_to_progression_line",
+            "use_line": {
+                "line_id": 330,
+                "special": 11,
+                "distance": 512.0,
+                "angle_delta": 0.0,
+            },
+        },
+    )
+
+    assert outcome["attempted"]
+    assert outcome["line_id"] == 330
+    assert outcome["exit"] is True
+    assert outcome["target_source"] == "decision_line"
 
 
 def test_doom_agent_env_reset_can_warmup_until_shootable_target():

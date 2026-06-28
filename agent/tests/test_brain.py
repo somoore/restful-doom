@@ -951,6 +951,78 @@ def test_post_kill_policy_skips_far_exit_until_route_is_clearer(tmp_path):
     assert action.raw.forward_move > 0
 
 
+def test_post_combat_policy_prefers_visible_far_exit_when_combat_is_quiet(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    asyncio.run(policy.next_action(state(tick=1)))
+
+    game_state = state(tick=40, x=8)
+    game_state.player.kills = 3
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=195,
+            midpoint=SimpleNamespace(x_fp=1000 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=1000 * 65536, y_fp=0, z_fp=0),
+            special=88,
+            tag=2,
+            distance_fp=1000 * 65536,
+            nearest_distance_fp=1000 * 65536,
+        ),
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=1800 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=1800 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=1800 * 65536,
+            nearest_distance_fp=1800 * 65536,
+        ),
+    ]
+
+    action = asyncio.run(policy.next_action(game_state))
+
+    assert policy.last_decision["use_line"]["line_id"] == 330
+    assert policy.last_decision["skill"] == "approach_progression_line"
+    assert action.raw.forward_move > 0
+
+
+def test_far_exit_preference_does_not_preempt_visible_combat(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    asyncio.run(policy.next_action(state(tick=1)))
+
+    game_state = state(
+        tick=40,
+        x=8,
+        enemy={"x": 256, "y": 0, "distance": 256, "line_of_sight": True},
+    )
+    game_state.player.kills = 3
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=1800 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=1800 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=1800 * 65536,
+            nearest_distance_fp=1800 * 65536,
+        ),
+    ]
+
+    asyncio.run(policy.next_action(game_state))
+
+    assert policy.last_decision["skill"] in {"engage_enemy", "fire_on_enemy"}
+    assert policy.last_decision.get("use_line", {}).get("line_id") != 330
+
+
 def test_post_kill_policy_delays_far_walk_trigger_to_hunt_remaining_enemy(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(

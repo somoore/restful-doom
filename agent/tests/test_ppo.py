@@ -328,6 +328,15 @@ def test_ppo_eval_episode_serializes_contact_diagnostics():
         shootable_target_steps=12,
         fire_on_shootable_steps=12,
         damage_delta=20,
+        route_action_reward=1.5,
+        route_attempt_steps=6,
+        route_reached_steps=2,
+        route_failed_steps=1,
+        route_progress_units=96.5,
+        exit_route_attempt_steps=3,
+        exit_route_reached_steps=1,
+        exit_route_failed_steps=1,
+        exit_route_progress_units=32.25,
     )
     payload = PolicyEval(
         result=EvaluationResult(
@@ -350,6 +359,11 @@ def test_ppo_eval_episode_serializes_contact_diagnostics():
     assert row["fire_on_shootable_steps"] == 12
     assert row["damage_delta"] == 20
     assert row["steps_to_required_kills"] == 128
+    assert row["route_action_reward"] == 1.5
+    assert row["route_attempt_steps"] == 6
+    assert row["route_progress_units"] == 96.5
+    assert row["exit_route_attempt_steps"] == 3
+    assert row["exit_route_progress_units"] == 32.25
 
 
 def test_expert_skill_labels_map_to_ppo_actions():
@@ -1849,6 +1863,13 @@ def test_policy_eval_aggregates_snapshot_verification_failures():
         stuck_events=0,
         done_reason="max_steps",
         snapshot_verification_failures=0,
+        route_action_reward=0.75,
+        route_attempt_steps=2,
+        route_reached_steps=1,
+        route_progress_units=16.0,
+        exit_route_attempt_steps=1,
+        exit_route_reached_steps=1,
+        exit_route_progress_units=8.0,
     )
     failed = EpisodeEval(
         seed=8,
@@ -1862,12 +1883,29 @@ def test_policy_eval_aggregates_snapshot_verification_failures():
         stuck_events=0,
         done_reason="max_steps",
         snapshot_verification_failures=1,
+        route_action_reward=-0.25,
+        route_attempt_steps=1,
+        route_failed_steps=1,
+        route_progress_units=-4.0,
+        exit_route_attempt_steps=1,
+        exit_route_failed_steps=1,
+        exit_route_progress_units=-4.0,
     )
 
     result = _aggregate("ppo:snapshot-failure", [ok, failed])
 
     assert result.result.snapshot_verification_failures == 1
-    assert result.to_dict()["result"]["snapshot_verification_failures"] == 1
+    payload = result.to_dict()["result"]
+    assert payload["snapshot_verification_failures"] == 1
+    assert payload["route_action_reward"] == 0.5
+    assert payload["route_attempt_steps"] == 3
+    assert payload["route_reached_steps"] == 1
+    assert payload["route_failed_steps"] == 1
+    assert payload["route_progress_units"] == 12.0
+    assert payload["exit_route_attempt_steps"] == 2
+    assert payload["exit_route_reached_steps"] == 1
+    assert payload["exit_route_failed_steps"] == 1
+    assert payload["exit_route_progress_units"] == 4.0
 
 
 def test_policy_eval_reports_reset_source_breakdown():
@@ -1884,6 +1922,13 @@ def test_policy_eval_reports_reset_source_breakdown():
         done_reason="level_complete",
         start_kills=5,
         reset_source="snapshot_restore",
+        route_action_reward=2.5,
+        route_attempt_steps=4,
+        route_reached_steps=1,
+        route_progress_units=128.0,
+        exit_route_attempt_steps=4,
+        exit_route_reached_steps=1,
+        exit_route_progress_units=128.0,
     )
     fresh_episode = EpisodeEval(
         seed=8,
@@ -1900,6 +1945,10 @@ def test_policy_eval_reports_reset_source_breakdown():
         kill_delta=1,
         max_kill_gain=1,
         reset_source="reset_episode",
+        route_action_reward=-0.5,
+        route_attempt_steps=3,
+        route_failed_steps=2,
+        route_progress_units=-12.0,
     )
 
     result = _aggregate("ppo:mixed-reset", [snapshot_episode, fresh_episode])
@@ -1909,8 +1958,12 @@ def test_policy_eval_reports_reset_source_breakdown():
     assert breakdown["snapshot_restore"]["level_completion_rate"] == 1.0
     assert breakdown["snapshot_restore"]["mean_steps_to_exit"] == 192
     assert breakdown["snapshot_restore"]["mean_kills"] == 0.0
+    assert breakdown["snapshot_restore"]["exit_route_attempt_steps"] == 4
+    assert breakdown["snapshot_restore"]["exit_route_reached_steps"] == 1
+    assert breakdown["snapshot_restore"]["exit_route_progress_units"] == 128.0
     assert breakdown["reset_episode"]["level_completion_rate"] == 0.0
     assert breakdown["reset_episode"]["mean_kills"] == 1.0
+    assert breakdown["reset_episode"]["route_failed_steps"] == 2
 
 
 def test_checkpoint_resume_score_prefers_curriculum_eval_when_present():

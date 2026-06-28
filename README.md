@@ -38,6 +38,9 @@ The punchline is:
   PPO restore plumbing, and native agent save-slot restore are implemented.
 - Snapshot PPO summaries distinguish earned kill progress from absolute kill
   counters inherited from restored slots.
+- Post-combat exit-routing diagnostics track controller-selected exit-line
+  attempts/progress, while `post-combat-exit-route` snapshots now require an
+  actual exit route waypoint rather than exit-control fallback evidence.
 - Checkpoint curriculum eval restores snapshot stages through the same native
   slot/external restore path and serializes start-vs-earned counters.
 - Checkpoint scorer schema `restfuldoom.ppo_checkpoint_eval_score.v4` separates
@@ -660,10 +663,10 @@ and `{tick}`. After capture, validate the manifest and artifact digests:
 For post-combat exit-routing gates, use `--auto post-combat` and
 `--auto post-combat-exit-route`. Both default to `--post-combat-kills 5` for
 E1M1; adjust that threshold for other maps or stricter gates. The
-`post-combat-exit-route` selector accepts either a live route waypoint with
-`exit=true` or older trajectory evidence from exit-control skills/use-lines, so
-older successful structured-brain traces can still seed a focused exit-routing
-curriculum.
+`post-combat-exit-route` selector now requires a live route waypoint with
+`exit=true` and a positive route line id. Exit-control skills or visible exit
+use-lines alone are not enough; that keeps focused exit-route snapshots from
+being seeded by misleading line-195 post-combat states.
 
 For native in-process curriculum, capture real save slots while the structured
 brain drives Doom:
@@ -751,13 +754,18 @@ PYTHONPATH=agent python -m restfuldoom_agent.snapshot_slots load \
 `scripts/hellbox-agent-demo.sh snapshot-save` and `snapshot-load` wrap these
 commands using `SNAPSHOT_SLOT`.
 
-PPO rollout summaries include route diagnostics for spawn-to-contact work:
+PPO rollout summaries and checkpoint evals include route diagnostics for
+spawn-to-contact and post-combat work:
 `route_attempt_steps`, `route_reached_steps`, `route_failed_steps`,
 `route_progress_units`, `exit_route_attempt_steps`, `exit_route_reached_steps`,
 `exit_route_failed_steps`, `exit_route_progress_units`, and
-`route_action_reward`. These are the first numbers to inspect when a run moves
-through E1M1 but still never reaches a shootable target or stalls after combat
-instead of pressing the exit. First-contact curriculum runs also report
+`route_action_reward`. Route outcomes also include `target_source`, so
+controller-selected exit-line attempts can be distinguished from strict route
+waypoint evidence. These are diagnostics, not standalone proof of learning:
+larger totals can simply mean longer episodes or more route opportunities.
+They are the first numbers to inspect when a run moves through E1M1 but still
+never reaches a shootable target or stalls after combat instead of pressing the
+exit. First-contact curriculum runs also report
 `visible_enemy_steps`,
 `first_visible_contacts`, `first_shootable_contacts`, and `contact_reward`.
 Exit-marked route waypoints receive additional route shaping controlled by
@@ -771,10 +779,12 @@ restoring from a slot that may already contain prior kills.
 Checkpoint curriculum eval uses the same rule: `mean_kills`, `mean_items`, and
 `mean_secrets` are earned after the eval reset, while each serialized episode
 keeps start counters, absolute max counters, deltas/gains, `reset_source`,
-start/end map, and item/secret deltas so snapshot-stage wins are auditable.
+start/end map, item/secret deltas, and route/exit-route diagnostic totals so
+snapshot-stage wins are auditable.
 Eval aggregates also include `mean_item_gain`, `mean_secret_gain`, and
 `reset_source_breakdown`, which separates `snapshot_restore` outcomes from
-fresh-reset outcomes. Checkpoint eval score schema
+fresh-reset outcomes and carries the same route diagnostic totals per reset
+source. Checkpoint eval score schema
 `restfuldoom.ppo_checkpoint_eval_score.v4` scores level-complete stages with
 `exit_routing_speed`: selection favors reliable and faster exits with shaped
 reward capped as a tiebreaker. Post-combat snapshot stages use

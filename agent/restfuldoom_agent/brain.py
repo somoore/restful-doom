@@ -1643,10 +1643,38 @@ class BrainPolicy:
         ]
         if not candidates:
             return None
+        far_exit = self._select_post_combat_exit_progression_line(features, candidates)
+        if far_exit is not None:
+            return far_exit
         return min(
             candidates,
             key=lambda line: (
                 self._progression_line_priority(line),
+                float(line["distance"]) / 384.0,
+                abs(float(line["angle_delta"])) / 45.0,
+            ),
+        )
+
+    def _select_post_combat_exit_progression_line(
+        self,
+        features: TacticalFeatures,
+        candidates: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if features.visible_enemies or self._shootable_enemy(features) is not None:
+            return None
+        start_kills = self._start_kills if self._start_kills is not None else features.kills
+        if features.kills - start_kills < 1:
+            return None
+        exit_candidates = [
+            line
+            for line in candidates
+            if int(line.get("special", 0)) in EXIT_LINE_SPECIALS
+        ]
+        if not exit_candidates:
+            return None
+        return min(
+            exit_candidates,
+            key=lambda line: (
                 float(line["distance"]) / 384.0,
                 abs(float(line["angle_delta"])) / 45.0,
             ),
@@ -1668,6 +1696,13 @@ class BrainPolicy:
         if special not in EXIT_LINE_SPECIALS:
             return True
         if float(line.get("distance", 999999)) <= EXIT_ASSIST_DISTANCE_UNITS:
+            return True
+        if (
+            features.kills >= 2
+            and kill_delta >= 1
+            and not features.visible_enemies
+            and self._shootable_enemy(features) is None
+        ):
             return True
         return kill_delta >= 5
 

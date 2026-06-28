@@ -30,19 +30,6 @@ AUTO_SELECTORS = frozenset(
     }
 )
 POST_COMBAT_KILL_THRESHOLD = 5
-EXIT_ROUTE_SKILLS = frozenset(
-    {
-        "backtrack_from_exit_switch",
-        "press_exit_switch",
-        "push_exit_switch",
-        "retry_exit_assist_door",
-        "turn_to_exit_assist_door",
-        "turn_to_exit_switch",
-        "turn_to_retry_exit_assist_door",
-        "use_exit_assist_door",
-    }
-)
-EXIT_LINE_SPECIALS = frozenset({11})
 
 
 def build_snapshot_curriculum_from_trajectory(
@@ -555,17 +542,10 @@ def _is_post_combat_exit_route(
 ) -> bool:
     if not _is_post_combat(record, min_kills=min_kills):
         return False
-    return _has_exit_route_evidence(record)
-
-
-def _has_exit_route_evidence(record: dict[str, Any]) -> bool:
     route = _route_waypoint(record)
-    if route and bool(route.get("exit")):
-        return True
-    skill = _policy_skill(record)
-    if skill in EXIT_ROUTE_SKILLS:
-        return True
-    return _has_exit_use_line(record)
+    line = route.get("line") if isinstance(route, dict) else None
+    line_id = _int_or_none(line.get("line_id")) if isinstance(line, dict) else None
+    return bool(route and route.get("exit") is True and line_id is not None and line_id > 0)
 
 
 def _route_waypoint(record: dict[str, Any]) -> dict[str, Any]:
@@ -586,17 +566,6 @@ def _navigation_dicts(record: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(decision_navigation, dict):
         out.append(decision_navigation)
     return out
-
-
-def _has_exit_use_line(record: dict[str, Any]) -> bool:
-    for navigation in _navigation_dicts(record):
-        lines = navigation.get("use_lines")
-        if not isinstance(lines, list):
-            continue
-        for line in lines:
-            if isinstance(line, dict) and _int_or_none(line.get("special")) in EXIT_LINE_SPECIALS:
-                return True
-    return False
 
 
 def _damage_delta(record: dict[str, Any]) -> int:
@@ -660,7 +629,7 @@ def _stage_note(selector: str) -> str:
         "first-kill": "Restore the first trajectory state where the agent scored a kill.",
         "post-combat": "Restore the first trajectory state after the post-combat kill threshold.",
         "post-combat-exit-route": (
-            "Restore the first post-combat state with exit route or exit-control evidence."
+            "Restore the first post-combat state with an exit route waypoint."
         ),
         "level-transition": "Restore the trajectory state around level transition.",
     }
