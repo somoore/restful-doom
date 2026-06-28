@@ -2012,6 +2012,126 @@ def test_required_kill_selection_score_takes_priority_over_post_combat_hint():
     assert components["earned_kill_bonus"] == 120.0
 
 
+def test_true_spawn_promotion_selection_score_requires_full_chain():
+    true_spawn_stage = {
+        "name": "fresh_spawn_true_spawn_gate",
+        "evidence": {"true_spawn_promotion_stage": True},
+    }
+    kills_only = _aggregate(
+        "ppo:true-spawn-kills-only",
+        [
+            EpisodeEval(
+                seed=7,
+                total_reward=220.0,
+                level_completed=False,
+                death=False,
+                max_kills=5,
+                min_health=32,
+                steps=1000,
+                steps_to_exit=6000,
+                steps_to_required_kills=1000,
+                stuck_events=4,
+                done_reason="required_kills",
+                start_kills=0,
+                kill_delta=5,
+                max_kill_gain=5,
+                reset_source="episode",
+                first_visible_contacts=1,
+                first_shootable_contacts=1,
+                route_attempt_steps=300,
+                exit_route_attempt_steps=20,
+            )
+        ],
+    )
+    completed = _aggregate(
+        "ppo:true-spawn-complete",
+        [
+            EpisodeEval(
+                seed=7,
+                total_reward=90.0,
+                level_completed=True,
+                death=False,
+                max_kills=5,
+                min_health=40,
+                steps=1300,
+                steps_to_exit=1300,
+                stuck_events=1,
+                done_reason="level_complete",
+                start_kills=0,
+                kill_delta=5,
+                max_kill_gain=5,
+                reset_source="episode",
+                start_episode=1,
+                start_map=1,
+                end_episode=1,
+                end_map=2,
+                level_transition_delta=1,
+                first_visible_contacts=1,
+                first_shootable_contacts=1,
+                route_attempt_steps=420,
+                exit_route_attempt_steps=70,
+                exit_route_reached_steps=8,
+            )
+        ],
+    )
+
+    kills_only_components = _policy_eval_selection_components(
+        kills_only,
+        stage=true_spawn_stage,
+    )
+    completed_components = _policy_eval_selection_components(
+        completed,
+        stage=true_spawn_stage,
+    )
+
+    assert kills_only_components["mode"] == "true_spawn_promotion"
+    assert completed_components["mode"] == "true_spawn_promotion"
+    assert kills_only_components["completion_rate"] == 0.0
+    assert completed_components["completion_rate"] == 1.0
+    assert completed_components["selection_score"] > kills_only_components[
+        "selection_score"
+    ]
+
+
+def test_true_spawn_promotion_selection_score_penalizes_non_episode_reset():
+    true_spawn_stage = {
+        "name": "fresh_spawn_true_spawn_gate",
+        "evidence": {"true_spawn_promotion_stage": True},
+    }
+    snapshot_eval = _aggregate(
+        "ppo:true-spawn-snapshot",
+        [
+            EpisodeEval(
+                seed=7,
+                total_reward=90.0,
+                level_completed=True,
+                death=False,
+                max_kills=5,
+                min_health=40,
+                steps=1300,
+                steps_to_exit=1300,
+                stuck_events=1,
+                done_reason="level_complete",
+                start_kills=0,
+                kill_delta=5,
+                max_kill_gain=5,
+                reset_source="snapshot_restore",
+                level_transition_delta=1,
+                first_visible_contacts=1,
+                first_shootable_contacts=1,
+                route_attempt_steps=420,
+                exit_route_attempt_steps=70,
+            )
+        ],
+    )
+
+    components = _policy_eval_selection_components(snapshot_eval, stage=true_spawn_stage)
+
+    assert components["mode"] == "true_spawn_promotion"
+    assert components["valid_true_spawn_rate"] == 0.0
+    assert components["completion_rate"] == 0.0
+
+
 def test_policy_eval_aggregates_earned_kills_not_restored_snapshot_kills():
     inherited = EpisodeEval(
         seed=7,

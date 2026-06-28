@@ -12,8 +12,9 @@ import time
 from collections import Counter
 from dataclasses import replace
 from pathlib import Path
+from typing import Callable
 
-from .brain import AgentMemory
+from .brain import AgentMemory, POST_COMBAT_EXIT_KILLS
 from .curriculum import build_curriculum, curriculum_names, stage_for_update
 from .env import ACTION_SCHEMA, OBSERVATION_SCHEMA, DoomAgentEnv, DoomEnvConfig
 from .ppo import PPOConfig, PPOTrainer, require_torch
@@ -1103,8 +1104,9 @@ async def _evaluate_checkpoint_curriculum(
         "selection_score": aggregate_score,
         "score_formula": (
             "0.7 * mean_stage_score + 0.3 * worst_stage_score; "
-            "required-kill and exit-routing stage scores use reliability + "
-            "speed with shaped reward capped as a tiebreaker; post-combat "
+            "true-spawn promotion stages score the full contact-to-transition "
+            "chain; required-kill and exit-routing stage scores use reliability "
+            "+ speed with shaped reward capped as a tiebreaker; post-combat "
             "snapshot stages are scored as exit-routing objectives even before "
             "level completion"
         ),
@@ -1159,6 +1161,8 @@ def _policy_eval_selection_components(
     """Returns deterministic eval score components for resume selection."""
     result = getattr(eval_result, "result", eval_result)
     episodes = getattr(eval_result, "episodes", [])
+    if _stage_prefers_true_spawn_promotion_score(stage):
+        return _true_spawn_promotion_score_components(result, episodes)
     force_exit_routing = _stage_prefers_exit_routing_score(stage)
     required_kill_components = _required_kill_score_components(episodes)
     exit_routing_components = _exit_routing_score_components(
@@ -1323,6 +1327,132 @@ def _stage_prefers_exit_routing_score(stage: object | None) -> bool:
         or "post_combat" in label
         for label in labels
     )
+
+
+def _stage_prefers_true_spawn_promotion_score(stage: object | None) -> bool:
+    """Returns whether a curriculum stage should be scored as true-spawn promotion."""
+    if not isinstance(stage, dict):
+        return False
+    evidence = stage.get("evidence")
+    return isinstance(evidence, dict) and bool(evidence.get("true_spawn_promotion_stage"))
+
+
+def _true_spawn_promotion_score_components(
+    result: object,
+    episodes: object,
+) -> dict[str, object]:
+    """Scores true-spawn stages against the full promotion chain, not kills alone."""
+    episode_list = episodes if isinstance(episodes, list) else []
+    episode_count = max(1, len(episode_list))
+    valid_episodes = [
+        episode
+        for episode in episode_list
+        if getattr(episode, "reset_source", "") == "episode"
+        and int(getattr(episode, "invalid_action_steps", 0) or 0) == 0
+        and int(getattr(episode, "selected_disallowed_steps", 0) or 0) == 0
+        and int(getattr(episode, "strict_allowed_skill_fallback_steps", 0) or 0) == 0
+        and int(getattr(episode, "snapshot_verification_failures", 0) or 0) == 0
+    ]
+    full_successes = [
+        episode
+        for episode in valid_episodes
+        if (
+            bool(getattr(episode, "level_completed", False))
+            or getattr(episode, "done_reason", None) == "level_complete"
+        )
+        and int(getattr(episode, "level_transition_delta", 0) or 0) >= 1
+        and _episode_earned_kills_for_score(episode) >= POST_COMBAT_EXIT_KILLS
+        and int(getattr(episode, "first_visible_contacts", 0) or 0) > 0
+        and int(getattr(episode, "first_shootable_contacts", 0) or 0) > 0
+        and int(getattr(episode, "route_attempt_steps", 0) or 0) > 0
+        and int(getattr(episode, "exit_route_attempt_steps", 0) or 0) > 0
+    ]
+    contact_rate = _episode_rate(
+        episode_list,
+        lambda episode: int(getattr(episode, "first_visible_contacts", 0) or 0) > 0,
+    )
+    shootable_rate = _episode_rate(
+        episode_list,
+        lambda episode: int(getattr(episode, "first_shootable_contacts", 0) or 0) > 0,
+    )
+    route_rate = _episode_rate(
+        episode_list,
+        lambda episode: int(getattr(episode, "route_attempt_steps", 0) or 0) > 0,
+    )
+    exit_route_rate = _episode_rate(
+        episode_list,
+        lambda episode: int(getattr(episode, "exit_route_attempt_steps", 0) or 0) > 0,
+    )
+    valid_rate = len(valid_episodes) / episode_count
+    completion_rate = len(full_successes) / episode_count
+    mean_earned_kills = (
+        sum(_episode_earned_kills_for_score(episode) for episode in episode_list)
+        / episode_count
+    )
+    kill_fraction = min(1.0, mean_earned_kills / max(1.0, float(POST_COMBAT_EXIT_KILLS)))
+    max_steps = max(
+        1,
+        *[
+            int(getattr(episode, "steps_to_exit", 0) or getattr(episode, "steps", 0) or 0)
+            for episode in episode_list
+        ],
+    )
+    if full_successes:
+        mean_steps_to_exit = sum(
+            int(getattr(episode, "steps_to_exit", 0) or getattr(episode, "steps", 0))
+            for episode in full_successes
+        ) / len(full_successes)
+    else:
+        mean_steps_to_exit = float(max_steps)
+    speed_fraction = completion_rate * max(
+        0.0,
+        min(1.0, (float(max_steps) - mean_steps_to_exit) / float(max_steps)),
+    )
+    mean_reward = float(getattr(result, "mean_reward", 0.0))
+    reward_tiebreak = max(-20.0, min(20.0, mean_reward))
+    survival_bonus = float(getattr(result, "survival_rate", 0.0)) * 20.0
+    stuck_penalty = -float(getattr(result, "mean_stuck_events", 0.0)) * 2.0
+    score = round(
+        completion_rate * 1000.0
+        + speed_fraction * 200.0
+        + valid_rate * 80.0
+        + contact_rate * 60.0
+        + shootable_rate * 60.0
+        + kill_fraction * 300.0
+        + route_rate * 80.0
+        + exit_route_rate * 120.0
+        + survival_bonus
+        + stuck_penalty
+        + reward_tiebreak,
+        4,
+    )
+    return {
+        "schema": CHECKPOINT_EVAL_SCORE_SCHEMA,
+        "mode": "true_spawn_promotion",
+        "selection_score": score,
+        "mean_reward": mean_reward,
+        "reward_tiebreak": round(reward_tiebreak, 4),
+        "valid_true_spawn_rate": round(valid_rate, 4),
+        "first_visible_contact_rate": round(contact_rate, 4),
+        "first_shootable_contact_rate": round(shootable_rate, 4),
+        "earned_kill_fraction": round(kill_fraction, 4),
+        "mean_earned_kills": round(mean_earned_kills, 4),
+        "route_attempt_rate": round(route_rate, 4),
+        "exit_route_attempt_rate": round(exit_route_rate, 4),
+        "completion_rate": round(completion_rate, 4),
+        "exit_speed_bonus": round(speed_fraction * 200.0, 4),
+        "mean_steps_to_exit": round(mean_steps_to_exit, 4),
+        "survival_bonus": round(survival_bonus, 4),
+        "stuck_penalty": round(stuck_penalty, 4),
+        "required_kill_threshold": POST_COMBAT_EXIT_KILLS,
+    }
+
+
+def _episode_rate(episodes: list[object], predicate: Callable[[object], bool]) -> float:
+    """Returns the fraction of episodes matching predicate."""
+    if not episodes:
+        return 0.0
+    return sum(1 for episode in episodes if predicate(episode)) / len(episodes)
 
 
 def _required_kill_score_components(episodes: object) -> dict[str, object] | None:
