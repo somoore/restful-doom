@@ -123,6 +123,8 @@ def test_forced_option_eval_comparison_keeps_failure_visible():
                 "ok": True,
                 "forced_skill": "seek_enemy",
                 "stage": {"name": "first-visible"},
+                "termination_reason": "forced_option_disallowed",
+                "termination_step": 7,
                 "summary": {
                     "first_shootable_contacts": 1,
                     "shootable_target_steps": 4,
@@ -155,6 +157,8 @@ def test_forced_option_eval_comparison_keeps_failure_visible():
     assert rows[1]["selected_disallowed_steps"] == 0
     assert rows[1]["shootable_handoff_steps"] == 3
     assert rows[1]["unhandled_forced_disallowed_steps"] == 0
+    assert rows[1]["termination_reason"] == "forced_option_disallowed"
+    assert rows[1]["termination_step"] == 7
     assert rows[1]["stuck_steps"] == 1
 
 

@@ -592,6 +592,55 @@ def test_rollout_summary_deduplicates_reset_warmup_metadata():
     assert summary["reset_warmup_stop_reasons"] == {"visible": 1}
 
 
+def test_rollout_summary_counts_allowed_skill_filter_fallbacks():
+    buffer = SimpleNamespace(
+        records=[
+            SimpleNamespace(
+                reward=0.0,
+                done=False,
+                action=0,
+                action_mask=[True, False],
+                info={
+                    "skill": "close_visible_contact",
+                    "action_mask_filter": {
+                        "strict": True,
+                        "fallback_applied": True,
+                        "fallback_skill": "close_visible_contact",
+                    },
+                    "transition": {},
+                    "state": {"health": 100, "kills": 0},
+                },
+            ),
+            SimpleNamespace(
+                reward=0.0,
+                done=False,
+                action=1,
+                action_mask=[False, True],
+                info={
+                    "skill": "fire",
+                    "action_mask_filter": {
+                        "strict": False,
+                        "fallback_applied": True,
+                        "fallback_skill": "unfiltered_mask",
+                    },
+                    "transition": {},
+                    "state": {"health": 100, "kills": 0},
+                },
+            ),
+        ]
+    )
+
+    summary = _summarize_buffer(buffer)
+
+    assert summary["allowed_skill_filter_steps"] == 2
+    assert summary["allowed_skill_filter_fallback_steps"] == 2
+    assert summary["strict_allowed_skill_fallback_steps"] == 1
+    assert summary["allowed_skill_filter_fallback_skills"] == {
+        "close_visible_contact": 1,
+        "unfiltered_mask": 1,
+    }
+
+
 def test_reset_start_from_trajectory_row(tmp_path):
     trajectory = tmp_path / "combat.jsonl"
     trajectory.write_text(

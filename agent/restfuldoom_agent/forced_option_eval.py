@@ -101,6 +101,8 @@ async def _run_one(
     env = DoomAgentEnv(_env_config_for_stage(config, curriculum, stage, forced_skill))
     buffer = RolloutBuffer()
     reset_error: str | None = None
+    termination_reason: str | None = None
+    termination_step: int | None = None
     started = time.time()
     try:
         try:
@@ -131,6 +133,10 @@ async def _run_one(
                     selected_action_index = handoff_index
                     selected_skill = config.shootable_handoff_skill
                     handoff_applied = True
+            if not forced_action_allowed and not handoff_applied:
+                termination_reason = "forced_option_disallowed"
+                termination_step = len(buffer.records)
+                break
             transition = await env.step(selected_action_index)
             info = dict(transition.info)
             info["forced_skill"] = forced_skill
@@ -165,6 +171,8 @@ async def _run_one(
             _write_jsonl_record(config, stage, forced_skill, buffer.records[-1])
             obs = transition.observation
             if transition.done:
+                termination_reason = str(info.get("done_reason") or "env_done")
+                termination_step = len(buffer.records)
                 break
     finally:
         await env.close()
@@ -177,6 +185,8 @@ async def _run_one(
         "stage": _compact_stage(stage),
         "ok": True,
         "elapsed_seconds": round(time.time() - started, 4),
+        "termination_reason": termination_reason,
+        "termination_step": termination_step,
         "summary": summary,
         "forced_summary": forced_summary,
     }
@@ -370,6 +380,8 @@ def _comparison(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "unhandled_forced_disallowed_steps": int(
                     forced.get("unhandled_forced_disallowed_steps", 0)
                 ),
+                "termination_reason": run.get("termination_reason"),
+                "termination_step": run.get("termination_step"),
                 "stuck_steps": int(forced.get("stuck_steps", 0)),
                 "recovery_steps": int(forced.get("recovery_steps", 0)),
                 "reset_error": run.get("reset_error"),

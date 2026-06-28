@@ -52,6 +52,10 @@ class EpisodeEval:
     missed_shootable_fire_steps: int = 0
     damage_delta: int = 0
     invalid_action_steps: int = 0
+    allowed_skill_filter_steps: int = 0
+    allowed_skill_filter_fallback_steps: int = 0
+    strict_allowed_skill_fallback_steps: int = 0
+    allowed_skill_filter_fallback_skills: dict[str, int] = field(default_factory=dict)
     snapshot_verification_failures: int = 0
 
 
@@ -221,6 +225,10 @@ async def evaluate_skill_policy(
             missed_shootable_fire_steps = 0
             damage_delta = 0
             invalid_action_steps = 0
+            allowed_skill_filter_steps = 0
+            allowed_skill_filter_fallback_steps = 0
+            strict_allowed_skill_fallback_steps = 0
+            allowed_skill_filter_fallback_skills: dict[str, int] = {}
             step_limit = max_steps or env_config.max_steps
             for steps in range(1, step_limit + 1):
                 action_mask = env.action_mask()
@@ -273,6 +281,20 @@ async def evaluate_skill_policy(
                 min_health = min(min_health, int(state.get("health", 0)))
                 if decision.get("stuck") and step.info.get("skill") == "recover_stuck":
                     stuck_events += 1
+                action_mask_filter = step.info.get("action_mask_filter", {})
+                if isinstance(action_mask_filter, dict) and action_mask_filter:
+                    allowed_skill_filter_steps += 1
+                    if action_mask_filter.get("fallback_applied"):
+                        allowed_skill_filter_fallback_steps += 1
+                        if action_mask_filter.get("strict"):
+                            strict_allowed_skill_fallback_steps += 1
+                        fallback_skill = str(
+                            action_mask_filter.get("fallback_skill", "unknown")
+                        )
+                        allowed_skill_filter_fallback_skills[fallback_skill] = (
+                            allowed_skill_filter_fallback_skills.get(fallback_skill, 0)
+                            + 1
+                        )
                 if step.done:
                     done_reason = step.info.get("done_reason")
                     break
@@ -325,6 +347,12 @@ async def evaluate_skill_policy(
                     missed_shootable_fire_steps=missed_shootable_fire_steps,
                     damage_delta=damage_delta,
                     invalid_action_steps=invalid_action_steps,
+                    allowed_skill_filter_steps=allowed_skill_filter_steps,
+                    allowed_skill_filter_fallback_steps=allowed_skill_filter_fallback_steps,
+                    strict_allowed_skill_fallback_steps=strict_allowed_skill_fallback_steps,
+                    allowed_skill_filter_fallback_skills=dict(
+                        sorted(allowed_skill_filter_fallback_skills.items())
+                    ),
                     snapshot_verification_failures=snapshot_verification_failures,
                 )
             )

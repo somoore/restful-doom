@@ -413,6 +413,26 @@ def test_doom_agent_env_allowed_skill_filter_narrows_action_mask():
     assert combat_mask["fire"]
     assert not combat_mask["close_visible_contact"]
     assert quiet_mask["route_progression"]
+    assert env._last_action_mask_filter["fallback_skill"] == "unfiltered_mask"
+
+
+def test_doom_agent_env_strict_allowed_skill_filter_stays_inside_allowlist():
+    env = DoomAgentEnv(
+        DoomEnvConfig(
+            allowed_skills=("close_visible_contact", "fire"),
+            strict_allowed_skills=True,
+        ),
+        controller=SkillController(),
+    )
+
+    env._current_state = _state(enemy=False, combat=False)
+    quiet_mask = dict(zip(SKILL_ACTIONS, env.action_mask()))
+
+    assert quiet_mask["close_visible_contact"]
+    assert not quiet_mask["route_progression"]
+    assert not quiet_mask["recover_stuck"]
+    assert env._last_action_mask_filter["fallback_applied"]
+    assert env._last_action_mask_filter["fallback_skill"] == "close_visible_contact"
 
 
 def test_skill_controller_contact_actions_use_visible_enemy_and_route_waypoint():

@@ -93,6 +93,7 @@ class DoomEnvConfig:
     terminate_on_first_visible: bool = False
     terminate_on_first_shootable: bool = False
     allowed_skills: tuple[str, ...] = ()
+    strict_allowed_skills: bool = False
     curriculum: dict[str, Any] | None = None
     curriculum_stage: dict[str, Any] | None = None
     reset_mode: str = "episode"
@@ -1154,6 +1155,7 @@ class DoomAgentEnv:
         self._episode_index = 0
         self._last_reset_warmup: dict[str, Any] = {}
         self._last_reset_context: dict[str, Any] = {}
+        self._last_action_mask_filter: dict[str, Any] = {}
         self._episode_seen_visible_enemy = False
         self._episode_seen_shootable_enemy = False
 
@@ -1476,6 +1478,7 @@ class DoomAgentEnv:
             "had_shootable_target": had_shootable_target,
             "first_visible_contact": first_visible_contact,
             "first_shootable_contact": first_shootable_contact,
+            "action_mask_filter": dict(self._last_action_mask_filter),
             "reset_warmup": dict(self._last_reset_warmup),
             "reset_context": dict(self._last_reset_context),
             "state": summarize_state(current),
@@ -1504,6 +1507,7 @@ class DoomAgentEnv:
 
     def _filter_allowed_skills(self, mask: list[bool]) -> list[bool]:
         allowed_skills = tuple(self.config.allowed_skills or ())
+        self._last_action_mask_filter = {}
         if not allowed_skills:
             return mask
         allowed = set(allowed_skills)
@@ -1511,7 +1515,35 @@ class DoomAgentEnv:
             bool(value) and skill in allowed
             for skill, value in zip(SKILL_ACTIONS, mask, strict=False)
         ]
-        return filtered if any(filtered) else mask
+        info: dict[str, Any] = {
+            "schema": "restfuldoom.allowed_skill_filter.v1",
+            "configured": True,
+            "strict": bool(self.config.strict_allowed_skills),
+            "allowed_skills": list(allowed_skills),
+            "raw_allowed_count": sum(1 for value in mask if value),
+            "filtered_allowed_count": sum(1 for value in filtered if value),
+            "fallback_applied": False,
+            "fallback_skill": None,
+        }
+        if any(filtered):
+            self._last_action_mask_filter = info
+            return filtered
+        if not self.config.strict_allowed_skills:
+            info["fallback_applied"] = True
+            info["fallback_skill"] = "unfiltered_mask"
+            self._last_action_mask_filter = info
+            return mask
+        for skill in allowed_skills:
+            if skill in SKILL_ACTIONS:
+                fallback = [False for _ in SKILL_ACTIONS]
+                fallback[SKILL_ACTIONS.index(skill)] = True
+                info["fallback_applied"] = True
+                info["fallback_skill"] = skill
+                info["filtered_allowed_count"] = 1
+                self._last_action_mask_filter = info
+                return fallback
+        self._last_action_mask_filter = info
+        return filtered
 
     def _combat_action_reward(self, skill: str, had_shootable_target: bool) -> float:
         if had_shootable_target and skill == "fire":

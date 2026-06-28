@@ -137,6 +137,9 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                 else None,
                 "resume_migration": trainer.resume_migration,
                 "allowed_skills": list(args.allowed_skill or []),
+                "strict_allowed_skills": bool(
+                    getattr(args, "strict_allowed_skills", False)
+                ),
             }
             trainer.save_checkpoint(
                 checkpoint_path,
@@ -153,6 +156,9 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     "terminate_on_first_visible": args.terminate_on_first_visible,
                     "terminate_on_first_shootable": args.terminate_on_first_shootable,
                     "allowed_skills": list(args.allowed_skill or []),
+                    "strict_allowed_skills": bool(
+                        getattr(args, "strict_allowed_skills", False)
+                    ),
                 },
                 extra=checkpoint_extra,
             )
@@ -180,6 +186,9 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                         "terminate_on_first_visible": args.terminate_on_first_visible,
                         "terminate_on_first_shootable": args.terminate_on_first_shootable,
                         "allowed_skills": list(args.allowed_skill or []),
+                        "strict_allowed_skills": bool(
+                            getattr(args, "strict_allowed_skills", False)
+                        ),
                     },
                     extra=checkpoint_extra,
                 )
@@ -201,6 +210,9 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                         "terminate_on_first_visible": args.terminate_on_first_visible,
                         "terminate_on_first_shootable": args.terminate_on_first_shootable,
                         "allowed_skills": list(args.allowed_skill or []),
+                        "strict_allowed_skills": bool(
+                            getattr(args, "strict_allowed_skills", False)
+                        ),
                     },
                     metrics=metrics,
                     rollout_summary=rollout_summary,
@@ -297,6 +309,7 @@ async def evaluate(args: argparse.Namespace) -> dict[str, object]:
         terminate_on_first_visible=args.terminate_on_first_visible,
         terminate_on_first_shootable=args.terminate_on_first_shootable,
         allowed_skills=tuple(getattr(args, "allowed_skill", []) or ()),
+        strict_allowed_skills=bool(getattr(args, "strict_allowed_skills", False)),
         snapshot_verify_restored_state=args.snapshot_verify_restored_state,
         snapshot_verify_tick_tolerance=args.snapshot_verify_tick_tolerance,
         snapshot_verify_stream_tick=args.snapshot_verify_stream_tick,
@@ -413,6 +426,7 @@ def _env_config_for_start(
         terminate_on_first_visible=args.terminate_on_first_visible,
         terminate_on_first_shootable=args.terminate_on_first_shootable,
         allowed_skills=tuple(getattr(args, "allowed_skill", []) or ()),
+        strict_allowed_skills=bool(getattr(args, "strict_allowed_skills", False)),
     )
 
 
@@ -975,6 +989,7 @@ async def _evaluate_checkpoint_curriculum(
         "max_steps": int(args.checkpoint_eval_max_steps),
         "sample": bool(args.checkpoint_eval_sample),
         "allowed_skills": list(getattr(args, "allowed_skill", []) or []),
+        "strict_allowed_skills": bool(getattr(args, "strict_allowed_skills", False)),
         "stage_count": len(stage_records),
         "mean_stage_score": round(mean_score, 4),
         "worst_stage_score": round(worst_score, 4),
@@ -1288,6 +1303,20 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
             or not bool(record.action_mask[record.action])
         )
     )
+    action_mask_filters = [
+        record.info.get("action_mask_filter", {})
+        for record in records
+        if isinstance(record.info, dict)
+        and isinstance(record.info.get("action_mask_filter", {}), dict)
+        and record.info.get("action_mask_filter")
+    ]
+    fallback_filter_steps = [
+        context for context in action_mask_filters if context.get("fallback_applied")
+    ]
+    fallback_filter_skills = Counter(
+        str(context.get("fallback_skill", "unknown"))
+        for context in fallback_filter_steps
+    )
     warmups = [
         record.info.get("reset_warmup", {})
         for record in records
@@ -1497,6 +1526,14 @@ def _summarize_buffer(buffer: object) -> dict[str, object]:
             4,
         ),
         "invalid_action_steps": invalid_action_steps,
+        "allowed_skill_filter_steps": len(action_mask_filters),
+        "allowed_skill_filter_fallback_steps": len(fallback_filter_steps),
+        "strict_allowed_skill_fallback_steps": sum(
+            1 for context in fallback_filter_steps if context.get("strict")
+        ),
+        "allowed_skill_filter_fallback_skills": dict(
+            sorted(fallback_filter_skills.items())
+        ),
         "reset_warmup_tics": sum(int(warmup.get("tics", 0)) for warmup in warmups),
         "reset_warmup_steps": sum(int(warmup.get("steps", 0)) for warmup in warmups),
         "reset_warmup_stop_reasons": dict(sorted(warmup_reasons.items())),
@@ -1763,6 +1800,15 @@ def main() -> None:
         help=(
             "experiment-only skill allowlist applied after the normal action mask; "
             "repeat to keep multiple skills"
+        ),
+    )
+    parser.add_argument(
+        "--strict-allowed-skills",
+        action="store_true",
+        help=(
+            "When --allowed-skill filters out every normal action, keep the policy "
+            "inside the allowlist instead of falling back to the unfiltered mask. "
+            "Use this for exact bottleneck ladder evals."
         ),
     )
     parser.add_argument("--updates", type=int, default=1)
