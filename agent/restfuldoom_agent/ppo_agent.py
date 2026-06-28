@@ -1375,14 +1375,26 @@ def _true_spawn_promotion_score_components(
         episode_list,
         lambda episode: int(getattr(episode, "first_shootable_contacts", 0) or 0) > 0,
     )
-    route_rate = _episode_rate(
-        episode_list,
-        lambda episode: int(getattr(episode, "route_attempt_steps", 0) or 0) > 0,
+    route_ready_episodes = [
+        episode
+        for episode in episode_list
+        if _episode_earned_kills_for_score(episode) >= POST_COMBAT_EXIT_KILLS
+    ]
+    route_rate = len(
+        [
+            episode
+            for episode in route_ready_episodes
+            if int(getattr(episode, "route_attempt_steps", 0) or 0) > 0
+        ]
+    ) / episode_count
+    exit_route_rate = len(
+        [
+            episode
+            for episode in route_ready_episodes
+            if int(getattr(episode, "exit_route_attempt_steps", 0) or 0) > 0
+        ]
     )
-    exit_route_rate = _episode_rate(
-        episode_list,
-        lambda episode: int(getattr(episode, "exit_route_attempt_steps", 0) or 0) > 0,
-    )
+    exit_route_rate /= episode_count
     valid_rate = len(valid_episodes) / episode_count
     completion_rate = len(full_successes) / episode_count
     mean_earned_kills = (
@@ -1412,6 +1424,10 @@ def _true_spawn_promotion_score_components(
     reward_tiebreak = max(-20.0, min(20.0, mean_reward))
     survival_bonus = float(getattr(result, "survival_rate", 0.0)) * 20.0
     stuck_penalty = -float(getattr(result, "mean_stuck_events", 0.0)) * 2.0
+    death_penalty = -_episode_rate(
+        episode_list,
+        lambda episode: bool(getattr(episode, "death", False)),
+    ) * 300.0
     score = round(
         completion_rate * 1000.0
         + speed_fraction * 200.0
@@ -1423,6 +1439,7 @@ def _true_spawn_promotion_score_components(
         + exit_route_rate * 120.0
         + survival_bonus
         + stuck_penalty
+        + death_penalty
         + reward_tiebreak,
         4,
     )
@@ -1444,6 +1461,7 @@ def _true_spawn_promotion_score_components(
         "mean_steps_to_exit": round(mean_steps_to_exit, 4),
         "survival_bonus": round(survival_bonus, 4),
         "stuck_penalty": round(stuck_penalty, 4),
+        "death_penalty": round(death_penalty, 4),
         "required_kill_threshold": POST_COMBAT_EXIT_KILLS,
     }
 

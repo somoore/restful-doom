@@ -2132,6 +2132,77 @@ def test_true_spawn_promotion_selection_score_penalizes_non_episode_reset():
     assert components["completion_rate"] == 0.0
 
 
+def test_true_spawn_promotion_selection_score_gates_route_credit_after_kills():
+    true_spawn_stage = {
+        "name": "fresh_spawn_true_spawn_gate",
+        "evidence": {"true_spawn_promotion_stage": True},
+    }
+    dead_before_required_kills = _aggregate(
+        "ppo:true-spawn-dead-route",
+        [
+            EpisodeEval(
+                seed=7,
+                total_reward=-450.0,
+                level_completed=False,
+                death=True,
+                max_kills=4,
+                min_health=-6,
+                steps=1300,
+                steps_to_exit=6000,
+                stuck_events=19,
+                done_reason="death",
+                start_kills=0,
+                kill_delta=4,
+                max_kill_gain=4,
+                reset_source="episode",
+                first_visible_contacts=1,
+                first_shootable_contacts=1,
+                route_attempt_steps=450,
+                exit_route_attempt_steps=12,
+            )
+        ],
+    )
+    alive_at_required_kills = _aggregate(
+        "ppo:true-spawn-alive-route",
+        [
+            EpisodeEval(
+                seed=8,
+                total_reward=-60.0,
+                level_completed=False,
+                death=False,
+                max_kills=5,
+                min_health=10,
+                steps=1900,
+                steps_to_exit=6000,
+                stuck_events=120,
+                done_reason="max_steps",
+                start_kills=0,
+                kill_delta=5,
+                max_kill_gain=5,
+                reset_source="episode",
+                first_visible_contacts=1,
+                first_shootable_contacts=1,
+                route_attempt_steps=800,
+                exit_route_attempt_steps=120,
+            )
+        ],
+    )
+
+    dead_components = _policy_eval_selection_components(
+        dead_before_required_kills,
+        stage=true_spawn_stage,
+    )
+    alive_components = _policy_eval_selection_components(
+        alive_at_required_kills,
+        stage=true_spawn_stage,
+    )
+
+    assert dead_components["exit_route_attempt_rate"] == 0.0
+    assert dead_components["death_penalty"] == -300.0
+    assert alive_components["exit_route_attempt_rate"] == 1.0
+    assert alive_components["selection_score"] > dead_components["selection_score"]
+
+
 def test_policy_eval_aggregates_earned_kills_not_restored_snapshot_kills():
     inherited = EpisodeEval(
         seed=7,
