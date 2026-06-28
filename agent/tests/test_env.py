@@ -946,6 +946,99 @@ def test_skill_controller_recent_contact_does_not_suppress_exit_route():
     assert not mask["press_exit"]
 
 
+def test_skill_controller_failed_stale_exit_route_exposes_recovery():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(tick=80, kills=2, route=True, route_exit=False, x_units=-1400)
+    route_line = state.navigation.route_waypoint.line
+    route_line.line_id = 195
+    route_line.special = 88
+    state.navigation.use_lines.append(
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=2912 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=2912 * 65536, y_fp=-64 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=2912 * 65536, y_fp=64 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=2912 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=2200 * 65536,
+            nearest_distance_fp=2200 * 65536,
+        )
+    )
+    route_index = SKILL_ACTIONS.index("route_progression")
+
+    assert dict(zip(SKILL_ACTIONS, controller.action_mask(state)))["route_progression"]
+
+    for _ in range(4):
+        controller.record_action_history(
+            action_index=route_index,
+            had_shootable_target=False,
+            route_outcome={
+                "attempted": True,
+                "line_id": 330,
+                "exit": True,
+                "walk_trigger": False,
+                "progress_units": -1.0,
+                "reached": False,
+                "failed": True,
+            },
+        )
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+
+    assert mask["recover_stuck"]
+    assert not mask["route_progression"]
+
+
+def test_skill_controller_route_progression_recovers_after_failed_stale_exit_route():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(tick=80, kills=2, route=True, route_exit=False, x_units=-1400)
+    route_line = state.navigation.route_waypoint.line
+    route_line.line_id = 195
+    route_line.special = 88
+    state.navigation.forward_open = True
+    state.navigation.use_lines.append(
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=2912 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=2912 * 65536, y_fp=-64 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=2912 * 65536, y_fp=64 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=2912 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=2200 * 65536,
+            nearest_distance_fp=2200 * 65536,
+        )
+    )
+    route_index = SKILL_ACTIONS.index("route_progression")
+    for _ in range(4):
+        controller.record_action_history(
+            action_index=route_index,
+            had_shootable_target=False,
+            route_outcome={
+                "attempted": True,
+                "line_id": 330,
+                "exit": True,
+                "walk_trigger": False,
+                "progress_units": -1.0,
+                "reached": False,
+                "failed": True,
+            },
+        )
+
+    action, decision = controller.action_for(route_index, state)
+
+    assert decision["ppo_skill"] == "route_progression"
+    assert decision["skill"] in {
+        "unstick_approach_exit_line",
+        "unstick_route_to_exit_line",
+    }
+    assert decision["use_line"]["line_id"] == 330
+    assert action.raw.forward_move > 0
+
+
 def test_skill_controller_masks_far_exit_as_route_not_press():
     controller = SkillController()
     controller.policy._start_kills = 0

@@ -20,6 +20,7 @@ from .brain import (
     BrainPolicyParams,
     EXIT_LINE_SPECIALS,
     MANUAL_USE_LINE_SPECIALS,
+    WALK_TRIGGER_LINE_SPECIALS,
     cell_key,
     extract_features,
     raw_ticcmd_action,
@@ -44,6 +45,7 @@ from .skill_policy import features_from_tactical
 
 SKILL_ACTIONS = PPO_SKILL_ACTIONS
 LOW_HEALTH_RETREAT_STREAK_LIMIT = 96
+EXIT_ROUTE_FAILURE_RECOVERY_THRESHOLD = 4
 
 
 def _line_is_exit(line: dict[str, Any] | None) -> bool:
@@ -616,6 +618,10 @@ class SkillController:
             mask["seek_enemy"] = True
 
         progression_line = self.policy._select_progression_line(features)
+        exit_route_recovery = self._exit_route_recovery_needed(
+            features,
+            progression_line,
+        )
 
         if (
             not can_fire
@@ -636,7 +642,9 @@ class SkillController:
         ):
             mask["open_use_line"] = True
 
-        if not can_fire and progression_line is not None:
+        if exit_route_recovery:
+            mask["recover_stuck"] = True
+        elif not can_fire and progression_line is not None:
             if not self._suppress_route_after_contact_failures(
                 features,
                 recent_contact_active,
@@ -657,6 +665,30 @@ class SkillController:
             mask["route_progression"] = True
 
         return [mask[skill] for skill in SKILL_ACTIONS]
+
+    def _exit_route_recovery_needed(
+        self,
+        features: Any,
+        progression_line: dict[str, Any] | None,
+    ) -> bool:
+        """Returns whether a repeated stale-waypoint exit route should recover."""
+        if self._failed_route_attempt_count < EXIT_ROUTE_FAILURE_RECOVERY_THRESHOLD:
+            return False
+        if features.visible_enemies or self.policy._shootable_enemy(features) is not None:
+            return False
+        if not _line_is_exit(progression_line):
+            return False
+        route = features.navigation.get("route_waypoint", {})
+        if not isinstance(route, dict):
+            return False
+        route_line = route.get("line", {})
+        if not isinstance(route_line, dict):
+            return False
+        if int(route_line.get("line_id", 0)) == int(progression_line.get("line_id", 0)):
+            return False
+        return bool(route.get("walk_trigger")) or int(route_line.get("special", 0)) in (
+            WALK_TRIGGER_LINE_SPECIALS
+        )
 
     def _exit_press_ready(self, features: Any, line: dict[str, Any]) -> bool:
         """Returns whether the exit option can do exit activation work now."""
@@ -861,6 +893,8 @@ class SkillController:
             if line is None:
                 line = self._contact_route_waypoint(features)
             if line is not None:
+                if self._exit_route_recovery_needed(features, line):
+                    return self.policy._recover_from_stuck(features)
                 return self.policy._advance_progression_line(features, line, stuck)
             return self.policy._explore(features, stuck)
 
