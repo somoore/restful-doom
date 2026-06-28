@@ -1299,13 +1299,14 @@ def test_skill_controller_recovers_after_stalled_exit_push():
     stalled.navigation.front_blocking_line_special = 1
     stalled.navigation.front_block_distance_fp = 16 * 65536
     stalled.navigation.use_lines = state.navigation.use_lines
-    _next_action, next_decision = controller.action_for(
+    next_action, next_decision = controller.action_for(
         SKILL_ACTIONS.index("press_exit"),
         stalled,
     )
 
     assert first_decision["skill"] == "push_exit_switch"
-    assert next_decision["skill"] == "recover_exit_switch_approach"
+    assert next_decision["skill"] == "use_exit_route_blocker_ahead"
+    assert next_action.action == agent_pb2.ACTION_USE
 
 
 def test_skill_controller_turns_to_exit_when_close_blocked_path_is_misaligned():

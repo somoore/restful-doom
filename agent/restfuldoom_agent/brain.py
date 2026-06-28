@@ -2237,6 +2237,29 @@ class BrainPolicy:
                         ),
                     )
                 if self._exit_push_stalled(features, line, distance):
+                    if self._exit_route_blocker_ahead_ready(features):
+                        self._last_use_tick = features.tick
+                        return (
+                            semantic_action(
+                                agent_pb2.ACTION_USE,
+                                duration_tics=1,
+                                tick=features.tick,
+                            ),
+                            self._decision(
+                                "use_exit_route_blocker_ahead",
+                                features,
+                                stuck=stuck,
+                                use_line=line_record,
+                                front_block_distance_fp=int(
+                                    features.navigation.get("front_block_distance_fp", 0)
+                                ),
+                                front_blocking_line_special=int(
+                                    features.navigation.get(
+                                        "front_blocking_line_special", 0
+                                    )
+                                ),
+                            ),
+                        )
                     return self._recover_stalled_exit_push(
                         features,
                         line_record,
@@ -2271,27 +2294,6 @@ class BrainPolicy:
                         features,
                         stuck=stuck,
                         use_line=line_record,
-                    ),
-                )
-            if self._exit_route_blocker_ahead_ready(features):
-                self._last_use_tick = features.tick
-                return (
-                    semantic_action(
-                        agent_pb2.ACTION_USE,
-                        duration_tics=1,
-                        tick=features.tick,
-                    ),
-                    self._decision(
-                        "use_exit_route_blocker_ahead",
-                        features,
-                        stuck=stuck,
-                        use_line=line_record,
-                        front_block_distance_fp=int(
-                            features.navigation.get("front_block_distance_fp", 0)
-                        ),
-                        front_blocking_line_special=int(
-                            features.navigation.get("front_blocking_line_special", 0)
-                        ),
                     ),
                 )
             if min(distance, front_distance) > activate_distance:

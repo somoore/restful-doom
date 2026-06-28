@@ -2638,7 +2638,7 @@ def test_repeated_close_exit_push_keeps_approaching_clear_front_point(tmp_path):
     assert action.raw.forward_move > 0
 
 
-def test_stalled_exit_push_recovers_instead_of_pulsing_front_blocker(tmp_path):
+def test_stalled_exit_push_uses_front_blocker_before_recovery(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
         memory=memory,
@@ -2679,9 +2679,8 @@ def test_stalled_exit_push_recovers_instead_of_pulsing_front_blocker(tmp_path):
 
     action, decision = policy._advance_progression_line(features, exit_line, stuck=False)
 
-    assert decision["skill"] == "recover_exit_switch_approach"
-    assert action.raw.forward_move < 0
-    assert action.raw.side_move != 0
+    assert decision["skill"] == "use_exit_route_blocker_ahead"
+    assert action.action == agent_pb2.ACTION_USE
 
 
 def test_stalled_exit_push_closes_from_front_side_when_front_point_is_near(tmp_path):
