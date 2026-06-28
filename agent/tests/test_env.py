@@ -1039,6 +1039,51 @@ def test_skill_controller_route_progression_recovers_after_failed_stale_exit_rou
     assert action.raw.forward_move > 0
 
 
+def test_skill_controller_failed_far_walk_route_yields_to_local_use_recovery():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(
+        tick=80,
+        kills=2,
+        route=True,
+        contact_use=True,
+        contact_use_distance_units=64,
+    )
+    route_line = state.navigation.route_waypoint.line
+    route_line.line_id = 195
+    route_line.special = 88
+    route_line.distance_fp = 1500 * 65536
+    route_line.nearest_distance_fp = 1500 * 65536
+    route_index = SKILL_ACTIONS.index("route_progression")
+
+    assert dict(zip(SKILL_ACTIONS, controller.action_mask(state)))["route_progression"]
+
+    for _ in range(4):
+        controller.record_action_history(
+            action_index=route_index,
+            had_shootable_target=False,
+            route_outcome={
+                "attempted": True,
+                "line_id": 195,
+                "exit": False,
+                "walk_trigger": True,
+                "progress_units": -1.0,
+                "reached": False,
+                "failed": True,
+            },
+        )
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+    action, decision = controller.action_for(route_index, state)
+
+    assert mask["open_use_line"]
+    assert mask["recover_stuck"]
+    assert not mask["route_progression"]
+    assert decision["ppo_skill"] == "route_progression"
+    assert decision["skill"] == "unstick_use"
+    assert action.action == agent_pb2.ACTION_USE
+
+
 def test_skill_controller_masks_far_exit_as_route_not_press():
     controller = SkillController()
     controller.policy._start_kills = 0

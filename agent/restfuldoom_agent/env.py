@@ -622,6 +622,10 @@ class SkillController:
             features,
             progression_line,
         )
+        stale_route_recovery = self._stale_route_waypoint_recovery_needed(
+            features,
+            progression_line,
+        )
 
         if (
             not can_fire
@@ -642,7 +646,7 @@ class SkillController:
         ):
             mask["open_use_line"] = True
 
-        if exit_route_recovery:
+        if exit_route_recovery or stale_route_recovery:
             mask["recover_stuck"] = True
         elif not can_fire and progression_line is not None:
             if not self._suppress_route_after_contact_failures(
@@ -652,7 +656,8 @@ class SkillController:
             ):
                 mask["route_progression"] = True
         elif not can_fire and not features.visible_enemies and not recent_contact_active:
-            mask["route_progression"] = True
+            if not stale_route_recovery:
+                mask["route_progression"] = True
 
         if stuck:
             mask["recover_stuck"] = True
@@ -688,6 +693,39 @@ class SkillController:
             return False
         return bool(route.get("walk_trigger")) or int(route_line.get("special", 0)) in (
             WALK_TRIGGER_LINE_SPECIALS
+        )
+
+    def _stale_route_waypoint_recovery_needed(
+        self,
+        features: Any,
+        progression_line: dict[str, Any] | None,
+    ) -> bool:
+        """Returns whether a local affordance should break a stale route waypoint."""
+        if self._failed_route_attempt_count < EXIT_ROUTE_FAILURE_RECOVERY_THRESHOLD:
+            return False
+        if features.visible_enemies or self.policy._shootable_enemy(features) is not None:
+            return False
+        if not self.policy._has_episode_kill(features):
+            return False
+        if _line_is_exit(progression_line):
+            return False
+        route = features.navigation.get("route_waypoint", {})
+        if not isinstance(route, dict):
+            return False
+        route_line = route.get("line", {})
+        if not isinstance(route_line, dict):
+            return False
+        route_is_walk_trigger = bool(route.get("walk_trigger")) or int(
+            route_line.get("special", 0)
+        ) in WALK_TRIGGER_LINE_SPECIALS
+        if not route_is_walk_trigger:
+            return False
+        if float(route_line.get("distance", 0.0) or 0.0) <= 384.0:
+            return False
+        return (
+            self.policy._select_nearby_use_line(features) is not None
+            or self.policy._select_use_ray(features) is not None
+            or self.policy._should_use_ahead(features)
         )
 
     def _exit_press_ready(self, features: Any, line: dict[str, Any]) -> bool:
@@ -890,10 +928,15 @@ class SkillController:
 
         if skill == "route_progression":
             line = self.policy._select_progression_line(features)
+            if line is None and self._stale_route_waypoint_recovery_needed(features, None):
+                return self.policy._recover_from_stuck(features)
             if line is None:
                 line = self._contact_route_waypoint(features)
             if line is not None:
-                if self._exit_route_recovery_needed(features, line):
+                if self._exit_route_recovery_needed(
+                    features,
+                    line,
+                ) or self._stale_route_waypoint_recovery_needed(features, line):
                     return self.policy._recover_from_stuck(features)
                 return self.policy._advance_progression_line(features, line, stuck)
             return self.policy._explore(features, stuck)
