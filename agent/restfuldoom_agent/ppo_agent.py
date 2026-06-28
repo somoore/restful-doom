@@ -1012,7 +1012,11 @@ async def _evaluate_checkpoint_curriculum(
         "mean_stage_score": round(mean_score, 4),
         "worst_stage_score": round(worst_score, 4),
         "selection_score": aggregate_score,
-        "score_formula": "0.7 * mean_stage_score + 0.3 * worst_stage_score",
+        "score_formula": (
+            "0.7 * mean_stage_score + 0.3 * worst_stage_score; "
+            "stage scores include required-kill speed bonus when episodes end "
+            "with done_reason=required_kills"
+        ),
         "stages": stage_records,
     }
 
@@ -1025,8 +1029,52 @@ def _policy_eval_selection_score(eval_result: object) -> float:
         + float(getattr(result, "mean_kills", 0.0)) * 100.0
         + float(getattr(result, "level_completion_rate", 0.0)) * 500.0
         + float(getattr(result, "survival_rate", 0.0)) * 20.0
+        + _required_kill_speed_score(eval_result)
         - float(getattr(result, "mean_stuck_events", 0.0)) * 2.0,
         4,
+    )
+
+
+def _required_kill_speed_score(eval_result: object) -> float:
+    """Returns a bounded selection bonus for fast required-kill terminations."""
+    episodes = getattr(eval_result, "episodes", [])
+    if not isinstance(episodes, list) or not episodes:
+        return 0.0
+    successful = [
+        episode
+        for episode in episodes
+        if getattr(episode, "done_reason", None) == "required_kills"
+        and _episode_earned_kills_for_score(episode) > 0
+    ]
+    if not successful:
+        return 0.0
+    max_steps = max(
+        1,
+        *[
+            int(getattr(episode, "steps_to_exit", 0) or getattr(episode, "steps", 0) or 0)
+            for episode in episodes
+        ],
+    )
+    mean_steps = sum(
+        int(getattr(episode, "steps_to_required_kills", 0) or getattr(episode, "steps", 0))
+        for episode in successful
+    ) / len(successful)
+    success_rate = len(successful) / len(episodes)
+    speed_fraction = max(0.0, min(1.0, (max_steps - mean_steps) / max_steps))
+    return success_rate * 40.0 + speed_fraction * 40.0
+
+
+def _episode_earned_kills_for_score(episode: object) -> int:
+    """Returns earned kills for score helpers without importing ppo_eval internals."""
+    absolute_gain = max(
+        0,
+        int(getattr(episode, "max_kills", 0))
+        - int(getattr(episode, "start_kills", 0)),
+    )
+    return max(
+        int(getattr(episode, "kill_delta", 0)),
+        int(getattr(episode, "max_kill_gain", 0)),
+        absolute_gain,
     )
 
 

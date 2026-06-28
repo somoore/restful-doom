@@ -280,8 +280,9 @@ def test_ppo_eval_episode_serializes_contact_diagnostics():
         min_health=80,
         steps=128,
         steps_to_exit=640,
+        steps_to_required_kills=128,
         stuck_events=0,
-        done_reason="max_steps",
+        done_reason="required_kills",
         kill_delta=2,
         max_kill_gain=2,
         skill_counts={"close_visible_contact": 40, "fire": 12},
@@ -311,6 +312,7 @@ def test_ppo_eval_episode_serializes_contact_diagnostics():
     assert row["shootable_target_steps"] == 12
     assert row["fire_on_shootable_steps"] == 12
     assert row["damage_delta"] == 20
+    assert row["steps_to_required_kills"] == 128
 
 
 def test_expert_skill_labels_map_to_ppo_actions():
@@ -1357,6 +1359,69 @@ def test_policy_eval_selection_score_rewards_cross_stage_competence():
     )
 
     assert _policy_eval_selection_score(useful) > _policy_eval_selection_score(weak)
+
+
+def test_policy_eval_selection_score_prefers_faster_required_kill():
+    slow = PolicyEval(
+        result=EvaluationResult(
+            policy_id="ppo:slow",
+            level_completion_rate=0.0,
+            mean_kills=1.0,
+            survival_rate=1.0,
+            mean_steps_to_exit=640,
+            mean_stuck_events=0.0,
+            episode_count=1,
+            mean_reward=20.0,
+        ),
+        episodes=[
+            EpisodeEval(
+                seed=7,
+                total_reward=20.0,
+                level_completed=False,
+                death=False,
+                max_kills=1,
+                min_health=100,
+                steps=400,
+                steps_to_exit=640,
+                steps_to_required_kills=400,
+                stuck_events=0,
+                done_reason="required_kills",
+                kill_delta=1,
+                max_kill_gain=1,
+            )
+        ],
+    )
+    fast = PolicyEval(
+        result=EvaluationResult(
+            policy_id="ppo:fast",
+            level_completion_rate=0.0,
+            mean_kills=1.0,
+            survival_rate=1.0,
+            mean_steps_to_exit=640,
+            mean_stuck_events=0.0,
+            episode_count=1,
+            mean_reward=20.0,
+        ),
+        episodes=[
+            EpisodeEval(
+                seed=8,
+                total_reward=20.0,
+                level_completed=False,
+                death=False,
+                max_kills=1,
+                min_health=100,
+                steps=100,
+                steps_to_exit=640,
+                steps_to_required_kills=100,
+                stuck_events=0,
+                done_reason="required_kills",
+                kill_delta=1,
+                max_kill_gain=1,
+            )
+        ],
+    )
+
+    assert _policy_eval_selection_score(fast) > _policy_eval_selection_score(slow)
 
 
 def test_policy_eval_aggregates_earned_kills_not_restored_snapshot_kills():

@@ -26,6 +26,7 @@ class EpisodeEval:
     steps_to_exit: int
     stuck_events: int
     done_reason: str | None
+    steps_to_required_kills: int = 0
     start_kills: int = 0
     kill_delta: int = 0
     max_kill_gain: int = 0
@@ -319,6 +320,9 @@ async def evaluate_skill_policy(
                     min_health=min_health,
                     steps=steps,
                     steps_to_exit=end_tick - start_tick if level_completed else step_limit,
+                    steps_to_required_kills=steps
+                    if done_reason == "required_kills"
+                    else 0,
                     stuck_events=stuck_events,
                     done_reason=done_reason,
                     start_kills=start_kills,
