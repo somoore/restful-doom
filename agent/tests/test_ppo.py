@@ -15,6 +15,7 @@ from restfuldoom_agent.ppo_agent import (
     _evaluate_checkpoint_curriculum,
     _redacted_restore_argv,
     _render_snapshot_restore_command,
+    _policy_eval_selection_components,
     _policy_eval_selection_score,
     _record_ppo_checkpoint,
     _reset_start_from_trajectory,
@@ -1424,6 +1425,77 @@ def test_policy_eval_selection_score_prefers_faster_required_kill():
     assert _policy_eval_selection_score(fast) > _policy_eval_selection_score(slow)
 
 
+def test_required_kill_selection_score_caps_reward_tiebreak_for_speed():
+    slow_high_reward = PolicyEval(
+        result=EvaluationResult(
+            policy_id="ppo:slow-high-reward",
+            level_completion_rate=0.0,
+            mean_kills=1.0,
+            survival_rate=1.0,
+            mean_steps_to_exit=640,
+            mean_stuck_events=0.0,
+            episode_count=1,
+            mean_reward=55.0,
+        ),
+        episodes=[
+            EpisodeEval(
+                seed=7,
+                total_reward=55.0,
+                level_completed=False,
+                death=False,
+                max_kills=1,
+                min_health=100,
+                steps=240,
+                steps_to_exit=640,
+                steps_to_required_kills=240,
+                stuck_events=0,
+                done_reason="required_kills",
+                kill_delta=1,
+                max_kill_gain=1,
+            )
+        ],
+    )
+    fast_lower_reward = PolicyEval(
+        result=EvaluationResult(
+            policy_id="ppo:fast-lower-reward",
+            level_completion_rate=0.0,
+            mean_kills=1.0,
+            survival_rate=1.0,
+            mean_steps_to_exit=640,
+            mean_stuck_events=0.0,
+            episode_count=1,
+            mean_reward=10.0,
+        ),
+        episodes=[
+            EpisodeEval(
+                seed=8,
+                total_reward=10.0,
+                level_completed=False,
+                death=False,
+                max_kills=1,
+                min_health=100,
+                steps=100,
+                steps_to_exit=640,
+                steps_to_required_kills=100,
+                stuck_events=0,
+                done_reason="required_kills",
+                kill_delta=1,
+                max_kill_gain=1,
+            )
+        ],
+    )
+
+    slow_components = _policy_eval_selection_components(slow_high_reward)
+    fast_components = _policy_eval_selection_components(fast_lower_reward)
+
+    assert slow_components["mode"] == "required_kill_speed"
+    assert slow_components["reward_tiebreak"] == 20.0
+    assert fast_components["required_kill_speed_bonus"] > slow_components[
+        "required_kill_speed_bonus"
+    ]
+    assert fast_components["selection_score"] > slow_components["selection_score"]
+
+
 def test_policy_eval_aggregates_earned_kills_not_restored_snapshot_kills():
     inherited = EpisodeEval(
         seed=7,
@@ -1612,12 +1684,14 @@ def test_checkpoint_curriculum_eval_restores_snapshot_stages(monkeypatch, tmp_pa
     )
 
     assert payload["schema"] == "restfuldoom.ppo_checkpoint_curriculum_eval.v1"
+    assert payload["score_schema"] == "restfuldoom.ppo_checkpoint_eval_score.v2"
     assert seen_configs
     config = seen_configs[0]
     assert config.reset_mode == "snapshot"
     assert config.snapshot == {"id": "slot-3", "slot": 3, "ref": "save_slot:3"}
     assert config.curriculum_stage["snapshot_restore"]["api_method"] == "grpc_load_snapshot"
     assert config.curriculum_stage["snapshot_restore"]["slot"] == 3
+    assert payload["stages"][0]["selection_score_components"]["mode"] == "standard"
     assert payload["stages"][0]["result"]["result"]["mean_kills"] == 0.0
 
 

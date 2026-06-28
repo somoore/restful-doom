@@ -27,6 +27,8 @@ from .schemas import map_expert_skill_to_ppo_action, pad_observation_features
 from .snapshot_curriculum import load_snapshot_curriculum
 from .skill_policy import features_from_record
 
+CHECKPOINT_EVAL_SCORE_SCHEMA = "restfuldoom.ppo_checkpoint_eval_score.v2"
+
 
 async def train(args: argparse.Namespace) -> dict[str, object]:
     """Runs PPO collection and update batches."""
@@ -978,11 +980,13 @@ async def _evaluate_checkpoint_curriculum(
             deterministic=not args.checkpoint_eval_sample,
             before_reset=before_reset,
         )
-        stage_score = _policy_eval_selection_score(result)
+        stage_score_components = _policy_eval_selection_components(result)
+        stage_score = float(stage_score_components["selection_score"])
         stage_records.append(
             {
                 "stage": stage_dict,
                 "selection_score": stage_score,
+                "selection_score_components": stage_score_components,
                 "result": result.to_dict(),
             }
         )
@@ -1006,6 +1010,7 @@ async def _evaluate_checkpoint_curriculum(
         "terminate_on_required_kills": bool(
             getattr(args, "terminate_on_required_kills", False)
         ),
+        "score_schema": CHECKPOINT_EVAL_SCORE_SCHEMA,
         "allowed_skills": list(getattr(args, "allowed_skill", []) or []),
         "strict_allowed_skills": bool(getattr(args, "strict_allowed_skills", False)),
         "stage_count": len(stage_records),
@@ -1014,8 +1019,8 @@ async def _evaluate_checkpoint_curriculum(
         "selection_score": aggregate_score,
         "score_formula": (
             "0.7 * mean_stage_score + 0.3 * worst_stage_score; "
-            "stage scores include required-kill speed bonus when episodes end "
-            "with done_reason=required_kills"
+            "required-kill stage scores use reliability + speed with shaped "
+            "reward capped as a tiebreaker"
         ),
         "stages": stage_records,
     }
@@ -1023,23 +1028,70 @@ async def _evaluate_checkpoint_curriculum(
 
 def _policy_eval_selection_score(eval_result: object) -> float:
     """Scores deterministic eval results for resume selection, not promotion."""
+    return float(_policy_eval_selection_components(eval_result)["selection_score"])
+
+
+def _policy_eval_selection_components(eval_result: object) -> dict[str, object]:
+    """Returns deterministic eval score components for resume selection."""
     result = getattr(eval_result, "result", eval_result)
-    return round(
-        float(getattr(result, "mean_reward", 0.0))
-        + float(getattr(result, "mean_kills", 0.0)) * 100.0
-        + float(getattr(result, "level_completion_rate", 0.0)) * 500.0
-        + float(getattr(result, "survival_rate", 0.0)) * 20.0
-        + _required_kill_speed_score(eval_result)
-        - float(getattr(result, "mean_stuck_events", 0.0)) * 2.0,
+    episodes = getattr(eval_result, "episodes", [])
+    required_kill_components = _required_kill_score_components(episodes)
+    completion_bonus = float(getattr(result, "level_completion_rate", 0.0)) * 500.0
+    survival_bonus = float(getattr(result, "survival_rate", 0.0)) * 20.0
+    stuck_penalty = -float(getattr(result, "mean_stuck_events", 0.0)) * 2.0
+    if required_kill_components is not None:
+        score = round(
+            float(required_kill_components["earned_kill_bonus"])
+            + float(required_kill_components["success_bonus"])
+            + float(required_kill_components["speed_bonus"])
+            + float(required_kill_components["reward_tiebreak"])
+            + completion_bonus
+            + survival_bonus
+            + stuck_penalty,
+            4,
+        )
+        return {
+            "schema": CHECKPOINT_EVAL_SCORE_SCHEMA,
+            "mode": "required_kill_speed",
+            "selection_score": score,
+            "mean_reward": float(getattr(result, "mean_reward", 0.0)),
+            "reward_tiebreak": required_kill_components["reward_tiebreak"],
+            "earned_kill_bonus": required_kill_components["earned_kill_bonus"],
+            "required_kill_success_bonus": required_kill_components["success_bonus"],
+            "required_kill_speed_bonus": required_kill_components["speed_bonus"],
+            "required_kill_success_rate": required_kill_components["success_rate"],
+            "required_kill_speed_fraction": required_kill_components["speed_fraction"],
+            "mean_steps_to_required_kills": required_kill_components[
+                "mean_steps_to_required_kills"
+            ],
+            "completion_bonus": round(completion_bonus, 4),
+            "survival_bonus": round(survival_bonus, 4),
+            "stuck_penalty": round(stuck_penalty, 4),
+            "reward_tiebreak_cap": 20.0,
+        }
+    mean_reward = float(getattr(result, "mean_reward", 0.0))
+    earned_kill_bonus = float(getattr(result, "mean_kills", 0.0)) * 100.0
+    score = round(
+        mean_reward + earned_kill_bonus + completion_bonus + survival_bonus + stuck_penalty,
         4,
     )
+    return {
+        "schema": CHECKPOINT_EVAL_SCORE_SCHEMA,
+        "mode": "standard",
+        "selection_score": score,
+        "mean_reward": round(mean_reward, 4),
+        "reward_tiebreak": round(mean_reward, 4),
+        "earned_kill_bonus": round(earned_kill_bonus, 4),
+        "completion_bonus": round(completion_bonus, 4),
+        "survival_bonus": round(survival_bonus, 4),
+        "stuck_penalty": round(stuck_penalty, 4),
+    }
 
 
-def _required_kill_speed_score(eval_result: object) -> float:
-    """Returns a bounded selection bonus for fast required-kill terminations."""
-    episodes = getattr(eval_result, "episodes", [])
+def _required_kill_score_components(episodes: object) -> dict[str, object] | None:
+    """Returns reliability and speed components for required-kill evals."""
     if not isinstance(episodes, list) or not episodes:
-        return 0.0
+        return None
     successful = [
         episode
         for episode in episodes
@@ -1047,7 +1099,11 @@ def _required_kill_speed_score(eval_result: object) -> float:
         and _episode_earned_kills_for_score(episode) > 0
     ]
     if not successful:
-        return 0.0
+        if not any(
+            getattr(episode, "done_reason", None) == "required_kills"
+            for episode in episodes
+        ):
+            return None
     max_steps = max(
         1,
         *[
@@ -1055,13 +1111,37 @@ def _required_kill_speed_score(eval_result: object) -> float:
             for episode in episodes
         ],
     )
-    mean_steps = sum(
-        int(getattr(episode, "steps_to_required_kills", 0) or getattr(episode, "steps", 0))
-        for episode in successful
-    ) / len(successful)
+    mean_steps = (
+        sum(
+            int(
+                getattr(episode, "steps_to_required_kills", 0)
+                or getattr(episode, "steps", 0)
+            )
+            for episode in successful
+        )
+        / len(successful)
+        if successful
+        else float(max_steps)
+    )
     success_rate = len(successful) / len(episodes)
-    speed_fraction = max(0.0, min(1.0, (max_steps - mean_steps) / max_steps))
-    return success_rate * 40.0 + speed_fraction * 40.0
+    speed_fraction = success_rate * max(
+        0.0,
+        min(1.0, (max_steps - mean_steps) / max_steps),
+    )
+    mean_reward = sum(float(getattr(episode, "total_reward", 0.0)) for episode in episodes)
+    mean_reward /= len(episodes)
+    reward_tiebreak = max(-20.0, min(20.0, mean_reward))
+    mean_earned_kills = sum(_episode_earned_kills_for_score(episode) for episode in episodes)
+    mean_earned_kills /= len(episodes)
+    return {
+        "success_rate": round(success_rate, 4),
+        "speed_fraction": round(speed_fraction, 4),
+        "mean_steps_to_required_kills": round(mean_steps, 4),
+        "reward_tiebreak": round(reward_tiebreak, 4),
+        "earned_kill_bonus": round(mean_earned_kills * 120.0, 4),
+        "success_bonus": round(success_rate * 80.0, 4),
+        "speed_bonus": round(speed_fraction * 120.0, 4),
+    }
 
 
 def _episode_earned_kills_for_score(episode: object) -> int:
