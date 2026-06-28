@@ -2425,6 +2425,49 @@ def _verify_snapshot_restored_state(
                 f"{expected_line_id!r} got {actual_line_id!r}"
             )
 
+    exit_use_line = None
+    if "exit_use_line_id" in expected:
+        compared.append("exit_use_line_id")
+        expected_line_id = _optional_int(expected.get("exit_use_line_id"))
+        exit_use_line = _snapshot_use_line(actual, raw_state, expected_line_id)
+        actual_line_id = _snapshot_line_id(exit_use_line)
+        if actual_line_id != expected_line_id:
+            errors.append(
+                "exit_use_line_id expected "
+                f"{expected_line_id!r} got {actual_line_id!r}"
+            )
+
+    if "exit_use_line_special" in expected:
+        compared.append("exit_use_line_special")
+        expected_special = _optional_int(expected.get("exit_use_line_special"))
+        if exit_use_line is None:
+            expected_line_id = _optional_int(expected.get("exit_use_line_id"))
+            exit_use_line = _snapshot_use_line(actual, raw_state, expected_line_id)
+        actual_special = _snapshot_line_special(exit_use_line)
+        if actual_special != expected_special:
+            errors.append(
+                "exit_use_line_special expected "
+                f"{expected_special!r} got {actual_special!r}"
+            )
+
+    if "exit_use_line_max_distance_units" in expected:
+        compared.append("exit_use_line_max_distance_units")
+        if exit_use_line is None:
+            expected_line_id = _optional_int(expected.get("exit_use_line_id"))
+            exit_use_line = _snapshot_use_line(actual, raw_state, expected_line_id)
+        actual_distance = _snapshot_line_distance_units(exit_use_line)
+        expected_max = _optional_float(expected.get("exit_use_line_max_distance_units"))
+        if actual_distance is None:
+            errors.append(
+                "exit_use_line_max_distance_units expected "
+                f"<= {expected_max!r} got None"
+            )
+        elif expected_max is not None and actual_distance > expected_max:
+            errors.append(
+                "exit_use_line_max_distance_units expected "
+                f"<= {expected_max!r} got {actual_distance!r}"
+            )
+
     verification["compared_fields"] = compared
     verification["errors"] = errors
     verification["valid"] = not errors
@@ -2463,6 +2506,59 @@ def _snapshot_route_waypoint_line_id(actual: dict[str, Any], raw_state: Any) -> 
     return None
 
 
+def _snapshot_use_line(
+    actual: dict[str, Any],
+    raw_state: Any,
+    line_id: int | None,
+) -> Any | None:
+    if line_id is None:
+        return None
+    navigation = actual.get("navigation")
+    if isinstance(navigation, dict):
+        for line in navigation.get("use_lines", []) or []:
+            if isinstance(line, dict) and _optional_int(line.get("line_id")) == line_id:
+                return line
+    raw_navigation = getattr(raw_state, "navigation", None)
+    for line in getattr(raw_navigation, "use_lines", []) or []:
+        if _snapshot_line_id(line) == line_id:
+            return line
+    return None
+
+
+def _snapshot_line_id(line: Any | None) -> int | None:
+    if isinstance(line, dict):
+        return _optional_int(line.get("line_id"))
+    if line is not None and hasattr(line, "line_id"):
+        return _optional_int(getattr(line, "line_id"))
+    return None
+
+
+def _snapshot_line_special(line: Any | None) -> int | None:
+    if isinstance(line, dict):
+        return _optional_int(line.get("special"))
+    if line is not None and hasattr(line, "special"):
+        return _optional_int(getattr(line, "special"))
+    return None
+
+
+def _snapshot_line_distance_units(line: Any | None) -> float | None:
+    if isinstance(line, dict):
+        if "distance" in line:
+            return _optional_float(line.get("distance"))
+        if "nearest_distance_fp" in line:
+            value = _optional_float(line.get("nearest_distance_fp"))
+            return None if value is None else value / 65536.0
+        if "distance_fp" in line:
+            value = _optional_float(line.get("distance_fp"))
+            return None if value is None else value / 65536.0
+    if line is not None:
+        for attr in ("nearest_distance_fp", "distance_fp"):
+            if hasattr(line, attr):
+                value = _optional_float(getattr(line, attr))
+                return None if value is None else value / 65536.0
+    return None
+
+
 def _route_waypoint_dict(actual: dict[str, Any]) -> dict[str, Any]:
     navigation = actual.get("navigation")
     if isinstance(navigation, dict):
@@ -2477,6 +2573,15 @@ def _optional_int(value: object) -> int | None:
         if value is None:
             return None
         return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_float(value: object) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
     except (TypeError, ValueError):
         return None
 

@@ -460,6 +460,13 @@ def _expected_state(record: dict[str, Any]) -> dict[str, Any]:
         line = route.get("line")
         if isinstance(line, dict) and _int_or_none(line.get("line_id")) is not None:
             expected["route_waypoint_line_id"] = int(line["line_id"])
+    exit_line = _exit_decision_use_line(record)
+    if exit_line is not None:
+        expected["exit_use_line_id"] = int(exit_line["line_id"])
+        expected["exit_use_line_special"] = int(exit_line["special"])
+        expected["exit_use_line_max_distance_units"] = (
+            POST_COMBAT_EXIT_ROUTE_APPROACH_DISTANCE_UNITS
+        )
     expected["damage_delta"] = _damage_delta(record)
     expected["kill_delta"] = _kill_delta(record)
     done_reason = _record_info(record).get("done_reason")
@@ -555,15 +562,8 @@ def _is_post_combat_exit_route(
     if health is None or health < POST_COMBAT_EXIT_ROUTE_MIN_HEALTH:
         return False
     decision = _policy_decision(record)
-    decision_line = decision.get("use_line")
-    if not isinstance(decision_line, dict):
-        return False
-    special = _int_or_none(decision_line.get("special"))
-    line_id = _int_or_none(decision_line.get("line_id"))
-    if special not in EXIT_LINE_SPECIALS or line_id is None or line_id <= 0:
-        return False
-    distance = _float_or_none(decision_line.get("distance"))
-    if distance is None or distance > POST_COMBAT_EXIT_ROUTE_APPROACH_DISTANCE_UNITS:
+    decision_line = _exit_decision_use_line(record)
+    if decision_line is None:
         return False
     return str(decision.get("skill", "")) in {
         "approach_exit_switch_front",
@@ -581,6 +581,25 @@ def _is_post_combat_exit_route(
         "turn_to_exit_switch",
         "push_exit_switch",
         "press_exit_switch",
+    }
+
+
+def _exit_decision_use_line(record: dict[str, Any]) -> dict[str, Any] | None:
+    decision_line = _policy_decision(record).get("use_line")
+    if not isinstance(decision_line, dict):
+        return None
+    special = _int_or_none(decision_line.get("special"))
+    line_id = _int_or_none(decision_line.get("line_id"))
+    if special not in EXIT_LINE_SPECIALS or line_id is None or line_id <= 0:
+        return None
+    distance = _float_or_none(decision_line.get("distance"))
+    if distance is None or distance > POST_COMBAT_EXIT_ROUTE_APPROACH_DISTANCE_UNITS:
+        return None
+    return {
+        **decision_line,
+        "line_id": line_id,
+        "special": special,
+        "distance": distance,
     }
 
 

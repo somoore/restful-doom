@@ -163,6 +163,12 @@ def test_snapshot_builder_selects_post_combat_exit_route_from_decision_line(tmp_
     assert manifest["stages"][0]["evidence"]["source_record_index"] == 2
     assert manifest["stages"][0]["expected_state"]["route_waypoint_exit"] is False
     assert manifest["stages"][0]["expected_state"]["route_waypoint_line_id"] == 195
+    assert manifest["stages"][0]["expected_state"]["exit_use_line_id"] == 330
+    assert manifest["stages"][0]["expected_state"]["exit_use_line_special"] == 11
+    assert (
+        manifest["stages"][0]["expected_state"]["exit_use_line_max_distance_units"]
+        == 900.0
+    )
 
 
 def test_snapshot_builder_rejects_exit_control_without_exit_route_waypoint(tmp_path):
@@ -725,6 +731,68 @@ def test_native_snapshot_load_verification_uses_raw_route_waypoint_fallback():
     assert ok["valid"] is True
     assert bad["valid"] is False
     assert any("route_waypoint_line_id" in error for error in bad["errors"])
+
+
+def test_native_snapshot_load_verification_checks_exit_use_line():
+    expected = {
+        "episode": 1,
+        "map": 1,
+        "exit_use_line_id": 330,
+        "exit_use_line_special": 11,
+        "exit_use_line_max_distance_units": 896.0,
+    }
+    actual = {
+        "episode": 1,
+        "map": 1,
+        "navigation": {
+            "use_lines": [
+                {
+                    "line_id": 330,
+                    "special": 11,
+                    "nearest_distance_fp": 512 * 65536,
+                }
+            ]
+        },
+    }
+    wrong_line = {
+        "episode": 1,
+        "map": 1,
+        "navigation": {
+            "use_lines": [
+                {
+                    "line_id": 330,
+                    "special": 88,
+                    "nearest_distance_fp": 512 * 65536,
+                }
+            ]
+        },
+    }
+
+    ok = _verify_snapshot_restored_state(
+        actual=actual,
+        expected=expected,
+        raw_state=_state(combat=False),
+        enabled=True,
+        tick_tolerance=35,
+        verify_stream_tick=False,
+        position_tolerance_fp=160 * 65536,
+    )
+    bad = _verify_snapshot_restored_state(
+        actual=wrong_line,
+        expected=expected,
+        raw_state=_state(combat=False),
+        enabled=True,
+        tick_tolerance=35,
+        verify_stream_tick=False,
+        position_tolerance_fp=160 * 65536,
+    )
+
+    assert ok["valid"] is True
+    assert "exit_use_line_id" in ok["compared_fields"]
+    assert "exit_use_line_special" in ok["compared_fields"]
+    assert "exit_use_line_max_distance_units" in ok["compared_fields"]
+    assert bad["valid"] is False
+    assert any("exit_use_line_special" in error for error in bad["errors"])
 
 
 class _FakeSnapshotClient:

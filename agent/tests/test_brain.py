@@ -2477,7 +2477,7 @@ def test_recent_exit_line_target_rebuilds_when_live_line_drops(tmp_path):
     assert "front_distance" in target
 
 
-def test_close_exit_line_pushes_switch_before_blocked_front_recovery(tmp_path):
+def test_close_exit_line_approaches_front_before_push_window(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
         memory=memory,
@@ -2506,13 +2506,13 @@ def test_close_exit_line_pushes_switch_before_blocked_front_recovery(tmp_path):
 
     action, decision = policy._advance_progression_line(features, line, stuck=False)
 
-    assert decision["skill"] == "push_exit_switch"
+    assert decision["skill"] == "approach_exit_switch_front"
     assert decision["use_line"]["line_id"] == 330
+    assert not action.raw.buttons
     assert action.raw.forward_move > 0
-    assert action.raw.buttons & 2
 
 
-def test_close_exit_line_uses_side_manual_probe_before_push(tmp_path):
+def test_close_exit_line_pushes_before_side_manual_probe(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
         memory=memory,
@@ -2545,12 +2545,12 @@ def test_close_exit_line_uses_side_manual_probe_before_push(tmp_path):
 
     action = asyncio.run(policy.next_action(game_state))
 
-    assert policy.last_decision["skill"] == "turn_to_use_line"
-    assert policy.last_decision["direction_probe"]["angle_offset_degrees"] == 90
-    assert action.action == 3
+    assert policy.last_decision["skill"] == "push_exit_switch"
+    assert policy.last_decision["use_line"]["line_id"] == 330
+    assert action.raw.buttons & 2
 
 
-def test_close_exit_line_uses_front_manual_probe_before_side_probe(tmp_path):
+def test_close_exit_line_pushes_before_front_manual_probe(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
         memory=memory,
@@ -2591,12 +2591,12 @@ def test_close_exit_line_uses_front_manual_probe_before_side_probe(tmp_path):
 
     action = asyncio.run(policy.next_action(game_state))
 
-    assert policy.last_decision["skill"] == "use_directional_line"
-    assert policy.last_decision["direction_probe"]["angle_offset_degrees"] == 0
+    assert policy.last_decision["skill"] == "push_exit_switch"
+    assert policy.last_decision["use_line"]["line_id"] == 330
     assert action.raw.buttons & 2
 
 
-def test_repeated_close_exit_push_approaches_switch_front(tmp_path):
+def test_repeated_close_exit_push_recovers_from_bad_approach(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
         memory=memory,
@@ -2632,14 +2632,14 @@ def test_repeated_close_exit_push_approaches_switch_front(tmp_path):
     exit_line["front_distance"] = 152.0
     action, decision = policy._advance_progression_line(features, exit_line, stuck=False)
 
-    assert decision["skill"] == "approach_exit_switch_front"
+    assert decision["skill"] == "recover_exit_switch_approach"
     assert decision["use_line"]["line_id"] == 330
     assert not action.raw.buttons
-    assert action.raw.forward_move > 0
-    assert action.raw.angle_turn > 0
+    assert action.raw.forward_move < 0
+    assert action.raw.side_move != 0
 
 
-def test_stalled_exit_push_pulses_front_blocking_line_use(tmp_path):
+def test_stalled_exit_push_recovers_instead_of_pulsing_front_blocker(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
         memory=memory,
@@ -2680,9 +2680,9 @@ def test_stalled_exit_push_pulses_front_blocking_line_use(tmp_path):
 
     action, decision = policy._advance_progression_line(features, exit_line, stuck=False)
 
-    assert decision["skill"] == "use_exit_route_blocker_ahead"
-    assert decision["front_blocking_line_special"] == 1
-    assert action.action == agent_pb2.ACTION_USE
+    assert decision["skill"] == "recover_exit_switch_approach"
+    assert action.raw.forward_move < 0
+    assert action.raw.side_move != 0
 
 
 def test_stalled_exit_push_closes_from_front_side_when_front_point_is_near(tmp_path):
@@ -2730,7 +2730,7 @@ def test_stalled_exit_push_closes_from_front_side_when_front_point_is_near(tmp_p
     assert action.raw.forward_move > 0
 
 
-def test_stalled_exit_push_retries_next_unblocked_close_assist_door(tmp_path):
+def test_stalled_exit_push_recovers_instead_of_retrying_assist_door(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
         memory=memory,
@@ -2792,13 +2792,13 @@ def test_stalled_exit_push_retries_next_unblocked_close_assist_door(tmp_path):
 
     action, decision = policy._advance_progression_line(features, exit_line, stuck=False)
 
-    assert decision["skill"] == "retry_exit_assist_door"
-    assert decision["use_line"]["line_id"] == 324
-    assert action.raw.buttons & 2
-    assert action.raw.forward_move > 0
+    assert decision["skill"] == "recover_exit_switch_approach"
+    assert decision["use_line"]["line_id"] == 330
+    assert action.raw.forward_move < 0
+    assert action.raw.side_move != 0
 
 
-def test_stalled_exit_push_turns_to_retry_assist_door_when_off_angle(tmp_path):
+def test_stalled_exit_push_recovers_instead_of_turning_to_retry_assist_door(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
         memory=memory,
@@ -2847,12 +2847,13 @@ def test_stalled_exit_push_turns_to_retry_assist_door_when_off_angle(tmp_path):
 
     action, decision = policy._advance_progression_line(features, exit_line, stuck=False)
 
-    assert decision["skill"] == "turn_to_retry_exit_assist_door"
-    assert decision["use_line"]["line_id"] == 325
-    assert action.action in {3, 4}
+    assert decision["skill"] == "recover_exit_switch_approach"
+    assert decision["use_line"]["line_id"] == 330
+    assert action.raw.forward_move < 0
+    assert action.raw.side_move != 0
 
 
-def test_close_exit_line_turns_to_switch_when_line_is_off_angle(tmp_path):
+def test_close_exit_line_uses_front_approach_when_front_point_is_aligned(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
         memory=memory,
@@ -2881,9 +2882,10 @@ def test_close_exit_line_turns_to_switch_when_line_is_off_angle(tmp_path):
 
     action, decision = policy._advance_progression_line(features, line, stuck=False)
 
-    assert decision["skill"] == "turn_to_exit_switch"
+    assert decision["skill"] == "approach_exit_switch_front"
     assert decision["use_line"]["line_id"] == 330
-    assert action.action == 3
+    assert action.raw.forward_move > 0
+    assert not action.raw.buttons
 
 
 def test_policy_approaches_front_side_before_using_manual_line(tmp_path):
@@ -2913,7 +2915,7 @@ def test_policy_approaches_front_side_before_using_manual_line(tmp_path):
 
     action = asyncio.run(policy.next_action(game_state))
 
-    assert policy.last_decision["skill"] == "approach_progression_line_front"
+    assert policy.last_decision["skill"] == "approach_exit_switch_front"
     assert policy.last_decision["use_line"]["side"] == 1
     assert action.raw.forward_move > 0
     assert action.raw.buttons == 0

@@ -725,9 +725,10 @@ For post-combat exit-routing gates, use `--auto post-combat` and
 `--auto post-combat-exit-route`. Both default to `--post-combat-kills 5` for
 E1M1; adjust that threshold for other maps or stricter gates. The
 `post-combat-exit-route` selector now requires a live route waypoint with
-`exit=true` and a positive route line id. Exit-control skills or visible exit
-use-lines alone are not enough; that keeps focused exit-route snapshots from
-being seeded by misleading line-195 post-combat states.
+`exit=true` and a positive route line id, or a nearby verified exit use-line
+recorded in the snapshot `expected_state`. Exit-control skills alone are not
+enough; that keeps focused exit-route snapshots from being seeded by misleading
+line-195 post-combat states.
 
 For native in-process curriculum, capture real save slots while the structured
 brain drives Doom:

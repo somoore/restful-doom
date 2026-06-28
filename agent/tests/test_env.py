@@ -1165,6 +1165,32 @@ def test_skill_controller_masks_far_exit_as_route_not_press():
     assert controller.heuristic_action_index(state) == SKILL_ACTIONS.index("route_progression")
 
 
+def test_skill_controller_keeps_midrange_exit_out_of_generic_open_use():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(kills=1, enemy=False)
+    state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=480 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=480 * 65536, y_fp=-32 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=480 * 65536, y_fp=32 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=480 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=480 * 65536,
+            nearest_distance_fp=480 * 65536,
+        )
+    ]
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+
+    assert mask["route_progression"]
+    assert not mask["open_use_line"]
+    assert not mask["press_exit"]
+    assert controller.heuristic_action_index(state) == SKILL_ACTIONS.index("route_progression")
+
+
 def test_skill_controller_allows_press_exit_inside_activation_range():
     controller = SkillController()
     controller.policy._start_kills = 0
@@ -1189,10 +1215,39 @@ def test_skill_controller_allows_press_exit_inside_activation_range():
     assert controller.heuristic_action_index(state) == SKILL_ACTIONS.index("press_exit")
 
 
-def test_skill_controller_allows_press_exit_inside_push_window():
+def test_skill_controller_approaches_exit_before_push_window():
     controller = SkillController()
     controller.policy._start_kills = 0
     state = _state(kills=1, enemy=False)
+    state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=250 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=250 * 65536, y_fp=32 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=250 * 65536, y_fp=-32 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=250 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=250 * 65536,
+            nearest_distance_fp=250 * 65536,
+        )
+    ]
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+    _action, decision = controller.action_for(SKILL_ACTIONS.index("press_exit"), state)
+
+    assert mask["press_exit"]
+    assert decision["skill"] == "approach_exit_switch_front"
+
+
+def test_skill_controller_pushes_exit_when_close_front_path_is_blocked():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(tick=20, kills=1, enemy=False)
+    state.navigation.forward_open = False
+    state.navigation.use_line_ahead = True
+    state.navigation.front_blocking_line_special = 1
+    state.navigation.front_block_distance_fp = 16 * 65536
     state.navigation.use_lines = [
         SimpleNamespace(
             line_id=330,
@@ -1212,6 +1267,73 @@ def test_skill_controller_allows_press_exit_inside_push_window():
 
     assert mask["press_exit"]
     assert decision["skill"] == "push_exit_switch"
+
+
+def test_skill_controller_recovers_after_stalled_exit_push():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(tick=20, kills=1, enemy=False)
+    state.navigation.forward_open = False
+    state.navigation.use_line_ahead = True
+    state.navigation.front_blocking_line_special = 1
+    state.navigation.front_block_distance_fp = 16 * 65536
+    state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=168 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=168 * 65536, y_fp=32 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=168 * 65536, y_fp=-32 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=168 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=168 * 65536,
+            nearest_distance_fp=168 * 65536,
+        )
+    ]
+    _action, first_decision = controller.action_for(SKILL_ACTIONS.index("press_exit"), state)
+
+    stalled = _state(tick=20 + LINE_ATTEMPT_STALL_TICS + 1, kills=1, enemy=False)
+    stalled.navigation.forward_open = False
+    stalled.navigation.use_line_ahead = True
+    stalled.navigation.front_blocking_line_special = 1
+    stalled.navigation.front_block_distance_fp = 16 * 65536
+    stalled.navigation.use_lines = state.navigation.use_lines
+    _next_action, next_decision = controller.action_for(
+        SKILL_ACTIONS.index("press_exit"),
+        stalled,
+    )
+
+    assert first_decision["skill"] == "push_exit_switch"
+    assert next_decision["skill"] == "recover_exit_switch_approach"
+
+
+def test_skill_controller_turns_to_exit_when_close_blocked_path_is_misaligned():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(tick=20, kills=1, enemy=False)
+    state.navigation.forward_open = False
+    state.navigation.use_line_ahead = True
+    state.navigation.front_blocking_line_special = 1
+    state.navigation.front_block_distance_fp = 16 * 65536
+    state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=168 * 65536, y_fp=-132 * 65536, z_fp=0),
+            start=SimpleNamespace(x_fp=168 * 65536, y_fp=-100 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=168 * 65536, y_fp=-164 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=168 * 65536, y_fp=-132 * 65536, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=214 * 65536,
+            nearest_distance_fp=214 * 65536,
+        )
+    ]
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+    _action, decision = controller.action_for(SKILL_ACTIONS.index("press_exit"), state)
+
+    assert mask["press_exit"]
+    assert decision["skill"] == "turn_to_exit_switch"
 
 
 def test_exit_switch_decisions_do_not_trigger_stuck_recovery():
