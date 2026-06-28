@@ -1050,7 +1050,12 @@ async def _evaluate_checkpoint_curriculum(
             env_config,
             episodes=args.checkpoint_eval_episodes,
             max_steps=args.checkpoint_eval_max_steps,
-            seed=args.seed + update_index * 1000 + stage_index * 100,
+            seed=_checkpoint_eval_seed(
+                args,
+                update_index=update_index,
+                stage_index=stage_index,
+                stage=stage_dict,
+            ),
             device=args.device,
             deterministic=not args.checkpoint_eval_sample,
             before_reset=before_reset,
@@ -1138,6 +1143,20 @@ def _checkpoint_eval_trace_path(
     return path.with_name(
         f"{path.stem}-update{update_index:04d}-stage{stage_index:02d}-{safe_stage}{path.suffix}"
     )
+
+
+def _checkpoint_eval_seed(
+    args: argparse.Namespace,
+    *,
+    update_index: int,
+    stage_index: int,
+    stage: object,
+) -> int:
+    """Returns the eval seed for a checkpoint stage."""
+    base_seed = int(args.seed)
+    if _stage_prefers_true_spawn_promotion_score(stage):
+        return base_seed
+    return base_seed + int(update_index) * 1000 + int(stage_index) * 100
 
 
 def _policy_eval_selection_score(

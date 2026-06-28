@@ -2426,12 +2426,14 @@ def test_checkpoint_resume_score_prefers_curriculum_eval_when_present():
 def test_checkpoint_curriculum_eval_restores_snapshot_stages(monkeypatch, tmp_path):
     seen_configs = []
     seen_trace_paths = []
+    seen_eval_seeds = []
 
     async def fake_evaluate_checkpoint(checkpoint_path, env_config, **kwargs):
         env = SimpleNamespace(config=env_config)
         kwargs["before_reset"](env, 0)
         seen_configs.append(env.config)
         seen_trace_paths.append(kwargs.get("trace_path"))
+        seen_eval_seeds.append(kwargs.get("seed"))
         return PolicyEval(
             result=EvaluationResult(
                 policy_id=f"ppo:{checkpoint_path}",
@@ -2591,6 +2593,34 @@ def test_checkpoint_curriculum_eval_restores_snapshot_stages(monkeypatch, tmp_pa
     assert seen_trace_paths[1] == (
         tmp_path / "eval-trace-update0003-stage00-1420-post-combat_snapshot.jsonl"
     )
+
+    true_spawn_curriculum = {
+        **curriculum,
+        "stages": [
+            {
+                "index": 0,
+                "name": "fresh_spawn_true_spawn_gate",
+                "reset_mode": "episode",
+                "reset_start": {},
+                "evidence": {
+                    "true_spawn_promotion_stage": True,
+                    "snapshot_allowed": False,
+                    "forced_skill_allowed": False,
+                    "reset_source_required": "episode",
+                },
+            }
+        ],
+    }
+    asyncio.run(
+        _evaluate_checkpoint_curriculum(
+            tmp_path / "candidate.pt",
+            args,
+            curriculum=true_spawn_curriculum,
+            update_index=4,
+        )
+    )
+
+    assert seen_eval_seeds == [2007, 3007, 7]
 
 
 def test_curriculum_eval_best_replaces_legacy_rollout_best():
