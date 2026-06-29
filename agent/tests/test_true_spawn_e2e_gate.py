@@ -88,6 +88,82 @@ def test_true_spawn_e2e_gate_rejects_missing_chain_links_and_classifies_bottlene
         "post_combat_route": 1,
         "spawn_route": 1,
     }
+    assert report["summary"]["blocking_failure_count"] == 1
+    assert any(
+        failure["reason"] == "passed_episode_count_below_threshold"
+        for failure in report["failures"]
+    )
+
+
+def test_true_spawn_e2e_gate_allows_gate_b_completion_quota_with_diagnostics():
+    passing = [_episode(seed=seed) for seed in (7, 8, 9)]
+    combat_failures = [
+        _episode(
+            seed=10,
+            max_kills=2,
+            max_kill_gain=2,
+            kill_delta=2,
+            level_completed=False,
+            done_reason="max_steps",
+            level_transition_delta=0,
+            exit_route_attempt_steps=0,
+        ),
+        _episode(
+            seed=11,
+            max_kills=3,
+            max_kill_gain=3,
+            kill_delta=3,
+            level_completed=False,
+            done_reason="max_steps",
+            level_transition_delta=0,
+            exit_route_attempt_steps=0,
+        ),
+    ]
+
+    report = validate_true_spawn_e2e_gate(
+        _payload([*passing, *combat_failures]),
+        min_episodes=5,
+        min_level_completions=3,
+    )
+
+    assert report["ok"] is True
+    assert report["summary"]["episode_count"] == 5
+    assert report["summary"]["passed_episodes"] == 3
+    assert report["summary"]["blocking_failure_count"] == 0
+    assert report["summary"]["bottleneck_counts"] == {"combat": 2}
+    assert any(
+        failure["reason"] == "kill_gain_below_threshold"
+        for failure in report["failures"]
+    )
+
+
+def test_true_spawn_e2e_gate_blocks_integrity_failure_even_when_quota_met():
+    passing = [_episode(seed=seed) for seed in (7, 8, 9)]
+    bad = _episode(seed=10, selected_disallowed_steps=1)
+    diagnostic = _episode(
+        seed=11,
+        max_kills=3,
+        max_kill_gain=3,
+        kill_delta=3,
+        level_completed=False,
+        done_reason="max_steps",
+        level_transition_delta=0,
+        exit_route_attempt_steps=0,
+    )
+
+    report = validate_true_spawn_e2e_gate(
+        _payload([*passing, bad, diagnostic]),
+        min_episodes=5,
+        min_level_completions=3,
+    )
+
+    assert report["ok"] is False
+    assert report["summary"]["passed_episodes"] == 3
+    assert report["summary"]["blocking_failure_count"] == 1
+    assert any(
+        failure["reason"] == "selected_disallowed_steps_present"
+        for failure in report["failures"]
+    )
 
 
 def test_true_spawn_e2e_gate_rejects_illegal_mask_or_snapshot_semantics():
@@ -142,6 +218,7 @@ def test_true_spawn_e2e_gate_requires_strict_filter_evidence():
     assert {
         failure["reason"] for failure in strict_report["failures"]
     } == {"allowed_skill_filter_missing", "strict_allowed_skill_filter_missing"}
+    assert strict_report["summary"]["blocking_failure_count"] == 2
     assert relaxed_report["ok"] is True
 
 

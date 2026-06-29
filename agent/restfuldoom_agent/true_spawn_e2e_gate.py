@@ -16,6 +16,15 @@ from .schemas import PPO_SKILL_ACTIONS
 TRUE_SPAWN_E2E_GATE_SCHEMA = "restfuldoom.true_spawn_e2e_gate.v1"
 DEFAULT_ALLOWED_SKILLS = tuple(PPO_SKILL_ACTIONS)
 DEFAULT_MIN_KILL_GAIN = POST_COMBAT_EXIT_KILLS
+CHAIN_FAILURE_REASONS = {
+    "first_visible_contacts_below_threshold",
+    "first_shootable_contacts_below_threshold",
+    "kill_gain_below_threshold",
+    "route_attempt_steps_below_threshold",
+    "exit_route_attempt_steps_below_threshold",
+    "missing_level_transition",
+    "missing_level_complete_done",
+}
 
 
 def validate_true_spawn_e2e_gate(
@@ -88,6 +97,7 @@ def validate_true_spawn_e2e_gate(
         "disallowed_skill_counts": {},
         "configured_allowed_skills": [],
         "bottleneck_counts": {},
+        "blocking_failure_count": 0,
     }
     configured_allowed: set[str] = set()
     reset_source_counts: Counter[str] = Counter()
@@ -387,18 +397,26 @@ def validate_true_spawn_e2e_gate(
                 "minimum": int(min_episodes),
             }
         )
-    if summary["level_complete_episode_count"] < int(min_level_completions):
+    summary["passed_episodes"] = summary["episode_count"] - len(failed_episode_keys)
+    if (
+        int(summary["passed_episodes"]) < int(min_level_completions)
+        and not _has_blocking_failures(failures)
+    ):
         failures.append(
             {
                 "stage": stage_name,
                 "episode_index": None,
-                "reason": "level_completion_count_below_threshold",
+                "reason": "passed_episode_count_below_threshold",
+                "passed_episodes": summary["passed_episodes"],
                 "level_complete_episode_count": summary["level_complete_episode_count"],
                 "minimum": int(min_level_completions),
             }
         )
 
-    summary["passed_episodes"] = summary["episode_count"] - len(failed_episode_keys)
+    blocking_failure_count = sum(
+        1 for failure in failures if _is_blocking_failure(failure)
+    )
+    summary["blocking_failure_count"] = blocking_failure_count
     for field in ("route_progress_units", "exit_route_progress_units"):
         summary[field] = round(float(summary[field]), 4)
     summary["reset_source_counts"] = dict(sorted(reset_source_counts.items()))
@@ -411,7 +429,7 @@ def validate_true_spawn_e2e_gate(
     return {
         "schema": TRUE_SPAWN_E2E_GATE_SCHEMA,
         "created_at_epoch_seconds": int(time.time()),
-        "ok": not failures,
+        "ok": blocking_failure_count == 0,
         "config": {
             "stage_name": stage_name,
             "allowed_skills": list(allowed),
@@ -460,6 +478,14 @@ def _collect_aggregate_reset_failures(
                 "reset_source_breakdown": non_episode,
             }
         )
+
+
+def _has_blocking_failures(failures: list[dict[str, Any]]) -> bool:
+    return any(_is_blocking_failure(failure) for failure in failures)
+
+
+def _is_blocking_failure(failure: dict[str, Any]) -> bool:
+    return str(failure.get("reason") or "") not in CHAIN_FAILURE_REASONS
 
 
 def _extract_eval_blocks(
