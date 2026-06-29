@@ -3494,7 +3494,12 @@ def test_ppo_update_and_checkpoint_roundtrip(tmp_path):
     trainer = PPOTrainer(
         obs_dim=2,
         action_dim=2,
-        config=PPOConfig(update_epochs=1, minibatch_size=4, rollout_steps=8),
+        config=PPOConfig(
+            update_epochs=1,
+            minibatch_size=4,
+            rollout_steps=8,
+            reference_kl_coef=0.25,
+        ),
     )
 
     metrics = trainer.update(buffer)
@@ -3504,6 +3509,45 @@ def test_ppo_update_and_checkpoint_roundtrip(tmp_path):
     assert checkpoint.exists()
     assert metrics["value_loss"] >= 0
     assert loaded.update_index == trainer.update_index
+    assert loaded.config.reference_kl_coef == 0.25
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")
+def test_ppo_update_reports_reference_kl_and_preserves_reference_model():
+    buffer = RolloutBuffer()
+    for index in range(8):
+        buffer.add(
+            obs=[float(index % 2), 1.0],
+            action_mask=[True, True],
+            action=index % 2,
+            reward=1.0 if index % 2 else 0.0,
+            done=index == 7,
+            value=0.1,
+            logprob=-0.69,
+        )
+    trainer = PPOTrainer(
+        obs_dim=2,
+        action_dim=2,
+        config=PPOConfig(
+            update_epochs=2,
+            minibatch_size=4,
+            rollout_steps=8,
+            reference_kl_coef=0.5,
+        ),
+    )
+    reference_model = trainer.clone_reference_model()
+    before = {
+        name: parameter.detach().clone()
+        for name, parameter in reference_model.state_dict().items()
+    }
+
+    metrics = trainer.update(buffer, reference_model=reference_model)
+
+    assert "reference_kl" in metrics
+    assert metrics["reference_kl"] >= 0.0
+    assert trainer.update_index == 1
+    for name, parameter in reference_model.state_dict().items():
+        assert parameter.detach().equal(before[name])
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")

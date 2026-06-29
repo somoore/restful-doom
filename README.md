@@ -322,6 +322,10 @@ The training API is:
   guard: if a true-spawn promotion stage fails `true_spawn_e2e_gate`, the
   checkpoint is annotated as rejected, omitted from the memory resume candidate,
   and the training run stops before further updates can compound the regression.
+- `--reference-kl-coef <value>` adds a KL penalty against the policy at training
+  start. Use it with a known-good `--resume-checkpoint` so focused bottleneck
+  updates remain close to the checkpoint that already passed earlier
+  true-spawn gates.
 - `--eval-checkpoint --checkpoint-eval-curriculum` runs the same cross-stage
   curriculum eval without taking another training update.
 - `--allowed-skill <skill>` is an experiment-only allowlist applied after the

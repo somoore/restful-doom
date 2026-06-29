@@ -40,6 +40,7 @@ class PPOConfig:
     clip_ratio: float = 0.2
     entropy_coef: float = 0.01
     value_coef: float = 0.5
+    reference_kl_coef: float = 0.0
     max_grad_norm: float = 0.5
     update_epochs: int = 4
     minibatch_size: int = 128
@@ -250,6 +251,20 @@ class PPOTrainer:
         self.action_dim = action_dim
         self.resume_migration: dict[str, Any] | None = None
 
+    def clone_reference_model(self) -> Any:
+        """Returns a frozen policy snapshot for reference-KL regularization."""
+        reference = ActorCritic(
+            self.obs_dim,
+            self.action_dim,
+            hidden_size=self.config.hidden_size,
+        )
+        reference.load_state_dict(self.model.state_dict())
+        reference.to(self.device)
+        reference.eval()
+        for parameter in reference.parameters():
+            parameter.requires_grad_(False)
+        return reference
+
     async def collect_rollout(
         self,
         env: DoomAgentEnv,
@@ -307,9 +322,17 @@ class PPOTrainer:
         buffer.last_value = float(last_value.item())
         return buffer
 
-    def update(self, buffer: RolloutBuffer) -> dict[str, float]:
+    def update(
+        self,
+        buffer: RolloutBuffer,
+        *,
+        reference_model: Any | None = None,
+    ) -> dict[str, float]:
         """Runs PPO epochs over a collected rollout buffer."""
         tensors = buffer.tensors(config=self.config, device=self.device)
+        if reference_model is not None:
+            reference_model.to(self.device)
+            reference_model.eval()
         count = len(buffer)
         indices = torch.arange(count, device=self.device)
         metrics = {
@@ -317,6 +340,7 @@ class PPOTrainer:
             "value_loss": 0.0,
             "entropy": 0.0,
             "approx_kl": 0.0,
+            "reference_kl": 0.0,
         }
         batches = 0
         for _ in range(self.config.update_epochs):
@@ -337,10 +361,27 @@ class PPOTrainer:
                 ) * tensors["advantages"][batch]
                 policy_loss = -torch.min(unclipped, clipped).mean()
                 value_loss = 0.5 * (tensors["returns"][batch] - values).pow(2).mean()
+                reference_kl = torch.tensor(0.0, device=self.device)
+                if reference_model is not None and self.config.reference_kl_coef > 0.0:
+                    with torch.no_grad():
+                        reference_logits, _reference_values = reference_model(
+                            tensors["obs"][batch]
+                        )
+                        reference_logits = _masked_logits(
+                            reference_logits,
+                            tensors["action_masks"][batch],
+                        )
+                    reference_log_probs = torch.log_softmax(reference_logits, dim=-1)
+                    current_log_probs = torch.log_softmax(logits, dim=-1)
+                    reference_probs = torch.softmax(reference_logits, dim=-1)
+                    reference_kl = (
+                        reference_probs * (reference_log_probs - current_log_probs)
+                    ).sum(dim=-1).mean()
                 loss = (
                     policy_loss
                     + self.config.value_coef * value_loss
                     - self.config.entropy_coef * entropy
+                    + self.config.reference_kl_coef * reference_kl
                 )
 
                 self.optimizer.zero_grad()
@@ -354,6 +395,7 @@ class PPOTrainer:
                 metrics["value_loss"] += float(value_loss.item())
                 metrics["entropy"] += float(entropy.item())
                 metrics["approx_kl"] += float(approx_kl.item())
+                metrics["reference_kl"] += float(reference_kl.item())
                 batches += 1
 
         self.update_index += 1

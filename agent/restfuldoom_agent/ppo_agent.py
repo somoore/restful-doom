@@ -48,6 +48,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
         clip_ratio=args.clip_ratio,
         entropy_coef=args.entropy_coef,
         value_coef=args.value_coef,
+        reference_kl_coef=float(getattr(args, "reference_kl_coef", 0.0)),
         update_epochs=args.update_epochs,
         minibatch_size=args.minibatch_size,
         hidden_size=args.hidden_size,
@@ -71,6 +72,9 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
             config=ppo_config,
             device=args.device,
         )
+    reference_kl_coef = float(getattr(args, "reference_kl_coef", 0.0))
+    if float(getattr(trainer.config, "reference_kl_coef", 0.0)) != reference_kl_coef:
+        trainer.config = replace(trainer.config, reference_kl_coef=reference_kl_coef)
     behavior_clone_summary = None
     if args.bc_trajectory:
         samples, behavior_clone_summary = _load_behavior_clone_samples(args)
@@ -82,6 +86,11 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                 learning_rate=args.bc_learning_rate,
             )
         )
+    reference_model = (
+        trainer.clone_reference_model()
+        if reference_kl_coef > 0.0
+        else None
+    )
     summaries = []
     best_checkpoint: dict[str, object] | None = None
     try:
@@ -123,7 +132,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     }
                 )
                 continue
-            metrics = trainer.update(buffer)
+            metrics = trainer.update(buffer, reference_model=reference_model)
             checkpoint_path = args.checkpoint_dir / f"{args.run_id}-ppo-{update_index:04d}.pt"
             checkpoint_extra = {
                 "buffer_path": str(buffer_path),
@@ -144,6 +153,13 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                 "strict_allowed_skills": bool(
                     getattr(args, "strict_allowed_skills", False)
                 ),
+                "reference_kl": {
+                    "enabled": reference_model is not None,
+                    "coef": float(getattr(args, "reference_kl_coef", 0.0)),
+                    "source_checkpoint": str(resume_checkpoint)
+                    if resume_checkpoint is not None
+                    else "initial_policy",
+                },
             }
             trainer.save_checkpoint(
                 checkpoint_path,
@@ -542,6 +558,7 @@ def _reward_config_from_args(args: argparse.Namespace) -> dict[str, object]:
         "level_complete_bonus": args.level_complete_bonus,
         "kill_goal_bonus": args.kill_goal_bonus,
         "required_kills": args.required_kills,
+        "reference_kl_coef": float(getattr(args, "reference_kl_coef", 0.0)),
         "first_visible_bonus": args.first_visible_bonus,
         "first_shootable_bonus": args.first_shootable_bonus,
         "visible_contact_progress_reward": args.visible_contact_progress_reward,
@@ -2792,6 +2809,16 @@ def main() -> None:
     parser.add_argument("--clip-ratio", type=float, default=0.2)
     parser.add_argument("--entropy-coef", type=float, default=0.01)
     parser.add_argument("--value-coef", type=float, default=0.5)
+    parser.add_argument(
+        "--reference-kl-coef",
+        type=float,
+        default=0.0,
+        help=(
+            "Add a KL penalty against the policy at training start. Use with "
+            "a known-good resume checkpoint to make bottleneck updates preserve "
+            "existing true-spawn behavior."
+        ),
+    )
     parser.add_argument("--update-epochs", type=int, default=4)
     parser.add_argument("--minibatch-size", type=int, default=128)
     parser.add_argument("--hidden-size", type=int, default=128)
