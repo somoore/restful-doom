@@ -40,8 +40,6 @@
 #include "net_sdl.h"
 #include "net_loop.h"
 
-#include "doom/agent_bridge.h"
-
 // The complete set of data for a particular tic.
 
 typedef struct
@@ -184,7 +182,6 @@ static boolean BuildNewTic(void)
     //printf ("mk:%i ",maketic);
     memset(&cmd, 0, sizeof(ticcmd_t));
     loop_interface->BuildTiccmd(&cmd, maketic);
-    AgentBridge_ApplyTiccmd(&cmd);
 
 #ifdef FEATURE_MULTIPLAYER
 

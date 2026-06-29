@@ -108,6 +108,10 @@ def test_ppo_eval_trace_writer_serializes_steps(tmp_path):
             info={
                 "skill": "route_progression",
                 "decision": {"skill": "route_to_progression_line"},
+                "action": {
+                    "raw": {"forward_move": 28, "side_move": 0, "angle_turn": -256},
+                    "duration_tics": 4,
+                },
                 "state": {"kills": 2, "items": 1},
                 "transition": {"kill_delta": 1},
                 "route_outcome": {"attempted": True},
@@ -123,6 +127,10 @@ def test_ppo_eval_trace_writer_serializes_steps(tmp_path):
     assert rows[1]["policy_id"] == "ppo:checkpoint.pt"
     assert rows[1]["skill"] == "route_progression"
     assert rows[1]["decision"]["skill"] == "route_to_progression_line"
+    assert rows[1]["action"] == {
+        "raw": {"forward_move": 28, "side_move": 0, "angle_turn": -256},
+        "duration_tics": 4,
+    }
     assert rows[1]["action_mask"] == [False, False, False, False, True]
 
 

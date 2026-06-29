@@ -26,7 +26,13 @@ from .brain import (
     raw_ticcmd_action,
     raw_turn_for_delta,
 )
-from .client import DoomAgentClient, agent_pb2, semantic_action, summarize_state
+from .client import (
+    DoomAgentClient,
+    agent_pb2,
+    semantic_action,
+    summarize_action,
+    summarize_state,
+)
 from .client import EpisodeStart as ClientEpisodeStart
 from .reward import Goal, RewardEngine, TransitionReward, goal_preset
 from .schemas import (
@@ -1687,6 +1693,7 @@ class DoomAgentEnv:
                 "macro_tics": len(transition_summaries),
             },
             "decision": decision,
+            "action": summarize_action(action),
             "transition": _combine_transition_summaries(transition_summaries),
             "macro_tics": len(transition_summaries),
             "action_reward": action_reward,

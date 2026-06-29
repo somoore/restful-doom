@@ -97,6 +97,10 @@ static void RunTic(ticcmd_t *cmds, boolean *ingame)
     {
         memset(cmds, 0, sizeof(ticcmd_t) * MAXPLAYERS);
     }
+    else if (consoleplayer >= 0 && consoleplayer < MAXPLAYERS)
+    {
+        AgentBridge_ApplyTiccmd(&cmds[consoleplayer]);
+    }
     G_Ticker ();
     AgentBridge_AfterTic(gametic);
 }

@@ -493,6 +493,7 @@ def _write_trace_step(
             "done_reason": info.get("done_reason"),
             "skill": info.get("skill"),
             "decision": info.get("decision", {}),
+            "action": info.get("action", {}),
             "state": info.get("state", {}),
             "transition": info.get("transition", {}),
             "had_visible_enemy": bool(info.get("had_visible_enemy")),
