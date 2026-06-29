@@ -158,7 +158,7 @@ def _snapshot_stage(
         evidence["expected_state"] = dict(expected)
 
     name = str(raw_stage.get("name") or snapshot.get("id") or f"snapshot_stage_{index}")
-    return {
+    stage = {
         "index": int(raw_stage.get("index", index)),
         "name": name,
         "reset_start": dict(reset_start),
@@ -170,6 +170,10 @@ def _snapshot_stage(
         "expected_state": dict(expected),
         "evidence": evidence,
     }
+    training = raw_stage.get("training")
+    if isinstance(training, dict):
+        stage["training"] = dict(training)
+    return stage
 
 
 def _validate_stage(
@@ -213,6 +217,9 @@ def _validate_stage(
     expected = raw_stage.get("expected_state", raw_stage.get("expected", {}))
     if expected is not None and not isinstance(expected, dict):
         stage_report["errors"].append(f"stage {index} expected_state must be an object")
+    training = raw_stage.get("training")
+    if training is not None and not isinstance(training, dict):
+        stage_report["errors"].append(f"stage {index} training must be an object")
 
     if not any(snapshot.get(key) for key in ("id", "path", "ref", "slot")):
         stage_report["errors"].append(

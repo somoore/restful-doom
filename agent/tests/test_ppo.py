@@ -1225,6 +1225,10 @@ def test_snapshot_curriculum_manifest_loads_progressed_stages(tmp_path):
                         },
                         "expected_state": {"episode": 1, "map": 1, "tick": 1200},
                         "evidence": {"source_record_index": 47},
+                        "training": {
+                            "required_kills": 1,
+                            "terminate_on_required_kills": True,
+                        },
                     }
                 ],
             }
@@ -1248,6 +1252,10 @@ def test_snapshot_curriculum_manifest_loads_progressed_stages(tmp_path):
     assert stage["requires_progressed_state"] is True
     assert stage["snapshot"]["id"] == "snap-1"
     assert stage["evidence"]["snapshot_backed"] is True
+    assert stage["training"] == {
+        "required_kills": 1,
+        "terminate_on_required_kills": True,
+    }
 
 
 def test_true_spawn_stage_can_be_appended_to_snapshot_curriculum(tmp_path):
