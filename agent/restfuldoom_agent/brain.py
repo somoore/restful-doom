@@ -2229,27 +2229,13 @@ class BrainPolicy:
                     return self._use_nearby_line(features, assist_door, stuck)
 
         activate_distance = self._line_activate_distance(features, line)
-        exit_front_distance = float(line.get("front_distance", distance))
-        exit_forward_open = bool(features.navigation.get("forward_open", True))
-        exit_near_use_candidate = (
+        if (
             special in EXIT_LINE_SPECIALS
             and distance > activate_distance
             and distance <= 224.0
-        )
-        exit_push_stalled = False
-        exit_relocation_needed = False
-        if exit_near_use_candidate and not exit_forward_open:
-            exit_push_stalled = self._exit_push_stalled(features, line, distance)
-            exit_relocation_needed = (
-                exit_push_stalled
-                and not self._exit_route_blocker_ahead_ready(features)
-            )
-        if (
-            exit_near_use_candidate
-            and not exit_relocation_needed
         ):
-            front_distance = exit_front_distance
-            if not exit_forward_open:
+            front_distance = float(line.get("front_distance", distance))
+            if not bool(features.navigation.get("forward_open", True)):
                 front_angle_delta = float(line.get("front_angle_delta", angle_delta))
                 if (
                     int(features.navigation.get("front_blocking_line_special", 0)) == 0
@@ -2271,7 +2257,7 @@ class BrainPolicy:
                             use_line=line_record,
                         ),
                     )
-                if exit_push_stalled:
+                if self._exit_push_stalled(features, line, distance):
                     if self._exit_route_blocker_ahead_ready(features):
                         self._last_use_tick = features.tick
                         return (
@@ -2351,7 +2337,6 @@ class BrainPolicy:
             special in EXIT_LINE_SPECIALS
             and int(line.get("side", 0)) == 0
             and distance > activate_distance
-            and not exit_relocation_needed
             and (
                 distance <= 224.0
                 or float(line.get("front_distance", 999999)) <= 160.0
