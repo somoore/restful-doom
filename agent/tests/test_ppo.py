@@ -3048,6 +3048,77 @@ def test_record_ppo_checkpoint_uses_curriculum_eval_for_best_candidate(tmp_path)
     assert best["checkpoint_eval"]["schema"] == "restfuldoom.ppo_checkpoint_curriculum_eval.v1"
 
 
+def test_failed_true_spawn_gate_is_not_best_checkpoint(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    failed_true_spawn_eval = {
+        "schema": "restfuldoom.ppo_checkpoint_curriculum_eval.v1",
+        "selection_score": 624.0,
+        "stages": [
+            {
+                "selection_score_components": {
+                    "mode": "true_spawn_promotion",
+                    "gate_ok": False,
+                    "gate_passed_episodes": 0,
+                    "true_spawn_gate": {"ok": False},
+                },
+            }
+        ],
+    }
+
+    _record_ppo_checkpoint(
+        memory,
+        tmp_path / "failed-true-spawn.pt",
+        goal_preset="exit_seeking",
+        reward_config={"goal_preset": "exit_seeking"},
+        metrics={"policy_loss": 0.1},
+        rollout_summary={"checkpoint_selection_score": 10.0},
+        update_index=0,
+        buffer_path=tmp_path / "failed.jsonl",
+        curriculum_stage={"name": "fresh_spawn_true_spawn_gate"},
+        checkpoint_eval=failed_true_spawn_eval,
+    )
+
+    assert memory.data["ppo_policy"]["checkpoint_path"].endswith(
+        "failed-true-spawn.pt"
+    )
+    assert "ppo_best_checkpoint" not in memory.data
+
+
+def test_passing_true_spawn_gate_can_be_best_checkpoint(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    passing_true_spawn_eval = {
+        "schema": "restfuldoom.ppo_checkpoint_curriculum_eval.v1",
+        "selection_score": 1000.0,
+        "stages": [
+            {
+                "selection_score_components": {
+                    "mode": "true_spawn_promotion",
+                    "gate_ok": True,
+                    "gate_passed_episodes": 1,
+                    "true_spawn_gate": {"ok": True},
+                },
+            }
+        ],
+    }
+
+    _record_ppo_checkpoint(
+        memory,
+        tmp_path / "passing-true-spawn.pt",
+        goal_preset="exit_seeking",
+        reward_config={"goal_preset": "exit_seeking"},
+        metrics={"policy_loss": 0.1},
+        rollout_summary={"checkpoint_selection_score": 10.0},
+        update_index=0,
+        buffer_path=tmp_path / "passing.jsonl",
+        curriculum_stage={"name": "fresh_spawn_true_spawn_gate"},
+        checkpoint_eval=passing_true_spawn_eval,
+    )
+
+    assert memory.data["ppo_best_checkpoint"]["checkpoint_path"].endswith(
+        "passing-true-spawn.pt"
+    )
+
+
 def test_ppo_export_paths_include_best_checkpoint(tmp_path):
     latest = tmp_path / "latest.pt"
     best = tmp_path / "best.pt"

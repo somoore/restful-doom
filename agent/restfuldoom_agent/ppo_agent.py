@@ -190,11 +190,15 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
             }
             summaries.append(summary_record)
             score = _checkpoint_resume_score(rollout_summary, checkpoint_eval)
-            if best_checkpoint is None or score > float(best_checkpoint["score"]):
+            score_source = _checkpoint_resume_score_source(checkpoint_eval)
+            if (
+                _checkpoint_eval_resume_candidate_eligible(checkpoint_eval)
+                and (best_checkpoint is None or score > float(best_checkpoint["score"]))
+            ):
                 best_checkpoint = {
                     "update": update_index,
                     "score": score,
-                    "score_source": _checkpoint_resume_score_source(checkpoint_eval),
+                    "score_source": score_source,
                     "checkpoint_path": str(checkpoint_path),
                     "buffer_path": str(buffer_path),
                     "rollout_summary": rollout_summary,
@@ -1707,6 +1711,10 @@ def _should_replace_best_checkpoint(
     checkpoint_eval: dict[str, object] | None = None,
 ) -> bool:
     """Returns whether a checkpoint should become the memory resume candidate."""
+    if score_source == "checkpoint_curriculum_eval" and not _checkpoint_eval_resume_candidate_eligible(
+        checkpoint_eval
+    ):
+        return False
     if not isinstance(previous_best, dict):
         return True
     previous_source = _best_checkpoint_score_source(previous_best)
@@ -1723,6 +1731,29 @@ def _should_replace_best_checkpoint(
         if candidate_rank < previous_rank:
             return False
     return score > float(previous_best.get("checkpoint_selection_score", -1e12))
+
+
+def _checkpoint_eval_resume_candidate_eligible(
+    checkpoint_eval: dict[str, object] | None,
+) -> bool:
+    """Returns whether a checkpoint eval is eligible to become a resume best."""
+    if not isinstance(checkpoint_eval, dict):
+        return True
+    stages = checkpoint_eval.get("stages", [])
+    if not isinstance(stages, list):
+        return True
+    for stage_record in stages:
+        if not isinstance(stage_record, dict):
+            continue
+        components = stage_record.get("selection_score_components", {})
+        if not isinstance(components, dict):
+            continue
+        if components.get("mode") != "true_spawn_promotion":
+            continue
+        gate_report = components.get("true_spawn_gate")
+        if not isinstance(gate_report, dict) or not bool(gate_report.get("ok")):
+            return False
+    return True
 
 
 def _best_checkpoint_score_source(best: dict[str, object]) -> str:
