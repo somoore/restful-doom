@@ -167,6 +167,7 @@ EXPERT_TO_PPO_SKILL_ACTION = {
     "approach_exit_switch_front": "press_exit",
     "press_exit_switch": "press_exit",
     "push_exit_switch": "press_exit",
+    "release_exit_use": "press_exit",
     "turn_to_exit_switch": "press_exit",
 }
 

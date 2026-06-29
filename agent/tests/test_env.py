@@ -1351,6 +1351,27 @@ def test_skill_controller_pushes_exit_when_close_front_path_is_blocked():
 
     assert mask["press_exit"]
     assert decision["skill"] == "push_exit_switch"
+    assert _action.raw.buttons & BT_USE
+    assert _action.duration_tics == 1
+
+    release_state = _state(tick=21, kills=1, enemy=False)
+    release_state.navigation.forward_open = state.navigation.forward_open
+    release_state.navigation.use_line_ahead = state.navigation.use_line_ahead
+    release_state.navigation.front_blocking_line_special = (
+        state.navigation.front_blocking_line_special
+    )
+    release_state.navigation.front_block_distance_fp = (
+        state.navigation.front_block_distance_fp
+    )
+    release_state.navigation.use_lines = state.navigation.use_lines
+    release_action, release_decision = controller.action_for(
+        SKILL_ACTIONS.index("press_exit"),
+        release_state,
+    )
+
+    assert release_decision["skill"] == "release_exit_use"
+    assert release_action.raw.buttons == 0
+    assert release_action.duration_tics == 1
 
 
 def test_skill_controller_recovers_after_stalled_exit_push():
@@ -1424,6 +1445,7 @@ def test_skill_controller_turns_to_exit_when_close_blocked_path_is_misaligned():
 def test_exit_switch_decisions_do_not_trigger_stuck_recovery():
     assert "push_exit_switch" in _NON_LOCOMOTION_SKILLS
     assert "press_exit_switch" in _NON_LOCOMOTION_SKILLS
+    assert "release_exit_use" in _NON_LOCOMOTION_SKILLS
     assert "turn_to_exit_switch" in _NON_LOCOMOTION_SKILLS
 
 

@@ -40,6 +40,7 @@ EXIT_ASSIST_DOOR_CLOSE_USE_ANGLE_DEGREES = 48.0
 EXIT_ROUTE_LOCAL_DOOR_DISTANCE_UNITS = 192.0
 EXIT_ROUTE_LOCAL_DOOR_ANGLE_DEGREES = 60.0
 EXIT_ROUTE_LOCAL_DOOR_USE_COOLDOWN_TICS = 8
+EXIT_USE_RELEASE_TICS = 1
 POST_COMBAT_EXIT_KILLS = 5
 POST_COMBAT_EXIT_ROUTE_DISTANCE_UNITS = 3200.0
 POST_COMBAT_ROUTE_WAYPOINT_FINISH_DISTANCE_UNITS = 700.0
@@ -126,6 +127,7 @@ _NON_LOCOMOTION_SKILLS = {
     "open_or_probe",
     "press_exit_switch",
     "push_exit_switch",
+    "release_exit_use",
     "strafe_cooldown",
     "turn_from_block",
     "turn_to_exit_switch",
@@ -2208,6 +2210,15 @@ class BrainPolicy:
         line_record = self._line_record(line)
         special = int(line["special"])
         self._remember_post_combat_exit_line(features, line)
+        if special in EXIT_LINE_SPECIALS:
+            release = self._release_exit_use_after_pulse(
+                features,
+                line_record,
+                angle_delta,
+                stuck,
+            )
+            if release is not None:
+                return release
         if special in EXIT_LINE_SPECIALS and distance > 224.0:
             local_door = self._select_exit_route_local_manual_line(features, line)
             if local_door is not None:
@@ -2296,7 +2307,7 @@ class BrainPolicy:
                         buttons=BT_USE,
                         forward_move=max(4, self.params.move_amount // 2),
                         angle_turn=raw_turn_for_delta(angle_delta),
-                        duration_tics=3,
+                        duration_tics=1,
                         tick=features.tick,
                     ),
                     self._decision(
@@ -2370,12 +2381,13 @@ class BrainPolicy:
                                 use_line=line_record,
                             ),
                         )
+                    self._last_use_tick = features.tick
                     return (
                         raw_ticcmd_action(
                             buttons=BT_USE,
                             forward_move=self.params.move_amount,
                             angle_turn=raw_turn_for_delta(angle_delta),
-                            duration_tics=3,
+                            duration_tics=1,
                             tick=features.tick,
                         ),
                         self._decision(
@@ -2441,12 +2453,13 @@ class BrainPolicy:
                         use_line=line_record,
                     ),
                 )
+            self._last_use_tick = features.tick
             return (
                 raw_ticcmd_action(
                     buttons=BT_USE,
                     forward_move=self.params.move_amount,
                     angle_turn=raw_turn_for_delta(angle_delta),
-                    duration_tics=3,
+                    duration_tics=1,
                     tick=features.tick,
                 ),
                 self._decision(
@@ -2482,7 +2495,7 @@ class BrainPolicy:
                     buttons=BT_USE,
                     forward_move=max(4, self.params.move_amount // 2),
                     angle_turn=raw_turn_for_delta(angle_delta),
-                    duration_tics=3,
+                    duration_tics=1,
                     tick=features.tick,
                 ),
                 self._decision(
@@ -2563,7 +2576,7 @@ class BrainPolicy:
                     buttons=BT_USE,
                     forward_move=max(4, self.params.move_amount // 2),
                     angle_turn=raw_turn_for_delta(angle_delta),
-                    duration_tics=2,
+                    duration_tics=1 if special in EXIT_LINE_SPECIALS else 2,
                     tick=features.tick,
                 ),
                 self._decision(
@@ -2585,6 +2598,30 @@ class BrainPolicy:
                 "cross_progression_line"
                 if special in WALK_TRIGGER_LINE_SPECIALS
                 else "approach_progression_line",
+                features,
+                stuck=stuck,
+                use_line=line_record,
+            ),
+        )
+
+    def _release_exit_use_after_pulse(
+        self,
+        features: TacticalFeatures,
+        line_record: dict[str, Any],
+        angle_delta: float,
+        stuck: bool,
+    ) -> tuple[Any, dict[str, Any]] | None:
+        """Emit one no-use tic after an exit use so Doom sees the next press edge."""
+        if not 0 < features.tick - self._last_use_tick <= EXIT_USE_RELEASE_TICS:
+            return None
+        return (
+            raw_ticcmd_action(
+                angle_turn=raw_turn_for_delta(angle_delta),
+                duration_tics=1,
+                tick=features.tick,
+            ),
+            self._decision(
+                "release_exit_use",
                 features,
                 stuck=stuck,
                 use_line=line_record,

@@ -50,7 +50,7 @@ def state(*, tick=1, x=0, y=0, angle=0, enemy=None, combat=None, direction_probe
                 line_of_sight=enemy.get("line_of_sight", True),
             )
         )
-    level = SimpleNamespace(episode=1, map=1)
+    level = SimpleNamespace(episode=1, map=1, level_time=tick)
     navigation = SimpleNamespace(
         forward_open=True,
         back_open=True,
@@ -2176,6 +2176,17 @@ def test_post_kill_policy_uses_exit_line_at_close_range(tmp_path):
     assert policy.last_decision["skill"] == "press_exit_switch"
     assert policy.last_decision["use_line"]["line_id"] == 330
     assert action.raw.buttons & 2
+    assert action.duration_tics == 1
+
+    release_state = state(tick=41, x=8)
+    release_state.player.kills = 1
+    release_state.navigation.use_lines = game_state.navigation.use_lines
+    release_action = asyncio.run(policy.next_action(release_state))
+
+    assert policy.last_decision["skill"] == "release_exit_use"
+    assert policy.last_decision["use_line"]["line_id"] == 330
+    assert release_action.raw.buttons == 0
+    assert release_action.duration_tics == 1
 
 
 def test_close_exit_press_preempts_blocked_front_routing(tmp_path):
@@ -2216,6 +2227,7 @@ def test_close_exit_press_preempts_blocked_front_routing(tmp_path):
     assert policy.last_decision["skill"] == "press_exit_switch"
     assert policy.last_decision["use_line"]["line_id"] == 330
     assert action.raw.buttons & 2
+    assert action.duration_tics == 1
 
 
 def test_local_exit_opens_nearby_assist_door_when_blocked(tmp_path):
@@ -2463,7 +2475,7 @@ def test_repeated_exit_assist_attempts_fall_back_to_exit_line(tmp_path):
         asyncio.run(policy.next_action(game_state))
 
     assert policy.last_decision["use_line"]["line_id"] == 330
-    assert policy.last_decision["skill"] == "push_exit_switch"
+    assert policy.last_decision["skill"] in {"push_exit_switch", "release_exit_use"}
 
 
 def test_local_exit_uses_close_angled_assist_door(tmp_path):
