@@ -44,6 +44,8 @@ from .snapshot_builder import (
     _has_visible_enemy,
     _is_post_combat,
     _is_post_combat_exit_route,
+    _is_post_combat_low_health_exit_route,
+    _is_pre_required_kill,
     _int_or_none,
     _kill_delta,
     _record_state,
@@ -154,6 +156,11 @@ class SnapshotMilestoneTracker:
                 matches.append(selector)
             elif selector == "first-kill" and self._matches_first_kill(record):
                 matches.append(selector)
+            elif selector == "pre-required-kill" and _is_pre_required_kill(
+                record,
+                min_kills=self.post_combat_kills,
+            ):
+                matches.append(selector)
             elif selector == "post-combat" and _is_post_combat(
                 record,
                 min_kills=self.post_combat_kills,
@@ -162,6 +169,14 @@ class SnapshotMilestoneTracker:
             elif (
                 selector == "post-combat-exit-route"
                 and _is_post_combat_exit_route(
+                    record,
+                    min_kills=self.post_combat_kills,
+                )
+            ):
+                matches.append(selector)
+            elif (
+                selector == "post-combat-low-health-exit-route"
+                and _is_post_combat_low_health_exit_route(
                     record,
                     min_kills=self.post_combat_kills,
                 )

@@ -253,6 +253,58 @@ def test_snapshot_builder_respects_post_combat_kill_threshold(tmp_path):
     assert manifest["stages"][0]["evidence"]["source_record_index"] == 1
 
 
+def test_snapshot_builder_selects_gate_b_failure_anchors(tmp_path):
+    trajectory = tmp_path / "gate-b-failures.jsonl"
+    _write_jsonl(
+        trajectory,
+        [
+            _trajectory_row(0, visible=True, shootable=True, kills=3),
+            _trajectory_row(1, visible=True, shootable=False, kills=4, health=30),
+            _trajectory_row(2, visible=False, shootable=False, kills=5, health=80),
+            _trajectory_row(
+                3,
+                visible=False,
+                shootable=False,
+                kills=5,
+                health=42,
+                route_exit=True,
+                route_line_id=330,
+            ),
+        ],
+    )
+
+    manifest = build_snapshot_curriculum_from_trajectory(
+        trajectory,
+        output_path=tmp_path / "gate-b-failures.json",
+        name="gate-b-failures",
+        auto_selectors=[
+            "pre-required-kill",
+            "post-combat-exit-route",
+            "post-combat-low-health-exit-route",
+        ],
+        snapshot_dir=Path("snapshots"),
+        save_slot_base=1,
+    )
+
+    assert [stage["evidence"]["source_record_index"] for stage in manifest["stages"]] == [
+        1,
+        3,
+    ]
+    pre_required, low_health_route = manifest["stages"]
+    assert pre_required["name"] == "0001-pre-required-kill_snapshot"
+    assert pre_required["expected_state"]["kills"] == 4
+    assert pre_required["expected_state"]["health"] == 30
+    assert low_health_route["name"] == "0003-post-combat-low-health-exit-route_snapshot"
+    assert low_health_route["evidence"]["selectors"] == [
+        "post-combat-exit-route",
+        "post-combat-low-health-exit-route",
+    ]
+    assert low_health_route["expected_state"]["kills"] == 5
+    assert low_health_route["expected_state"]["health"] == 42
+    assert low_health_route["expected_state"]["route_waypoint_exit"] is True
+    assert low_health_route["snapshot"]["ref"] == "save_slot:2"
+
+
 def test_snapshot_validation_checks_required_artifacts_and_digests(tmp_path):
     snapshot = tmp_path / "first-contact.snap"
     snapshot.write_bytes(b"snapshot")
@@ -443,6 +495,55 @@ def test_native_snapshot_capture_tracker_matches_post_combat_selectors():
     assert post_combat == ["post-combat"]
     assert exit_control == []
     assert exit_route == ["post-combat-exit-route"]
+    assert tracker.complete is True
+
+
+def test_native_snapshot_capture_tracker_matches_gate_b_failure_anchors():
+    tracker = SnapshotMilestoneTracker(
+        (
+            "pre-required-kill",
+            "post-combat-exit-route",
+            "post-combat-low-health-exit-route",
+        ),
+        post_combat_kills=5,
+    )
+
+    early = tracker.observe(
+        _trajectory_row(0, visible=True, shootable=True, kills=3)
+    )
+    one_short = tracker.observe(
+        _trajectory_row(1, visible=True, shootable=False, kills=4, health=30)
+    )
+    tracker.mark_captured(one_short)
+    high_health_route = tracker.observe(
+        _trajectory_row(
+            2,
+            visible=False,
+            shootable=False,
+            kills=5,
+            health=80,
+            route_exit=True,
+            route_line_id=330,
+        )
+    )
+    tracker.mark_captured(high_health_route)
+    low_health_route = tracker.observe(
+        _trajectory_row(
+            3,
+            visible=False,
+            shootable=False,
+            kills=5,
+            health=42,
+            route_exit=True,
+            route_line_id=330,
+        )
+    )
+    tracker.mark_captured(low_health_route)
+
+    assert early == []
+    assert one_short == ["pre-required-kill"]
+    assert high_health_route == ["post-combat-exit-route"]
+    assert low_health_route == ["post-combat-low-health-exit-route"]
     assert tracker.complete is True
 
 
@@ -980,6 +1081,7 @@ def _trajectory_row(
     damage_delta: int = 0,
     kill_delta: int = 0,
     kills: int | None = None,
+    health: int = 100,
     route_exit: bool = False,
     route_line_id: int = 0,
     use_line_specials: list[int] | None = None,
@@ -1025,7 +1127,7 @@ def _trajectory_row(
             "tick": 100 + index,
             "episode": 1,
             "map": 1,
-            "health": 100,
+            "health": health,
             "armor": 0,
             "ammo_bullets": 50,
             "kills": state_kills,

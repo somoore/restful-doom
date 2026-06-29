@@ -24,14 +24,17 @@ AUTO_SELECTORS = frozenset(
         "first-enemy-shootable",
         "first-damage",
         "first-kill",
+        "pre-required-kill",
         "post-combat",
         "post-combat-exit-route",
+        "post-combat-low-health-exit-route",
         "level-transition",
     }
 )
 POST_COMBAT_KILL_THRESHOLD = 5
 POST_COMBAT_EXIT_ROUTE_APPROACH_DISTANCE_UNITS = 900.0
 POST_COMBAT_EXIT_ROUTE_MIN_HEALTH = 50
+POST_COMBAT_EXIT_ROUTE_LOW_HEALTH = 50
 EXIT_LINE_SPECIALS = frozenset({11, 51, 52, 124, 197, 198})
 
 
@@ -198,6 +201,8 @@ def _select_records(
 
 
 def _primary_selector(selectors: list[str]) -> str:
+    if "post-combat-low-health-exit-route" in selectors:
+        return "post-combat-low-health-exit-route"
     if "post-combat-exit-route" in selectors:
         return "post-combat-exit-route"
     return selectors[0] if selectors else "explicit"
@@ -230,6 +235,11 @@ def _first_matching_record(
                 return entry
             if kills is not None:
                 previous_kills = kills
+        if selector == "pre-required-kill" and _is_pre_required_kill(
+            record,
+            min_kills=post_combat_kills,
+        ):
+            return entry
         if selector == "post-combat" and _is_post_combat(
             record,
             min_kills=post_combat_kills,
@@ -238,6 +248,14 @@ def _first_matching_record(
         if selector == "post-combat-exit-route" and _is_post_combat_exit_route(
             record,
             min_kills=post_combat_kills,
+        ):
+            return entry
+        if (
+            selector == "post-combat-low-health-exit-route"
+            and _is_post_combat_low_health_exit_route(
+                record,
+                min_kills=post_combat_kills,
+            )
         ):
             return entry
         if selector == "level-transition" and _episode_map(state) != start_episode_map:
@@ -545,6 +563,18 @@ def _is_post_combat(
     )
 
 
+def _is_pre_required_kill(
+    record: dict[str, Any],
+    *,
+    min_kills: int = POST_COMBAT_KILL_THRESHOLD,
+) -> bool:
+    kills = _int_or_none(_record_state(record).get("kills"))
+    if kills is None:
+        return False
+    required = max(1, int(min_kills))
+    return required > 1 and kills == required - 1
+
+
 def _is_post_combat_exit_route(
     record: dict[str, Any],
     *,
@@ -582,6 +612,17 @@ def _is_post_combat_exit_route(
         "push_exit_switch",
         "press_exit_switch",
     }
+
+
+def _is_post_combat_low_health_exit_route(
+    record: dict[str, Any],
+    *,
+    min_kills: int = POST_COMBAT_KILL_THRESHOLD,
+) -> bool:
+    if not _is_post_combat_exit_route(record, min_kills=min_kills):
+        return False
+    health = _int_or_none(_record_state(record).get("health"))
+    return health is not None and health <= POST_COMBAT_EXIT_ROUTE_LOW_HEALTH
 
 
 def _exit_decision_use_line(record: dict[str, Any]) -> dict[str, Any] | None:
@@ -691,9 +732,15 @@ def _stage_note(selector: str) -> str:
         "first-enemy-shootable": "Restore the first trajectory state with a shootable enemy target.",
         "first-damage": "Restore the first trajectory state where the agent dealt damage.",
         "first-kill": "Restore the first trajectory state where the agent scored a kill.",
+        "pre-required-kill": (
+            "Restore the first trajectory state one kill short of the post-combat threshold."
+        ),
         "post-combat": "Restore the first trajectory state after the post-combat kill threshold.",
         "post-combat-exit-route": (
             "Restore the first post-combat state with an exit route waypoint."
+        ),
+        "post-combat-low-health-exit-route": (
+            "Restore the first low-health post-combat state with an exit route waypoint."
         ),
         "level-transition": "Restore the trajectory state around level transition.",
     }
