@@ -15,6 +15,7 @@ from restfuldoom_agent.ppo_agent import (
     _checkpoint_selection_score,
     _checkpoint_resume_score,
     _checkpoint_resume_score_source,
+    _checkpoint_eval_training_guard,
     _checkpoint_eval_stage_order,
     _checkpoint_eval_trace_path,
     _evaluate_checkpoint_curriculum,
@@ -3204,6 +3205,96 @@ def test_failed_true_spawn_gate_is_not_best_checkpoint(tmp_path):
         "failed-true-spawn.pt"
     )
     assert "ppo_best_checkpoint" not in memory.data
+
+
+def test_checkpoint_eval_training_guard_stops_failed_true_spawn_gate():
+    checkpoint_eval = {
+        "schema": "restfuldoom.ppo_checkpoint_curriculum_eval.v1",
+        "selection_score": 416.0,
+        "stages": [
+            {
+                "stage": {"name": "fresh_spawn_true_spawn_gate"},
+                "selection_score_components": {
+                    "mode": "true_spawn_promotion",
+                    "gate_ok": False,
+                    "gate_passed_episodes": 0,
+                    "gate_episode_count": 1,
+                    "true_spawn_gate": {
+                        "ok": False,
+                        "summary": {
+                            "bottleneck_counts": {"combat": 1},
+                            "done_reasons": {"death": 1},
+                        },
+                    },
+                },
+            }
+        ],
+    }
+
+    guard = _checkpoint_eval_training_guard(
+        SimpleNamespace(stop_on_true_spawn_regression=True),
+        checkpoint_eval,
+    )
+
+    assert guard == {
+        "schema": "restfuldoom.ppo_training_guard.v1",
+        "reason": "true_spawn_gate_regression",
+        "stop_training": True,
+        "stage_name": "fresh_spawn_true_spawn_gate",
+        "gate_ok": False,
+        "gate_passed_episodes": 0,
+        "gate_episode_count": 1,
+        "gate_bottleneck_counts": {"combat": 1},
+        "done_reasons": {"death": 1},
+    }
+
+
+def test_checkpoint_eval_training_guard_allows_passing_true_spawn_gate():
+    checkpoint_eval = {
+        "schema": "restfuldoom.ppo_checkpoint_curriculum_eval.v1",
+        "stages": [
+            {
+                "stage": {"name": "fresh_spawn_true_spawn_gate"},
+                "selection_score_components": {
+                    "mode": "true_spawn_promotion",
+                    "gate_ok": True,
+                    "gate_passed_episodes": 1,
+                    "gate_episode_count": 1,
+                    "true_spawn_gate": {"ok": True},
+                },
+            }
+        ],
+    }
+
+    assert (
+        _checkpoint_eval_training_guard(
+            SimpleNamespace(stop_on_true_spawn_regression=True),
+            checkpoint_eval,
+        )
+        is None
+    )
+
+
+def test_checkpoint_eval_training_guard_is_opt_in():
+    checkpoint_eval = {
+        "schema": "restfuldoom.ppo_checkpoint_curriculum_eval.v1",
+        "stages": [
+            {
+                "selection_score_components": {
+                    "mode": "true_spawn_promotion",
+                    "true_spawn_gate": {"ok": False},
+                },
+            }
+        ],
+    }
+
+    assert (
+        _checkpoint_eval_training_guard(
+            SimpleNamespace(stop_on_true_spawn_regression=False),
+            checkpoint_eval,
+        )
+        is None
+    )
 
 
 def test_passing_true_spawn_gate_can_be_best_checkpoint(tmp_path):

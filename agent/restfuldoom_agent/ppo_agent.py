@@ -164,7 +164,15 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     reward_config=_reward_config_from_args(args),
                     extra=checkpoint_extra,
                 )
-            if memory is not None:
+            training_guard = _checkpoint_eval_training_guard(args, checkpoint_eval)
+            if training_guard is not None:
+                checkpoint_extra["training_guard"] = training_guard
+                trainer.save_checkpoint(
+                    checkpoint_path,
+                    reward_config=_reward_config_from_args(args),
+                    extra=checkpoint_extra,
+                )
+            if memory is not None and training_guard is None:
                 _record_ppo_checkpoint(
                     memory,
                     checkpoint_path,
@@ -187,8 +195,11 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                 "rollout_summary": rollout_summary,
                 "curriculum_stage": curriculum_stage,
                 "checkpoint_eval": checkpoint_eval or {},
+                "training_guard": training_guard or {},
             }
             summaries.append(summary_record)
+            if training_guard is not None and bool(training_guard.get("stop_training")):
+                break
             score = _checkpoint_resume_score(rollout_summary, checkpoint_eval)
             score_source = _checkpoint_resume_score_source(checkpoint_eval)
             if (
@@ -1724,6 +1735,64 @@ def _checkpoint_resume_score_source(checkpoint_eval: dict[str, object] | None = 
     return "rollout_summary"
 
 
+def _checkpoint_eval_training_guard(
+    args: argparse.Namespace,
+    checkpoint_eval: dict[str, object] | None,
+) -> dict[str, object] | None:
+    """Returns a stop record when a guarded checkpoint regresses promotion gates."""
+    if not bool(getattr(args, "stop_on_true_spawn_regression", False)):
+        return None
+    if not isinstance(checkpoint_eval, dict):
+        return {
+            "schema": "restfuldoom.ppo_training_guard.v1",
+            "reason": "missing_checkpoint_eval",
+            "stop_training": True,
+        }
+    stages = checkpoint_eval.get("stages", [])
+    if not isinstance(stages, list):
+        return None
+    for stage_record in stages:
+        if not isinstance(stage_record, dict):
+            continue
+        components = stage_record.get("selection_score_components", {})
+        if not isinstance(components, dict):
+            continue
+        if components.get("mode") != "true_spawn_promotion":
+            continue
+        gate_report = components.get("true_spawn_gate")
+        gate_ok = bool(gate_report.get("ok")) if isinstance(gate_report, dict) else False
+        if gate_ok:
+            continue
+        gate_summary = (
+            gate_report.get("summary", {}) if isinstance(gate_report, dict) else {}
+        )
+        stage = stage_record.get("stage", {})
+        return {
+            "schema": "restfuldoom.ppo_training_guard.v1",
+            "reason": "true_spawn_gate_regression",
+            "stop_training": True,
+            "stage_name": (
+                stage.get("name")
+                if isinstance(stage, dict)
+                else stage_record.get("stage_name")
+            ),
+            "gate_ok": False,
+            "gate_passed_episodes": int(components.get("gate_passed_episodes") or 0),
+            "gate_episode_count": int(components.get("gate_episode_count") or 0),
+            "gate_bottleneck_counts": (
+                dict(gate_summary.get("bottleneck_counts", {}))
+                if isinstance(gate_summary, dict)
+                else {}
+            ),
+            "done_reasons": (
+                dict(gate_summary.get("done_reasons", {}))
+                if isinstance(gate_summary, dict)
+                else {}
+            ),
+        }
+    return None
+
+
 def _should_replace_best_checkpoint(
     previous_best: object,
     score: float,
@@ -2763,6 +2832,15 @@ def main() -> None:
             "After each PPO update, evaluate the checkpoint across every active "
             "curriculum stage and use that aggregate score for best-checkpoint resume. "
             "With --eval-checkpoint, run the same curriculum eval without training."
+        ),
+    )
+    parser.add_argument(
+        "--stop-on-true-spawn-regression",
+        action="store_true",
+        help=(
+            "During training, stop after a checkpoint curriculum eval if any "
+            "true-spawn promotion stage fails true_spawn_e2e_gate. The checkpoint "
+            "is annotated but not recorded as the memory resume candidate."
         ),
     )
     parser.add_argument("--checkpoint-eval-episodes", type=int, default=1)

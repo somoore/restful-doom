@@ -318,6 +318,10 @@ The training API is:
   `ppo_best_checkpoint`. This is slower than rollout-only selection, but it
   helps avoid preserving a checkpoint that overfit one contact stage while
   regressing combat-start or another visible-contact start.
+- `--stop-on-true-spawn-regression` makes checkpoint curriculum eval a training
+  guard: if a true-spawn promotion stage fails `true_spawn_e2e_gate`, the
+  checkpoint is annotated as rejected, omitted from the memory resume candidate,
+  and the training run stops before further updates can compound the regression.
 - `--eval-checkpoint --checkpoint-eval-curriculum` runs the same cross-stage
   curriculum eval without taking another training update.
 - `--allowed-skill <skill>` is an experiment-only allowlist applied after the
