@@ -2224,13 +2224,20 @@ class BrainPolicy:
         line: dict[str, Any],
         stuck: bool,
     ) -> tuple[Any, dict[str, Any]]:
+        special = int(line["special"])
         if not self._record_line_attempt(features, line):
-            return self._explore(features, stuck)
+            sector = features.navigation.get("current_sector", {}) or {}
+            damaging_sector = bool(sector.get("damaging")) or int(
+                sector.get("damage_per_32_tics", 0)
+            ) > 0
+            if special not in WALK_TRIGGER_LINE_SPECIALS or not damaging_sector:
+                return self._explore(features, stuck)
+            self._blocked_use_lines.pop(self._line_attempt_key(features, line), None)
+            self._line_attempts.pop(self._line_attempt_key(features, line), None)
 
         angle_delta = self._line_control_angle_delta(line)
         distance = self._line_control_distance(line)
         line_record = self._line_record(line)
-        special = int(line["special"])
         self._remember_post_combat_exit_line(features, line)
         if special in EXIT_LINE_SPECIALS:
             release = self._release_exit_use_after_pulse(

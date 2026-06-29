@@ -605,10 +605,11 @@ class SkillController:
             if low_health_contact and not features.visible_enemies and not can_fire
             else None
         )
+        critical_shootable_fire = can_fire and int(features.health) <= 15
         if low_health_contact and self._low_health_retreat_allowed(
             features,
             recent_contact_active=recent_contact_active,
-        ) and exit_commitment_line is None and not postcombat_route_available and threatened_exit_line is None and contact_exit_line is None and not self._low_health_damaging_sector_combat(features):
+        ) and exit_commitment_line is None and not postcombat_route_available and threatened_exit_line is None and contact_exit_line is None and not self._low_health_damaging_sector_combat(features) and not critical_shootable_fire:
             mask["retreat"] = True
             if stuck:
                 mask["recover_stuck"] = True
@@ -725,8 +726,9 @@ class SkillController:
             mask["route_progression"] = True
             mask["recover_stuck"] = True
         elif late_contact_route_recovery:
-            mask["route_progression"] = True
             mask["recover_stuck"] = True
+            if not self._late_contact_recover_only_needed(features):
+                mask["route_progression"] = True
         elif postcombat_visible_route_recovery:
             mask["recover_stuck"] = True
             if not self._postcombat_visible_recover_only_needed(features):
@@ -804,6 +806,11 @@ class SkillController:
             return False
         route_line = route.get("line", {})
         if not isinstance(route_line, dict):
+            return False
+        if (
+            progression_line is not None
+            and int(route_line.get("line_id", 0)) == int(progression_line.get("line_id", 0))
+        ):
             return False
         route_is_walk_trigger = bool(route.get("walk_trigger")) or int(
             route_line.get("special", 0)
@@ -1071,17 +1078,55 @@ class SkillController:
                 return self.policy._advance_progression_line(features, line, stuck)
             line = self.policy._select_progression_line(features)
             if line is None and self._stale_route_waypoint_recovery_needed(features, None):
-                return self.policy._recover_from_stuck(features)
+                route_line = self._route_waypoint_progression_line(features)
+                if route_line is not None:
+                    return self.policy._advance_progression_line(
+                        features,
+                        route_line,
+                        stuck,
+                    )
+                action, decision = self.policy._recover_from_stuck(features)
+                decision = dict(decision)
+                decision["route_recovery_reason"] = "stale_route_no_progression_line"
+                decision["route_waypoint_reject"] = (
+                    self._route_waypoint_progression_reject_reason(features)
+                )
+                return action, decision
+            if line is None:
+                line = self._route_waypoint_progression_line(features)
             if line is None:
                 line = self._contact_route_waypoint(features)
             if line is not None:
                 if self._exit_route_recovery_needed(
                     features,
                     line,
-                ) or self._stale_route_waypoint_recovery_needed(features, line):
-                    return self.policy._recover_from_stuck(features)
+                ):
+                    action, decision = self.policy._recover_from_stuck(features)
+                    decision = dict(decision)
+                    decision["route_recovery_reason"] = "exit_route_recovery"
+                    return action, decision
+                if self._stale_route_waypoint_recovery_needed(features, line):
+                    route_line = self._route_waypoint_progression_line(features)
+                    if route_line is not None:
+                        return self.policy._advance_progression_line(
+                            features,
+                            route_line,
+                            stuck,
+                        )
+                    action, decision = self.policy._recover_from_stuck(features)
+                    decision = dict(decision)
+                    decision["route_recovery_reason"] = "stale_route_progression_line"
+                    decision["route_waypoint_reject"] = (
+                        self._route_waypoint_progression_reject_reason(features)
+                    )
+                    return action, decision
                 return self.policy._advance_progression_line(features, line, stuck)
-            return self.policy._explore(features, stuck)
+            action, decision = self.policy._explore(features, stuck)
+            decision = dict(decision)
+            decision["route_waypoint_reject"] = (
+                self._route_waypoint_progression_reject_reason(features)
+            )
+            return action, decision
 
         if skill == "retreat":
             enemy = (
@@ -1115,6 +1160,47 @@ class SkillController:
             )
 
         return self.policy._explore(features, stuck)
+
+    def _route_waypoint_progression_line(self, features: Any) -> dict[str, Any] | None:
+        """Returns a walk-trigger route waypoint for no-visible late-contact routing."""
+        if self._route_waypoint_progression_reject_reason(features) is not None:
+            return None
+        route = features.navigation.get("route_waypoint", {})
+        line = route.get("line", {})
+        return line if isinstance(line, dict) else None
+
+    def _route_waypoint_progression_reject_reason(self, features: Any) -> str | None:
+        """Returns why a walk-trigger route waypoint cannot own route progression."""
+        if features.visible_enemies or self.policy._shootable_enemy(features) is not None:
+            return "active_enemy"
+        if (
+            not self.policy._has_episode_kill(features)
+            and int(features.kills) < POST_COMBAT_EXIT_KILLS - 1
+        ):
+            return "no_episode_kill"
+        route = features.navigation.get("route_waypoint", {})
+        if not isinstance(route, dict) or bool(route.get("exit", False)):
+            return "missing_or_exit_route"
+        line = route.get("line", {})
+        if not isinstance(line, dict) or int(line.get("line_id", 0)) <= 0:
+            return "missing_route_line"
+        if int(line.get("special", 0)) not in WALK_TRIGGER_LINE_SPECIALS:
+            return "not_walk_trigger"
+        if not bool(route.get("walk_trigger", False)) and int(
+            line.get("special", 0)
+        ) not in WALK_TRIGGER_LINE_SPECIALS:
+            return "not_route_walk_trigger"
+        if self.policy._line_control_distance(line) > 1200.0:
+            return "route_too_far"
+        if abs(self.policy._line_control_angle_delta(line)) > 170.0:
+            return "route_angle_too_wide"
+        sector = features.navigation.get("current_sector", {}) or {}
+        damaging_sector = bool(sector.get("damaging")) or int(
+            sector.get("damage_per_32_tics", 0)
+        ) > 0
+        if self.policy._is_line_blocked(features, line) and not damaging_sector:
+            return "route_blocked"
+        return None
 
     def _contact_route_waypoint(self, features: Any) -> dict[str, Any] | None:
         """Returns a route waypoint usable for visible-but-not-shootable contact."""
@@ -1568,14 +1654,36 @@ class SkillController:
         route = features.navigation.get("route_waypoint", {})
         if not isinstance(route, dict) or not isinstance(route.get("line"), dict):
             return False
-        if not self._recent_contact_active(features):
-            return False
+        recent_contact_active = self._recent_contact_active(features)
         enemy = self.policy._select_known_enemy(features)
-        if enemy is not None and float(enemy.get("distance", 999999.0)) <= 1200.0:
+        if self._previous_action_index is None:
             return False
-        if self._previous_action_index != SKILL_ACTIONS.index("close_visible_contact"):
+        previous_skill = SKILL_ACTIONS[self._previous_action_index]
+        if not recent_contact_active:
+            if enemy is None:
+                return False
+            if previous_skill in {"route_progression", "recover_stuck"}:
+                return self._same_skill_streak < 32
+            if previous_skill != "close_visible_contact":
+                return False
+            return self._same_skill_streak >= 64
+        if previous_skill in {"route_progression", "recover_stuck"}:
+            return self._same_skill_streak < 32
+        if previous_skill != "close_visible_contact":
             return False
-        return self._same_skill_streak >= 12
+        enemy_distance = (
+            float(enemy.get("distance", 999999.0))
+            if enemy is not None
+            else 999999.0
+        )
+        required_streak = 24 if enemy_distance <= 1200.0 else 12
+        return self._same_skill_streak >= required_streak
+
+    def _late_contact_recover_only_needed(self, features: Any) -> bool:
+        """Breaks sticky late-combat route sidesteps that stop moving."""
+        if self._previous_action_index != SKILL_ACTIONS.index("route_progression"):
+            return False
+        return self._same_skill_streak >= 8
 
     def _postcombat_visible_route_recovery_needed(self, features: Any) -> bool:
         """Lets exit routing take over when post-combat visible contact stalls."""
