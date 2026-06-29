@@ -442,6 +442,8 @@ def test_skill_controller_critical_shootable_contact_allows_fire_off_hazard():
 
     assert mask["fire"]
     assert not mask["retreat"]
+    assert not mask["route_progression"]
+    assert not mask["press_exit"]
 
 
 def test_skill_controller_low_health_no_visible_contact_breaks_retreat_loop():
@@ -659,6 +661,62 @@ def test_skill_controller_breaks_late_contact_loop_near_route_after_stale_close(
     assert recover_mask["recover_stuck"]
     assert not recover_mask["route_progression"]
     assert not recover_mask["close_visible_contact"]
+
+
+def test_skill_controller_late_route_recovery_defers_to_contact_use_line(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    memory.data["enemies"] = {
+        "7": {
+            "last_seen_tick": 40,
+            "last_position": [1190.0, 0.0],
+            "last_distance": 1190.0,
+            "last_health": 20,
+            "line_of_sight": True,
+        }
+    }
+    controller = SkillController(memory=memory)
+    visible_contact = _state(
+        tick=40,
+        kills=3,
+        enemy=True,
+        combat=False,
+        contact_use=True,
+        contact_use_distance_units=900,
+    )
+    contact_line = visible_contact.navigation.use_lines[0]
+    controller._remember_contact_use_line(
+        extract_features(visible_contact, controller.memory, controller.params),
+        {
+            "line_id": contact_line.line_id,
+            "special": contact_line.special,
+            "distance": 900.0,
+            "angle_delta": 0.0,
+        },
+    )
+    lost_contact = _state(
+        tick=120,
+        kills=3,
+        enemy=True,
+        enemy_line_of_sight=False,
+        enemy_distance=1190,
+        combat=False,
+        route=True,
+        contact_use=True,
+        contact_use_distance_units=900,
+    )
+    route_line = lost_contact.navigation.route_waypoint.line
+    route_line.line_id = 195
+    route_line.special = 88
+    route_line.distance_fp = 520 * 65536
+    route_line.nearest_distance_fp = 520 * 65536
+
+    controller._previous_action_index = SKILL_ACTIONS.index("route_progression")
+    controller._same_skill_streak = 1
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(lost_contact)))
+
+    assert mask["close_visible_contact"]
+    assert not mask["route_progression"]
+    assert not mask["recover_stuck"]
 
 
 def test_skill_controller_breaks_expired_late_contact_loop_after_long_close(tmp_path):
@@ -1791,7 +1849,7 @@ def test_skill_controller_far_final_line_approach_keeps_full_forward_speed():
     assert action.raw.forward_move == controller.params.move_amount
 
 
-def test_skill_controller_low_health_combat_probe_keeps_post_combat_press_exit():
+def test_skill_controller_critical_combat_probe_forces_fire_before_post_combat_press_exit():
     controller = SkillController()
     controller.policy._start_kills = 0
     state = _state(
@@ -1817,13 +1875,11 @@ def test_skill_controller_low_health_combat_probe_keeps_post_combat_press_exit()
 
     controller.action_mask(_state(tick=1, enemy=True, combat=False))
     mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
-    action, decision = controller.action_for(SKILL_ACTIONS.index("press_exit"), state)
 
     assert mask["fire"]
     assert not mask["retreat"]
-    assert mask["press_exit"]
-    assert decision["use_line"]["line_id"] == 330
-    assert action.raw.forward_move > 0
+    assert not mask["press_exit"]
+    assert not mask["route_progression"]
 
 
 def test_skill_controller_visible_contact_keeps_near_final_line_legal():
@@ -1970,7 +2026,7 @@ def test_skill_controller_postcombat_visible_contact_loop_yields_to_route():
     assert not recover_mask["close_visible_contact"]
 
 
-def test_skill_controller_critical_visible_combat_keeps_far_final_line_legal():
+def test_skill_controller_critical_visible_combat_forces_fire_before_far_final_line():
     controller = SkillController()
     controller.policy._start_kills = 0
     state = _state(
@@ -1997,8 +2053,8 @@ def test_skill_controller_critical_visible_combat_keeps_far_final_line_legal():
     mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
 
     assert mask["fire"]
-    assert mask["press_exit"]
-    assert mask["route_progression"]
+    assert not mask["press_exit"]
+    assert not mask["route_progression"]
     assert not mask["retreat"]
 
 
@@ -2035,7 +2091,7 @@ def test_skill_controller_critical_visible_final_line_suppresses_contact_work():
     assert not mask["retreat"]
 
 
-def test_skill_controller_low_health_combat_probe_keeps_far_post_combat_press_exit():
+def test_skill_controller_critical_combat_probe_forces_fire_before_far_post_combat_press_exit():
     controller = SkillController()
     controller.policy._start_kills = 0
     state = _state(
@@ -2061,13 +2117,11 @@ def test_skill_controller_low_health_combat_probe_keeps_far_post_combat_press_ex
 
     controller.action_mask(_state(tick=1, enemy=True, combat=False))
     mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
-    action, decision = controller.action_for(SKILL_ACTIONS.index("press_exit"), state)
 
     assert mask["fire"]
     assert not mask["retreat"]
-    assert mask["press_exit"]
-    assert decision["use_line"]["line_id"] == 330
-    assert action.raw.forward_move > 0
+    assert not mask["press_exit"]
+    assert not mask["route_progression"]
 
 
 def test_skill_controller_critical_hazard_keeps_blocked_final_line_legal():

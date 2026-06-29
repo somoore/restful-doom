@@ -616,6 +616,8 @@ class SkillController:
             return [mask[skill] for skill in SKILL_ACTIONS]
         if can_fire:
             mask["fire"] = True
+            if critical_shootable_fire:
+                return [mask[skill] for skill in SKILL_ACTIONS]
             if threatened_exit_line is not None or contact_exit_line is not None:
                 mask["press_exit"] = True
                 mask["route_progression"] = True
@@ -1653,6 +1655,12 @@ class SkillController:
             return False
         route = features.navigation.get("route_waypoint", {})
         if not isinstance(route, dict) or not isinstance(route.get("line"), dict):
+            return False
+        contact_line = self._recent_contact_use_line_for(features)
+        if contact_line is not None and not self._contact_use_line_ready_for_visible_contact(
+            features,
+            contact_line,
+        ):
             return False
         recent_contact_active = self._recent_contact_active(features)
         enemy = self.policy._select_known_enemy(features)
