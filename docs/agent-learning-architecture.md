@@ -401,8 +401,9 @@ learning observation. Known gaps:
 - Route waypoints are a single local progression target, not a full route plan
   or topology graph.
 - No enemy projectile or incoming-damage prediction.
-- No deterministic RNG seed application yet; reset seed is currently a label,
-  not replay proof.
+- Rebuilt gRPC servers apply requested `ResetEpisode` seeds and report
+  `seed_applied=true`; promotion artifacts should verify the per-episode
+  `seed_applied` fields before claiming fixed-seed replay proof.
 
 These gaps explain why the first PPO runs show distance-progress reward before
 damage or kills. The model can learn "approach enemy" from the current vector,
@@ -797,4 +798,5 @@ The next useful changes are:
   curriculum and evaluate against the deterministic full-level baseline.
 - Move skill definitions from exported descriptors to optional external config
   after the action set stabilizes.
-- Wire true deterministic seed application in the Doom reset path.
+- Rebuild and re-run true-spawn promotion evals with `seed_applied=true`
+  evidence in the candidate and gate summaries.

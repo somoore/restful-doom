@@ -16,6 +16,7 @@ def test_true_spawn_e2e_gate_accepts_strict_episode_transition():
     assert report["summary"]["episode_count"] == 1
     assert report["summary"]["passed_episodes"] == 1
     assert report["summary"]["true_spawn_episode_count"] == 1
+    assert report["summary"]["seed_applied_episode_count"] == 1
     assert report["summary"]["level_transition_episode_count"] == 1
     assert report["summary"]["level_complete_episode_count"] == 1
     assert report["summary"]["reset_source_counts"] == {"episode": 1}
@@ -340,6 +341,7 @@ def _episode(**overrides):
         "end_map": 2,
         "level_transition_delta": 1,
         "reset_source": "episode",
+        "seed_applied": True,
         "skill_counts": {"route_progression": 5, "fire": 2, "press_exit": 1},
         "visible_enemy_steps": 12,
         "first_visible_contacts": 1,

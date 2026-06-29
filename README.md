@@ -958,9 +958,11 @@ stores model weights, optimizer state, PPO config, observation/action schemas,
 reward config, and eval history. The promotion gate should compare PPO against
 the deterministic baseline before replacing the current brain.
 
-Current reset caveat: `ResetEpisode` accepts a seed and echoes it in the
-response, but reports `seed_applied=false` until Doom RNG seeding is wired and
-verified. Treat seeds as run labels for now, not deterministic replay proof.
+Current reset contract: rebuilt gRPC servers queue deterministic Doom RNG seed
+application for each `ResetEpisode` and report `seed_applied=true`.
+Promotion artifacts include `seed_applied` per episode plus
+`seed_applied_episode_count` in eval/gate summaries; verify those fields before
+claiming fixed-seed or held-out-seed replay evidence.
 
 ### Local Docker + Codex MCP
 

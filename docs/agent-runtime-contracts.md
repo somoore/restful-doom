@@ -180,7 +180,7 @@ Observation gap register:
 | Contact to shootable | visible enemy distance, contact use-line memory, first-shootable reward, explicit contact-line observation, local topology context | doorway/contact local geometry over time | validate shootable reset stage or add contact-ray/topology features |
 | Combat target quality | shootable yes/no, target distance, enemy health | aim error, weapon range quality, cooldown window | extend protobuf combat probe |
 | Survival threat | sector hazard, health deltas | projectile and incoming-damage prediction | add projectile/threat affordances |
-| Replayability | reset label and fresh starts | deterministic RNG and progressed map state | wire `seed_applied=true` and snapshot restore |
+| Replayability | `seed_applied=true` reset evidence and fresh starts | progressed map state | verify fixed/held-out seed gates and snapshot restore |
 
 The promotion rule should stay strict while this is incomplete. Reward shaping
 can train intermediate curricula, but a promoted full policy still needs level

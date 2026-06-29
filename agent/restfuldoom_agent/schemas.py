@@ -999,7 +999,7 @@ OBSERVATION_SCHEMA = {
             "no compact topological map graph",
             "no recurrent neural state beyond bounded hand-built temporal features",
             "no projectile or incoming-damage predictor",
-            "reset seeds are labels until the server reports seed_applied=true",
+            "fixed-seed claims require candidate/gate artifacts with seed_applied=true evidence",
         ],
         "next_feature_candidates": [
             "recent_damage_window_norm",

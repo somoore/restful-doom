@@ -8,6 +8,7 @@
 #include "doomstat.h"
 #include "g_game.h"
 #include "info.h"
+#include "m_random.h"
 #include "p_local.h"
 #include "r_main.h"
 #include "r_state.h"
@@ -21,6 +22,8 @@ static int agent_probe_block_distance_fp;
 static boolean agent_probe_use_line_ahead;
 static boolean agent_pending_start_active = false;
 static agent_control_request_t agent_pending_start;
+static boolean agent_pending_seed_active = false;
+static agent_control_request_t agent_pending_seed;
 
 #define AGENT_NAV_PROBE_DISTANCE (96 * FRACUNIT)
 
@@ -696,6 +699,28 @@ static void ApplyPendingStart(void)
     agent_pending_start_active = false;
 }
 
+static void ApplyPendingSeed(void)
+{
+    if (!agent_pending_seed_active)
+    {
+        return;
+    }
+
+    if (gamestate != GS_LEVEL)
+    {
+        return;
+    }
+
+    if (agent_pending_seed.episode != gameepisode
+        || agent_pending_seed.map != gamemap)
+    {
+        return;
+    }
+
+    M_SetRandomSeed((unsigned int) (agent_pending_seed.seed & 0xffffffffu));
+    agent_pending_seed_active = false;
+}
+
 static void FillPlayerState(agent_game_state_snapshot_t *snapshot)
 {
     player_t *player;
@@ -809,6 +834,7 @@ void AgentBridge_AfterTic(int completed_tic)
         return;
     }
 
+    ApplyPendingSeed();
     ApplyPendingStart();
 
     memset(&snapshot, 0, sizeof(snapshot));
@@ -853,6 +879,8 @@ int AgentBridge_BeforeTic(void)
                     ++actions_discarded;
                 }
                 agent_pending_start_active = false;
+                agent_pending_seed = request;
+                agent_pending_seed_active = true;
                 G_DeferedInitNew((skill_t) ClampInt(request.skill, sk_baby, sk_nightmare),
                                  request.episode,
                                  request.map);
@@ -883,6 +911,7 @@ int AgentBridge_BeforeTic(void)
                     ++actions_discarded;
                 }
                 agent_pending_start_active = false;
+                agent_pending_seed_active = false;
                 G_AgentLoadGame(ClampInt(request.snapshot_slot, 0, 9));
                 suppress_current_ticcmd = 1;
                 break;

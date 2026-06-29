@@ -261,7 +261,7 @@ The remaining learning gap is real. Known missing pieces:
 | recurrent context | feed-forward PPO sees only hand-built short history | bounded temporal features | recurrent policy if features stay insufficient |
 | combat target quality | shootable yes/no hides aim margin and weapon quality | fire mask and action reward | richer combat probe fields |
 | projectile threat | survival lacks incoming-threat prediction | health/sector deltas | projectile and incoming-damage affordances |
-| deterministic replay | reset seed is currently a label | run metadata records seed request | verified `seed_applied=true` |
+| deterministic replay | rebuilt resets report `seed_applied=true` | candidate/gate artifacts record applied seed evidence | fixed and held-out seed gates rerun on rebuilt server |
 
 The promotion rule stays strict while those gaps are open. Dense rewards can
 train intermediate checkpoints, but promotion still requires level completion,

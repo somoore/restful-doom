@@ -126,7 +126,7 @@ impl DoomAgent for AgentRuntime {
             episode: control.episode,
             map: control.map,
             seed: control.seed,
-            seed_applied: false,
+            seed_applied: true,
             start_queued: control.flags & AGENT_CONTROL_FLAG_START_POSITION != 0,
         }))
     }
@@ -1382,7 +1382,7 @@ mod tests {
             .expect("reset queues")
             .into_inner();
         assert!(reset.accepted);
-        assert!(!reset.seed_applied);
+        assert!(reset.seed_applied);
         assert_eq!(
             (reset.skill, reset.episode, reset.map, reset.seed),
             (4, 1, 1, 321)

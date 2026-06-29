@@ -1680,6 +1680,28 @@ def test_doom_agent_env_snapshot_reset_observes_without_episode_reset():
     ]
 
 
+def test_doom_agent_env_episode_reset_context_records_seed_applied():
+    first = _state(tick=710, level_time=1, enemy=True)
+    client = _FakeClient([first], seed_applied=True)
+    env = DoomAgentEnv(
+        DoomEnvConfig(goal_preset="combat"),
+        client=client,
+        controller=SkillController(),
+    )
+
+    async def run():
+        await env.reset(seed=123)
+        await env.close()
+        return env._last_reset_context
+
+    reset_context = asyncio.run(run())
+
+    assert reset_context["source"] == "episode"
+    assert reset_context["seed_label"] == 123
+    assert reset_context["seed_applied"] is True
+    assert reset_context["skipped_reset_episode"] is False
+
+
 def test_doom_agent_env_snapshot_reset_can_load_server_slot():
     first = _state(tick=800, level_time=14, enemy=True)
     client = _FakeClient([first])
@@ -2390,8 +2412,9 @@ def test_doom_agent_env_reset_warmup_respects_tic_limit():
 
 
 class _FakeClient:
-    def __init__(self, states):
+    def __init__(self, states, *, seed_applied=False):
         self.states = list(states)
+        self.seed_applied = bool(seed_applied)
         self.actions = []
         self.reset_requests = []
         self.load_snapshot_requests = []
@@ -2407,7 +2430,7 @@ class _FakeClient:
             episode=episode,
             map=map,
             seed=seed,
-            seed_applied=False,
+            seed_applied=self.seed_applied,
             start_queued=False,
         )
 

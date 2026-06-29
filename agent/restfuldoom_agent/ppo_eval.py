@@ -44,6 +44,7 @@ class EpisodeEval:
     end_map: int = 0
     level_transition_delta: int = 0
     reset_source: str = ""
+    seed_applied: bool = False
     skill_counts: dict[str, int] = field(default_factory=dict)
     visible_enemy_steps: int = 0
     first_visible_contacts: int = 0
@@ -228,6 +229,11 @@ async def evaluate_skill_policy(
                 if isinstance(reset_context, dict)
                 else ""
             )
+            seed_applied = bool(
+                reset_context.get("seed_applied", False)
+                if isinstance(reset_context, dict)
+                else False
+            )
             snapshot_verification_failures = int(
                 _reset_context_snapshot_verification_failed(reset_context)
             )
@@ -399,6 +405,7 @@ async def evaluate_skill_policy(
                     end_map=end_map,
                     level_transition_delta=level_transition_delta,
                     reset_source=reset_source,
+                    seed_applied=seed_applied,
                     skill_counts=dict(sorted(skill_counts.items())),
                     visible_enemy_steps=visible_enemy_steps,
                     first_visible_contacts=first_visible_contacts,
@@ -543,6 +550,9 @@ def _aggregate(policy_id: str, episodes: list[EpisodeEval]) -> PolicyEval:
         snapshot_verification_failures=sum(
             int(episode.snapshot_verification_failures) for episode in episodes
         ),
+        seed_applied_episode_count=sum(
+            1 for episode in episodes if bool(episode.seed_applied)
+        ),
         invalid_action_steps=sum(int(episode.invalid_action_steps) for episode in episodes),
         selected_disallowed_steps=sum(
             int(episode.selected_disallowed_steps) for episode in episodes
@@ -645,6 +655,9 @@ def _reset_source_breakdown(episodes: list[EpisodeEval]) -> dict[str, dict[str, 
             "snapshot_verification_failures": sum(
                 int(episode.snapshot_verification_failures)
                 for episode in source_episodes
+            ),
+            "seed_applied_episode_count": sum(
+                1 for episode in source_episodes if bool(episode.seed_applied)
             ),
             "invalid_action_steps": sum(
                 int(episode.invalid_action_steps) for episode in source_episodes

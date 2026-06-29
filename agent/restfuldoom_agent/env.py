@@ -1326,6 +1326,7 @@ class DoomAgentEnv:
         self._episode_index = 0
         self._last_reset_warmup: dict[str, Any] = {}
         self._last_reset_context: dict[str, Any] = {}
+        self._last_episode_reset: Any | None = None
         self._last_action_mask_filter: dict[str, Any] = {}
         self._episode_seen_visible_enemy = False
         self._episode_seen_shootable_enemy = False
@@ -1351,6 +1352,7 @@ class DoomAgentEnv:
             self.controller.reset_episode_context()
         reset_seed = self.config.seed if seed is None else seed
         if self.config.reset_mode == "snapshot":
+            self._last_episode_reset = None
             state = await self._reset_from_snapshot()
         elif self.config.reset_mode == "episode":
             await self._ensure_stream()
@@ -1417,6 +1419,11 @@ class DoomAgentEnv:
             "source": reset_source,
             "episode_index": self._episode_index,
             "seed_label": int(seed),
+            "seed_applied": bool(
+                getattr(self._last_episode_reset, "seed_applied", False)
+            )
+            if reset_source in {"episode", "warmup"}
+            else False,
             "skipped_reset_episode": self.config.reset_mode == "snapshot",
             "snapshot_id": snapshot.get("id"),
             "snapshot_path": snapshot.get("path"),
@@ -1526,6 +1533,7 @@ class DoomAgentEnv:
             if not reset.accepted:
                 raise RuntimeError(f"reset rejected: {reset.message}")
             try:
+                self._last_episode_reset = reset
                 return await self._next_reset_state(reset.episode, reset.map)
             except TimeoutError as error:
                 last_error = error

@@ -35,5 +35,8 @@ int P_Random (void);
 // Fix randoms for demos.
 void M_ClearRandom (void);
 
+// Set random indices from an agent-supplied reset seed.
+void M_SetRandomSeed (unsigned int seed);
+
 
 #endif

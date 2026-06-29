@@ -125,11 +125,12 @@ of folding them into generic `engage`. Each batch writes rollout buffers and a
 `restfuldoom.ppo_checkpoint.v1` checkpoint with model weights, optimizer state,
 schemas, reward config, and eval metadata.
 
-Before promoting PPO over the deterministic brain, evaluate it on fixed run
-labels and require it to beat the baseline on level completion, kills, survival,
-time/states to exit, and stuck events. Current reset responses include the
-requested seed but report `seed_applied=false`; do not claim deterministic
-seeded replay until that field is true in a verified build.
+Before promoting PPO over the deterministic brain, evaluate it on fixed and
+held-out reset seeds and require it to beat the baseline on level completion,
+kills, survival, time/states to exit, and stuck events. Rebuilt reset responses
+report `seed_applied=true`; do not claim deterministic seeded replay unless the
+candidate and gate artifacts show applied seed evidence for every checked
+episode.
 
 ## Production Demo Checklist
 

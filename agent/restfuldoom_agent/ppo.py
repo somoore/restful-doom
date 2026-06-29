@@ -641,6 +641,7 @@ class EvaluationResult:
     mean_secrets: float = 0.0
     mean_secret_gain: float = 0.0
     snapshot_verification_failures: int = 0
+    seed_applied_episode_count: int = 0
     invalid_action_steps: int = 0
     selected_disallowed_steps: int = 0
     action_mask_fallback_steps: int = 0

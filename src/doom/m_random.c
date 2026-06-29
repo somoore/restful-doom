@@ -73,6 +73,11 @@ void M_ClearRandom (void)
     rndindex = time(NULL) & 0xff;
 }
 
+void M_SetRandomSeed (unsigned int seed)
+{
+    prndindex = seed & 0xff;
+    rndindex = (seed >> 8) & 0xff;
+}
 
 
 

@@ -57,6 +57,7 @@ def validate_true_spawn_e2e_gate(
         "level_transition_delta_total": 0,
         "level_complete_episode_count": 0,
         "true_spawn_episode_count": 0,
+        "seed_applied_episode_count": 0,
         "snapshot_reset_episode_count": 0,
         "non_episode_reset_episode_count": 0,
         "invalid_action_steps": 0,
@@ -154,6 +155,8 @@ def validate_true_spawn_e2e_gate(
             reset_source_counts[reset_source] += 1
             if reset_source == "episode":
                 summary["true_spawn_episode_count"] += 1
+                if bool(episode.get("seed_applied", False)):
+                    summary["seed_applied_episode_count"] += 1
             elif reset_source == "snapshot_restore":
                 summary["snapshot_reset_episode_count"] += 1
                 summary["non_episode_reset_episode_count"] += 1
