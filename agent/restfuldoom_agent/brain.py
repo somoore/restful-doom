@@ -675,6 +675,14 @@ class BrainPolicy:
             return agent_pb2.PlayerAction(), self._decision("dead", features, stuck=stuck)
 
         shootable_enemy = self._shootable_enemy(features)
+        critical_hazard_escape = (
+            self._escape_hazard_cell(features, stuck)
+            if self._critical_hazard_escape_allowed(features)
+            else None
+        )
+        if critical_hazard_escape is not None:
+            return critical_hazard_escape
+
         if features.health <= 15 and (close_enemy is not None or shootable_enemy is not None):
             return self._retreat_or_fire(
                 features,
@@ -1188,6 +1196,8 @@ class BrainPolicy:
         )
 
     def _is_hazard_cell(self, features: TacticalFeatures) -> bool:
+        if self._current_sector_is_damaging(features):
+            return not features.visible_enemies and features.health <= 20
         if features.visible_enemies or features.known_enemies:
             return False
         cell = self.memory.data.get("cells", {}).get(features.cell, {})
@@ -1195,6 +1205,18 @@ class BrainPolicy:
         if damage_events <= 0:
             return False
         return features.health <= 55
+
+    def _critical_hazard_escape_allowed(self, features: TacticalFeatures) -> bool:
+        return (
+            features.health <= 20
+            and not features.visible_enemies
+            and self._current_sector_is_damaging(features)
+        )
+
+    @staticmethod
+    def _current_sector_is_damaging(features: TacticalFeatures) -> bool:
+        sector = features.navigation.get("current_sector", {}) or {}
+        return bool(sector.get("damaging")) or int(sector.get("damage_per_32_tics", 0)) > 0
 
     def _select_hazard_progression_line(
         self,
@@ -2229,6 +2251,26 @@ class BrainPolicy:
                     return self._use_nearby_line(features, assist_door, stuck)
 
         activate_distance = self._line_activate_distance(features, line)
+        if (
+            special in EXIT_LINE_SPECIALS
+            and distance > max(activate_distance, EXIT_ASSIST_DISTANCE_UNITS)
+            and abs(angle_delta) <= 90.0
+            and bool(features.navigation.get("forward_open", True))
+        ):
+            return (
+                raw_ticcmd_action(
+                    forward_move=self.params.move_amount,
+                    angle_turn=raw_turn_for_delta(angle_delta),
+                    duration_tics=4,
+                    tick=features.tick,
+                ),
+                self._decision(
+                    "approach_far_exit_line",
+                    features,
+                    stuck=stuck,
+                    use_line=line_record,
+                ),
+            )
         if (
             special in EXIT_LINE_SPECIALS
             and distance > activate_distance

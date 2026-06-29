@@ -874,6 +874,55 @@ def test_critical_health_hazard_escapes_instead_of_chasing_walk_trigger(tmp_path
     assert policy.last_decision["direction_probe"]["angle_offset_degrees"] == 0
 
 
+def test_critical_health_damaging_sector_preempts_stale_combat_probe(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    asyncio.run(policy.next_action(state(tick=1)))
+
+    combat = SimpleNamespace(
+        has_shootable_target=True,
+        target_id=7,
+        target_health=20,
+        target_distance_fp=256 * 65536,
+        aim_slope_fp=0,
+        range_fp=256 * 65536,
+        target_is_enemy=True,
+    )
+    game_state = state(
+        tick=40,
+        enemy={
+            "id": 7,
+            "x": 256,
+            "y": 0,
+            "distance": 256,
+            "line_of_sight": False,
+            "health": 20,
+        },
+        combat=combat,
+    )
+    game_state.player.health = 12
+    game_state.navigation.current_sector = SimpleNamespace(
+        sector_id=45,
+        special=7,
+        floor_height_fp=0,
+        ceiling_height_fp=128 * 65536,
+        light_level=160,
+        damaging=True,
+        damage_per_32_tics=5,
+        exit_damage=False,
+    )
+
+    action = asyncio.run(policy.next_action(game_state))
+
+    assert policy.last_decision["skill"] == "escape_hazard_cell"
+    assert action.raw.buttons == 0
+    assert action.raw.forward_move > 0
+
+
 def test_post_kill_policy_targets_progression_trigger_before_nearby_door(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
@@ -988,7 +1037,7 @@ def test_post_combat_policy_prefers_visible_far_exit_when_combat_is_quiet(tmp_pa
     action = asyncio.run(policy.next_action(game_state))
 
     assert policy.last_decision["use_line"]["line_id"] == 330
-    assert policy.last_decision["skill"] == "approach_progression_line"
+    assert policy.last_decision["skill"] == "approach_far_exit_line"
     assert action.raw.forward_move > 0
 
 
@@ -1030,7 +1079,7 @@ def test_post_combat_snapshot_prefers_visible_exit_with_inherited_kills(tmp_path
 
     assert selected["line_id"] == 330
     assert decision["use_line"]["line_id"] == 330
-    assert decision["skill"] == "approach_progression_line"
+    assert decision["skill"] == "approach_far_exit_line"
     assert action.raw.forward_move > 0
 
 
