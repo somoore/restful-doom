@@ -578,6 +578,9 @@ class SkillController:
         can_fire = shootable is not None and self.policy._can_shoot(features, shootable)
         recent_contact_active = self._recent_contact_active(features)
         late_contact_route_recovery = self._late_contact_route_recovery_needed(features)
+        postcombat_visible_route_recovery = (
+            self._postcombat_visible_route_recovery_needed(features)
+        )
         progression_line = None
         low_health_contact = (
             features.health <= self.params.retreat_health
@@ -585,6 +588,9 @@ class SkillController:
         )
         threatened_exit_line = self._postcombat_exit_under_threat_line(features)
         contact_exit_line = self._postcombat_contact_exit_line(features)
+        critical_contact_exit = (
+            contact_exit_line is not None and int(features.health) <= 20
+        )
         postcombat_route_available = (
             int(features.kills) >= POST_COMBAT_EXIT_KILLS
             and not features.visible_enemies
@@ -622,7 +628,11 @@ class SkillController:
             return [mask[skill] for skill in SKILL_ACTIONS]
 
         if features.visible_enemies:
-            if not can_fire:
+            if (
+                not can_fire
+                and not critical_contact_exit
+                and not postcombat_visible_route_recovery
+            ):
                 mask["close_visible_contact"] = True
             if contact_exit_line is not None:
                 mask["press_exit"] = True
@@ -630,6 +640,8 @@ class SkillController:
             contact_line = self._contact_use_line(features)
             if (
                 not can_fire
+                and not critical_contact_exit
+                and not postcombat_visible_route_recovery
                 and shootable is None
                 and contact_line is not None
                 and self._contact_use_line_ready_for_visible_contact(features, contact_line)
@@ -657,6 +669,7 @@ class SkillController:
             if (
                 contact_line is not None
                 and self._contact_use_line_ready_for_visible_contact(features, contact_line)
+                and not late_contact_route_recovery
                 and not postcombat_route_available
             ):
                 mask["open_use_line"] = True
@@ -713,6 +726,11 @@ class SkillController:
             mask["recover_stuck"] = True
         elif late_contact_route_recovery:
             mask["route_progression"] = True
+            mask["recover_stuck"] = True
+        elif postcombat_visible_route_recovery:
+            mask["recover_stuck"] = True
+            if not self._postcombat_visible_recover_only_needed(features):
+                mask["route_progression"] = True
         elif stale_route_recovery:
             mask["recover_stuck"] = True
         elif not can_fire and progression_line is not None:
@@ -824,6 +842,9 @@ class SkillController:
         line = self.policy._last_post_combat_exit_line_target(features)
         if line is not None:
             return line
+        line = self._postcombat_contact_exit_line(features)
+        if line is not None:
+            return line
         line = self._postcombat_exit_under_threat_line(features)
         if line is not None:
             return line
@@ -856,12 +877,7 @@ class SkillController:
             return False
         if self._postcombat_far_exit_approach_allowed(features, line):
             return True
-        max_distance = (
-            POST_COMBAT_EXIT_ROUTE_DISTANCE_UNITS
-            if features.health <= self.params.retreat_health
-            else EXIT_ASSIST_DISTANCE_UNITS
-        )
-        if self.policy._line_control_distance(line) > max_distance:
+        if self.policy._line_control_distance(line) > POST_COMBAT_EXIT_ROUTE_DISTANCE_UNITS:
             return False
         return abs(self.policy._line_control_angle_delta(line)) <= 150.0
 
@@ -1414,12 +1430,7 @@ class SkillController:
             return False
         if self.policy._is_line_blocked(features, line):
             return False
-        max_distance = (
-            POST_COMBAT_EXIT_ROUTE_DISTANCE_UNITS
-            if features.health <= self.params.retreat_health
-            else EXIT_ASSIST_DISTANCE_UNITS
-        )
-        if self.policy._line_control_distance(line) > max_distance:
+        if self.policy._line_control_distance(line) > POST_COMBAT_EXIT_ROUTE_DISTANCE_UNITS:
             return False
         return abs(self.policy._line_control_angle_delta(line)) <= 150.0
 
@@ -1554,14 +1565,45 @@ class SkillController:
             return False
         if features.visible_enemies or self.policy._shootable_enemy(features) is not None:
             return False
-        enemy = self.policy._select_known_enemy(features)
-        if enemy is None:
+        route = features.navigation.get("route_waypoint", {})
+        if not isinstance(route, dict) or not isinstance(route.get("line"), dict):
             return False
-        if float(enemy.get("distance", 999999.0)) <= 1200.0:
+        if not self._recent_contact_active(features):
+            return False
+        enemy = self.policy._select_known_enemy(features)
+        if enemy is not None and float(enemy.get("distance", 999999.0)) <= 1200.0:
             return False
         if self._previous_action_index != SKILL_ACTIONS.index("close_visible_contact"):
             return False
+        return self._same_skill_streak >= 12
+
+    def _postcombat_visible_route_recovery_needed(self, features: Any) -> bool:
+        """Lets exit routing take over when post-combat visible contact stalls."""
+        if int(features.kills) < POST_COMBAT_EXIT_KILLS:
+            return False
+        if not features.visible_enemies:
+            return False
+        if self.policy._shootable_enemy(features) is not None:
+            return False
+        if not self.policy._has_episode_kill(features):
+            return False
+        route = features.navigation.get("route_waypoint", {})
+        if not isinstance(route, dict) or not isinstance(route.get("line"), dict):
+            return False
+        if self._previous_action_index is None:
+            return False
+        previous_skill = SKILL_ACTIONS[self._previous_action_index]
+        if previous_skill in {"route_progression", "recover_stuck"}:
+            return self._same_skill_streak < 32
+        if previous_skill != "close_visible_contact":
+            return False
         return self._same_skill_streak >= 24
+
+    def _postcombat_visible_recover_only_needed(self, features: Any) -> bool:
+        """Breaks sticky post-combat route sidesteps that stop moving."""
+        if self._previous_action_index != SKILL_ACTIONS.index("route_progression"):
+            return False
+        return self._same_skill_streak >= 8
 
     def _recent_visible_contact_active(self, features: Any) -> bool:
         recent = self._recent_visible_contact

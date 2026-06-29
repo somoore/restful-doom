@@ -584,7 +584,56 @@ def test_skill_controller_breaks_late_contact_loop_with_route_recovery(tmp_path)
     mask = dict(zip(SKILL_ACTIONS, controller.action_mask(lost_contact)))
 
     assert mask["route_progression"]
+    assert mask["recover_stuck"]
     assert not mask["close_visible_contact"]
+    assert not mask["seek_enemy"]
+
+
+def test_skill_controller_late_contact_use_line_yields_to_route_recovery(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    memory.data["enemies"] = {
+        "7": {
+            "last_seen_tick": 40,
+            "last_position": [1800.0, 0.0],
+            "last_distance": 1800.0,
+            "last_health": 20,
+            "line_of_sight": True,
+        }
+    }
+    controller = SkillController(memory=memory)
+    visible_contact = _state(
+        tick=40,
+        kills=3,
+        enemy=True,
+        combat=False,
+        contact_use=True,
+        contact_use_distance_units=64,
+    )
+    lost_contact = _state(
+        tick=120,
+        kills=3,
+        enemy=True,
+        enemy_line_of_sight=False,
+        enemy_distance=1800,
+        combat=False,
+        route=True,
+        contact_use=True,
+        contact_use_distance_units=80,
+    )
+    lost_contact.navigation.route_waypoint.line.line_id = 195
+    lost_contact.navigation.route_waypoint.line.special = 88
+    lost_contact.navigation.route_waypoint.line.distance_fp = 1550 * 65536
+    lost_contact.navigation.route_waypoint.line.nearest_distance_fp = 1550 * 65536
+
+    controller.action_for(SKILL_ACTIONS.index("close_visible_contact"), visible_contact)
+    controller._previous_action_index = SKILL_ACTIONS.index("close_visible_contact")
+    controller._same_skill_streak = 12
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(lost_contact)))
+
+    assert mask["route_progression"]
+    assert mask["recover_stuck"]
+    assert not mask["close_visible_contact"]
+    assert not mask["open_use_line"]
     assert not mask["seek_enemy"]
 
 
@@ -1631,11 +1680,95 @@ def test_skill_controller_low_health_visible_contact_keeps_far_final_line_legal(
     ]
 
     mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+    action, decision = controller.action_for(SKILL_ACTIONS.index("press_exit"), state)
 
     assert mask["press_exit"]
     assert mask["route_progression"]
     assert mask["close_visible_contact"]
     assert not mask["retreat"]
+    assert decision["use_line"]["line_id"] == 330
+    assert action.raw.forward_move > 0
+
+
+def test_skill_controller_visible_contact_keeps_far_final_line_legal_after_kills():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(
+        kills=5,
+        health=75,
+        enemy=True,
+        enemy_line_of_sight=True,
+        enemy_distance=1800,
+        combat=False,
+    )
+    state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=1812 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=1812 * 65536, y_fp=-64 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=1812 * 65536, y_fp=64 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=1812 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=1812 * 65536,
+            nearest_distance_fp=1812 * 65536,
+        )
+    ]
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+    action, decision = controller.action_for(SKILL_ACTIONS.index("press_exit"), state)
+
+    assert mask["press_exit"]
+    assert mask["route_progression"]
+    assert mask["close_visible_contact"]
+    assert not mask["retreat"]
+    assert decision["use_line"]["line_id"] == 330
+    assert action.raw.forward_move > 0
+
+
+def test_skill_controller_postcombat_visible_contact_loop_yields_to_route():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(
+        kills=5,
+        health=75,
+        enemy=True,
+        enemy_line_of_sight=True,
+        enemy_distance=1800,
+        combat=False,
+        route=True,
+    )
+    route_line = state.navigation.route_waypoint.line
+    route_line.line_id = 195
+    route_line.special = 88
+    route_line.distance_fp = 1812 * 65536
+    route_line.nearest_distance_fp = 1812 * 65536
+    controller._previous_action_index = SKILL_ACTIONS.index("close_visible_contact")
+    controller._same_skill_streak = 24
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+
+    assert mask["route_progression"]
+    assert mask["recover_stuck"]
+    assert not mask["close_visible_contact"]
+    assert not mask["open_use_line"]
+    assert not mask["retreat"]
+
+    controller._previous_action_index = SKILL_ACTIONS.index("route_progression")
+    controller._same_skill_streak = 1
+    sticky_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+
+    assert sticky_mask["route_progression"]
+    assert sticky_mask["recover_stuck"]
+    assert not sticky_mask["close_visible_contact"]
+
+    controller._previous_action_index = SKILL_ACTIONS.index("route_progression")
+    controller._same_skill_streak = 8
+    recover_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+
+    assert recover_mask["recover_stuck"]
+    assert not recover_mask["route_progression"]
+    assert not recover_mask["close_visible_contact"]
 
 
 def test_skill_controller_critical_visible_combat_keeps_far_final_line_legal():
@@ -1667,6 +1800,39 @@ def test_skill_controller_critical_visible_combat_keeps_far_final_line_legal():
     assert mask["fire"]
     assert mask["press_exit"]
     assert mask["route_progression"]
+    assert not mask["retreat"]
+
+
+def test_skill_controller_critical_visible_final_line_suppresses_contact_work():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(
+        kills=5,
+        health=6,
+        enemy=True,
+        enemy_line_of_sight=True,
+        combat=False,
+    )
+    state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=228 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=228 * 65536, y_fp=-64 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=228 * 65536, y_fp=64 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=228 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=228 * 65536,
+            nearest_distance_fp=228 * 65536,
+        )
+    ]
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+
+    assert mask["press_exit"]
+    assert mask["route_progression"]
+    assert not mask["close_visible_contact"]
+    assert not mask["open_use_line"]
     assert not mask["retreat"]
 
 
