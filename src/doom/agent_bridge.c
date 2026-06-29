@@ -721,6 +721,23 @@ static void ApplyPendingSeed(void)
     agent_pending_seed_active = false;
 }
 
+void AgentBridge_ApplyPendingSeedForNewGame(int episode, int map)
+{
+    if (!agent_pending_seed_active)
+    {
+        return;
+    }
+
+    if (agent_pending_seed.episode != episode
+        || agent_pending_seed.map != map)
+    {
+        return;
+    }
+
+    M_SetRandomSeed((unsigned int) (agent_pending_seed.seed & 0xffffffffu));
+    agent_pending_seed_active = false;
+}
+
 static void FillPlayerState(agent_game_state_snapshot_t *snapshot)
 {
     player_t *player;
@@ -927,14 +944,13 @@ int AgentBridge_BeforeTic(void)
 void AgentBridge_ApplyTiccmd(ticcmd_t *cmd)
 {
     agent_player_action_t action;
-    int actions_applied = 0;
 
     if (!agent_bridge_initialized || cmd == NULL)
     {
         return;
     }
 
-    while (actions_applied < 16 && restfuldoom_agent_take_action(&action) == 1)
+    if (restfuldoom_agent_take_action(&action) == 1)
     {
         cmd->forwardmove = (signed char) ClampInt(
             cmd->forwardmove + action.forward_move,
@@ -949,6 +965,5 @@ void AgentBridge_ApplyTiccmd(ticcmd_t *cmd)
             -32768,
             32767);
         cmd->buttons |= action.buttons;
-        ++actions_applied;
     }
 }

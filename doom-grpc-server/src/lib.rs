@@ -82,6 +82,8 @@ impl DoomAgent for AgentRuntime {
         let mut inbound = request.into_inner();
         let action_tx = self.action_tx.clone();
 
+        drain_queued_actions();
+
         tokio::spawn(async move {
             while let Ok(Some(action)) = inbound.message().await {
                 for command in player_action_to_commands(&action) {
@@ -117,6 +119,7 @@ impl DoomAgent for AgentRuntime {
     ) -> Result<Response<ResetEpisodeResponse>, Status> {
         let request = request.into_inner();
         let control = control_request_from_proto(&request);
+        drain_queued_actions();
         self.queue_control(control, "episode reset")?;
 
         Ok(Response::new(ResetEpisodeResponse {
@@ -212,6 +215,21 @@ fn stream_states(
     });
 
     ReceiverStream::new(output)
+}
+
+fn drain_queued_actions() -> usize {
+    let Some(bridge) = BRIDGE.get() else {
+        return 0;
+    };
+    let Ok(mut rx) = bridge.action_rx.lock() else {
+        return 0;
+    };
+
+    let mut drained = 0;
+    while rx.try_recv().is_ok() {
+        drained += 1;
+    }
+    drained
 }
 
 fn encode_delta(previous: &GameState, current: &GameState) -> Vec<u8> {

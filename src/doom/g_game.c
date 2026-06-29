@@ -25,6 +25,7 @@
 #include "doomkeys.h"
 #include "doomstat.h"
 
+#include "agent_bridge.h"
 #include "deh_main.h"
 #include "deh_misc.h"
 
@@ -1852,6 +1853,7 @@ G_InitNew
       map = 9;
 
     M_ClearRandom ();
+    AgentBridge_ApplyPendingSeedForNewGame(episode, map);
 
     if (skill == sk_nightmare || respawnparm )
 	respawnmonsters = true;

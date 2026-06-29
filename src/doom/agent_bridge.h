@@ -187,6 +187,7 @@ int restfuldoom_agent_take_control_request(agent_control_request_t *out_request)
 void AgentBridge_Init(int port);
 int AgentBridge_BeforeTic(void);
 void AgentBridge_AfterTic(int completed_tic);
+void AgentBridge_ApplyPendingSeedForNewGame(int episode, int map);
 void AgentBridge_ApplyTiccmd(ticcmd_t *cmd);
 
 #endif
