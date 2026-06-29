@@ -2091,6 +2091,66 @@ def test_skill_controller_critical_visible_final_line_suppresses_contact_work():
     assert not mask["retreat"]
 
 
+def test_skill_controller_postcombat_exit_commitment_suppresses_stale_contact_work(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    memory.data["enemies"] = {
+        "7": {
+            "last_seen_tick": 40,
+            "last_position": [900.0, 0.0],
+            "last_distance": 900.0,
+            "last_health": 20,
+            "line_of_sight": True,
+        }
+    }
+    controller = SkillController(memory=memory)
+    controller.policy._start_kills = 0
+    visible_contact = _state(
+        tick=40,
+        kills=4,
+        enemy=True,
+        combat=False,
+        contact_use=True,
+        contact_use_distance_units=300,
+    )
+    controller.action_mask(visible_contact)
+
+    state = _state(
+        tick=120,
+        kills=5,
+        health=38,
+        enemy=True,
+        enemy_line_of_sight=False,
+        enemy_distance=900,
+        combat=False,
+        contact_use=True,
+        contact_use_distance_units=300,
+    )
+    state.navigation.use_lines.append(
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=176 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=176 * 65536, y_fp=-64 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=176 * 65536, y_fp=64 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=176 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=176 * 65536,
+            nearest_distance_fp=176 * 65536,
+        )
+    )
+    controller._previous_action_index = SKILL_ACTIONS.index("open_use_line")
+    controller._same_skill_streak = 1
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+
+    assert mask["press_exit"]
+    assert mask["route_progression"]
+    assert not mask["close_visible_contact"]
+    assert not mask["open_use_line"]
+    assert not mask["seek_enemy"]
+    assert not mask["retreat"]
+
+
 def test_skill_controller_critical_combat_probe_forces_fire_before_far_post_combat_press_exit():
     controller = SkillController()
     controller.policy._start_kills = 0

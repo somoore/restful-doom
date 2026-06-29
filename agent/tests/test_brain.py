@@ -2718,6 +2718,44 @@ def test_close_exit_line_approaches_front_before_push_window(tmp_path):
     assert action.raw.forward_move > 0
 
 
+def test_close_exit_line_pushes_when_front_point_is_in_use_range(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    game_state = state(tick=40)
+    game_state.player.kills = 6
+    game_state.navigation.forward_open = True
+    game_state.navigation.use_line_ahead = True
+    game_state.navigation.front_blocking_line_special = 0
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=200 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=140 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=140 * 65536,
+            nearest_distance_fp=140 * 65536,
+        )
+    ]
+    features = extract_features(game_state, memory, BrainPolicyParams())
+    line = features.navigation["use_lines"][0]
+    line["angle_delta"] = -52.0
+    line["front_angle_delta"] = -3.0
+    line["front_distance"] = 152.0
+    line["side"] = 0
+
+    action, decision = policy._advance_progression_line(features, line, stuck=False)
+
+    assert decision["skill"] == "push_exit_switch"
+    assert decision["use_line"]["line_id"] == 330
+    assert action.raw.buttons & 2
+    assert action.raw.forward_move > 0
+
+
 def test_close_exit_line_pushes_before_side_manual_probe(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(

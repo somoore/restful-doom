@@ -600,6 +600,17 @@ class SkillController:
         if postcombat_route_available:
             progression_line = self.policy._select_progression_line(features)
             postcombat_route_available = progression_line is not None
+        postcombat_exit_line = self._exit_press_candidate(features) if not can_fire else None
+        postcombat_exit_available = (
+            postcombat_exit_line is not None
+            and self._exit_press_available_for_mask(features, postcombat_exit_line)
+        )
+        postcombat_exit_commitment = (
+            postcombat_exit_available
+            and int(features.kills) >= POST_COMBAT_EXIT_KILLS
+            and not features.visible_enemies
+            and self.policy._line_control_distance(postcombat_exit_line) <= 384.0
+        )
         exit_commitment_line = (
             self._exit_commitment_line(features)
             if low_health_contact and not features.visible_enemies and not can_fire
@@ -624,7 +635,10 @@ class SkillController:
             if stuck:
                 mask["recover_stuck"] = True
             return [mask[skill] for skill in SKILL_ACTIONS]
-        elif self._contact_use_line_followthrough_active(features):
+        elif (
+            self._contact_use_line_followthrough_active(features)
+            and not postcombat_exit_commitment
+        ):
             mask["open_use_line"] = True
             if stuck:
                 mask["recover_stuck"] = True
@@ -660,11 +674,16 @@ class SkillController:
             ):
                 mask["retreat"] = True
         elif recent_contact_active:
-            if not postcombat_route_available and not late_contact_route_recovery:
+            if (
+                not postcombat_exit_commitment
+                and not postcombat_route_available
+                and not late_contact_route_recovery
+            ):
                 mask["close_visible_contact"] = True
             if (
                 self.policy._select_known_enemy(features) is not None
                 and self._post_contact_seek_allowed(features)
+                and not postcombat_exit_commitment
                 and not postcombat_route_available
             ):
                 mask["seek_enemy"] = True
@@ -673,6 +692,7 @@ class SkillController:
                 contact_line is not None
                 and self._contact_use_line_ready_for_visible_contact(features, contact_line)
                 and not late_contact_route_recovery
+                and not postcombat_exit_commitment
                 and not postcombat_route_available
             ):
                 mask["open_use_line"] = True
@@ -681,6 +701,7 @@ class SkillController:
             not features.visible_enemies
             and self.policy._select_known_enemy(features) is not None
             and self._late_known_enemy_contact_allowed(features)
+            and not postcombat_exit_commitment
             and not postcombat_route_available
             and not late_contact_route_recovery
         ):
@@ -690,6 +711,7 @@ class SkillController:
             not features.visible_enemies
             and self.policy._select_known_enemy(features) is not None
             and self._blind_seek_allowed(features, recent_contact_active=recent_contact_active)
+            and not postcombat_exit_commitment
             and not postcombat_route_available
         ):
             mask["seek_enemy"] = True
@@ -708,6 +730,7 @@ class SkillController:
         if (
             not can_fire
             and not recent_contact_active
+            and not postcombat_exit_commitment
             and (
                 self.policy._select_nearby_use_line(features) is not None
                 or (
@@ -751,11 +774,7 @@ class SkillController:
         if stuck:
             mask["recover_stuck"] = True
 
-        local_exit = self._exit_press_candidate(features) if not can_fire else None
-        if local_exit is not None and self._exit_press_available_for_mask(
-            features,
-            local_exit,
-        ):
+        if postcombat_exit_available:
             mask["press_exit"] = True
 
         if not any(mask.values()):
