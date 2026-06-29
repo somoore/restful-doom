@@ -1176,8 +1176,20 @@ def test_behavior_clone_loader_accepts_forced_option_records(tmp_path):
 
     assert len(samples) == 1
     assert samples[0][1] == 8
+    assert samples[0][2] == [
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+        False,
+        True,
+    ]
     assert len(samples[0][0]) == len(OBSERVATION_SCHEMA["feature_names"])
     assert summary["samples"] == 1
+    assert summary["action_masked_samples"] == 1
     assert summary["expert_skill_counts"] == {"close_visible_contact": 1}
     assert summary["ppo_skill_counts"] == {"close_visible_contact": 1}
     assert aux_samples == samples
@@ -1222,7 +1234,19 @@ def test_behavior_clone_loader_accepts_ppo_eval_trace_records(tmp_path):
 
     assert len(samples) == 1
     assert samples[0][1] == 4
+    assert samples[0][2] == [
+        False,
+        False,
+        False,
+        False,
+        True,
+        False,
+        False,
+        False,
+        False,
+    ]
     assert summary["skipped"] == 1
+    assert summary["action_masked_samples"] == 1
     assert summary["expert_skill_counts"] == {"advance_route": 1}
     assert summary["ppo_skill_counts"] == {"route_progression": 1}
 
@@ -3637,6 +3661,38 @@ def test_ppo_update_reports_aux_behavior_clone_metrics():
     assert metrics["aux_bc_loss"] > 0.0
     assert 0.0 <= metrics["aux_bc_accuracy"] <= 1.0
     assert trainer.update_index == 1
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")
+def test_ppo_aux_behavior_clone_applies_action_masks():
+    buffer = RolloutBuffer()
+    for index in range(8):
+        buffer.add(
+            obs=[float(index % 2), 1.0],
+            action_mask=[True, True],
+            action=index % 2,
+            reward=1.0,
+            done=index == 7,
+            value=0.1,
+            logprob=-0.69,
+        )
+    trainer = PPOTrainer(
+        obs_dim=2,
+        action_dim=2,
+        config=PPOConfig(
+            update_epochs=1,
+            minibatch_size=4,
+            rollout_steps=8,
+            aux_bc_coef=1.0,
+            aux_bc_batch_size=4,
+        ),
+    )
+    samples = [([0.0, 1.0], 1, [False, True]) for _ in range(8)]
+
+    metrics = trainer.update(buffer, behavior_clone_samples=samples)
+
+    assert metrics["aux_bc_loss"] == pytest.approx(0.0)
+    assert metrics["aux_bc_accuracy"] == pytest.approx(1.0)
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")

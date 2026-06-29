@@ -16,6 +16,9 @@ from .schemas import ACTION_SCHEMA, DECISION_CYCLE_SCHEMA, MEMORY_CONTRACT, OBSE
 
 PPO_CHECKPOINT_SCHEMA = "restfuldoom.ppo_checkpoint.v1"
 ROLLOUT_BUFFER_SCHEMA = "restfuldoom.ppo_rollout.v1"
+BehaviorCloneSample = (
+    tuple[list[float], int] | tuple[list[float], int, list[bool]]
+)
 
 try:  # pragma: no cover - exercised when torch is installed.
     import torch
@@ -329,7 +332,7 @@ class PPOTrainer:
         buffer: RolloutBuffer,
         *,
         reference_model: Any | None = None,
-        behavior_clone_samples: list[tuple[list[float], int]] | None = None,
+        behavior_clone_samples: list[BehaviorCloneSample] | None = None,
     ) -> dict[str, float]:
         """Runs PPO epochs over a collected rollout buffer."""
         tensors = buffer.tensors(config=self.config, device=self.device)
@@ -407,6 +410,10 @@ class PPOTrainer:
                     aux_logits, _aux_values = self.model(
                         aux_bc_tensors["obs"][aux_indices]
                     )
+                    aux_logits = _masked_logits(
+                        aux_logits,
+                        aux_bc_tensors["action_masks"][aux_indices],
+                    )
                     aux_actions = aux_bc_tensors["actions"][aux_indices]
                     aux_bc_loss = nn.functional.cross_entropy(aux_logits, aux_actions)
                     with torch.no_grad():
@@ -443,7 +450,7 @@ class PPOTrainer:
 
     def pretrain_actor(
         self,
-        samples: list[tuple[list[float], int]],
+        samples: list[BehaviorCloneSample],
         *,
         epochs: int = 3,
         minibatch_size: int = 128,
@@ -469,17 +476,15 @@ class PPOTrainer:
             rng.shuffle(samples)
             for start in range(0, len(samples), minibatch_size):
                 batch = samples[start : start + minibatch_size]
-                obs = torch.tensor(
-                    [features for features, _action in batch],
-                    dtype=torch.float32,
+                batch_tensors = _behavior_clone_tensors(
+                    batch,
+                    obs_dim=self.obs_dim,
+                    action_dim=self.action_dim,
                     device=self.device,
                 )
-                actions = torch.tensor(
-                    [action for _features, action in batch],
-                    dtype=torch.long,
-                    device=self.device,
-                )
-                logits, _values = self.model(obs)
+                logits, _values = self.model(batch_tensors["obs"])
+                logits = _masked_logits(logits, batch_tensors["action_masks"])
+                actions = batch_tensors["actions"]
                 loss = nn.functional.cross_entropy(logits, actions)
                 optimizer.zero_grad()
                 loss.backward()
@@ -845,7 +850,7 @@ def _action_mask_tensor(
 
 
 def _behavior_clone_tensors(
-    samples: list[tuple[list[float], int]],
+    samples: list[BehaviorCloneSample],
     *,
     obs_dim: int,
     action_dim: int,
@@ -855,11 +860,24 @@ def _behavior_clone_tensors(
     require_torch()
     observations: list[list[float]] = []
     actions: list[int] = []
-    for features, action in samples:
+    action_masks: list[list[bool]] = []
+    for sample in samples:
+        features = sample[0]
+        action = sample[1]
+        sample_mask = sample[2] if len(sample) >= 3 else None
         action_index = int(action)
         if action_index < 0 or action_index >= action_dim:
             raise ValueError(
                 "behavior-clone sample action is outside PPO action space: "
+                f"{action_index}"
+            )
+        action_mask = _behavior_clone_action_mask(
+            sample_mask,
+            action_dim=action_dim,
+        )
+        if not action_mask[action_index]:
+            raise ValueError(
+                "behavior-clone sample action is not allowed by its action mask: "
                 f"{action_index}"
             )
         row = [float(value) for value in features[:obs_dim]]
@@ -867,12 +885,31 @@ def _behavior_clone_tensors(
             row.extend([0.0] * (obs_dim - len(row)))
         observations.append(row)
         actions.append(action_index)
+        action_masks.append(action_mask)
     if not observations:
         raise ValueError("cannot apply auxiliary behavior cloning without samples")
     return {
         "obs": torch.tensor(observations, dtype=torch.float32, device=device),
         "actions": torch.tensor(actions, dtype=torch.long, device=device),
+        "action_masks": torch.tensor(action_masks, dtype=torch.bool, device=device),
     }
+
+
+def _behavior_clone_action_mask(
+    action_mask: list[bool] | None,
+    *,
+    action_dim: int,
+) -> list[bool]:
+    """Normalize a BC replay mask without widening an explicit mask."""
+    width = max(1, int(action_dim))
+    if action_mask is None:
+        return [True for _ in range(width)]
+    row = [bool(value) for value in action_mask[:width]]
+    if len(row) < width:
+        row.extend([False] * (width - len(row)))
+    if not any(row):
+        raise ValueError("behavior-clone action mask has no allowed actions")
+    return row
 
 
 def _masked_logits(logits: Any, action_masks: Any) -> Any:

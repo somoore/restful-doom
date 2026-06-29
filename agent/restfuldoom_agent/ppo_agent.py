@@ -17,7 +17,7 @@ from typing import Any, Callable
 from .brain import AgentMemory, POST_COMBAT_EXIT_KILLS
 from .curriculum import build_curriculum, curriculum_names, stage_for_update
 from .env import ACTION_SCHEMA, OBSERVATION_SCHEMA, DoomAgentEnv, DoomEnvConfig
-from .ppo import PPOConfig, PPOTrainer, require_torch
+from .ppo import BehaviorCloneSample, PPOConfig, PPOTrainer, require_torch
 from .ppo_eval import (
     decide_promotion,
     evaluate_checkpoint,
@@ -99,7 +99,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
         )
     if aux_bc_coef > 0.0 and not getattr(args, "aux_bc_trajectory", []):
         raise ValueError("--aux-bc-coef requires at least one --aux-bc-trajectory")
-    aux_behavior_clone_samples: list[tuple[list[float], int]] = []
+    aux_behavior_clone_samples: list[BehaviorCloneSample] = []
     aux_behavior_clone_summary = None
     if getattr(args, "aux_bc_trajectory", []):
         aux_behavior_clone_samples, aux_behavior_clone_summary = (
@@ -1979,10 +1979,11 @@ def _load_behavior_clone_samples(
     *,
     trajectory_attr: str = "bc_trajectory",
     max_samples_attr: str = "bc_max_samples",
-) -> tuple[list[tuple[list[float], int]], dict[str, object]]:
-    samples: list[tuple[list[float], int]] = []
+) -> tuple[list[BehaviorCloneSample], dict[str, object]]:
+    samples: list[BehaviorCloneSample] = []
     label_counts: Counter[str] = Counter()
     mapped_counts: Counter[str] = Counter()
+    masked_samples = 0
     skipped = 0
     max_samples = max(1, int(getattr(args, max_samples_attr)))
     trajectory_paths = [Path(path) for path in getattr(args, trajectory_attr)]
@@ -1998,9 +1999,14 @@ def _load_behavior_clone_samples(
                 if sample is None:
                     skipped += 1
                     continue
-                obs, action, skill = sample
+                obs, action, skill, action_mask = sample
                 label_counts[skill] += 1
-                samples.append((pad_observation_features(obs), action))
+                features = pad_observation_features(obs)
+                if action_mask is not None:
+                    samples.append((features, action, list(action_mask)))
+                    masked_samples += 1
+                else:
+                    samples.append((features, action))
                 mapped_counts[ACTION_SCHEMA["actions"][action]] += 1
         if len(samples) >= max_samples:
             break
@@ -2010,6 +2016,7 @@ def _load_behavior_clone_samples(
         "schema": "restfuldoom.ppo_behavior_clone.v1",
         "trajectory_paths": [str(path) for path in trajectory_paths],
         "samples": len(samples),
+        "action_masked_samples": masked_samples,
         "skipped": skipped,
         "expert_skill_counts": dict(sorted(label_counts.items())),
         "ppo_skill_counts": dict(sorted(mapped_counts.items())),
@@ -2018,7 +2025,7 @@ def _load_behavior_clone_samples(
 
 def _behavior_clone_sample_from_record(
     record: dict[str, object],
-) -> tuple[list[float], int, str] | None:
+) -> tuple[list[float], int, str, list[bool] | None] | None:
     """Returns a BC sample from supported trajectory/rollout record shapes."""
     if record.get("schema") == "restfuldoom.forced_option_eval_record.v1":
         wrapped = record.get("record")
@@ -2035,11 +2042,17 @@ def _behavior_clone_sample_from_record(
             info = {}
         if info.get("selected_action_allowed") is False:
             return None
+        action_mask = wrapped.get("action_mask")
+        mask = None
+        if isinstance(action_mask, list):
+            if action >= len(action_mask) or not bool(action_mask[action]):
+                return None
+            mask = [bool(value) for value in action_mask]
         skill = info.get("selected_forced_skill") or info.get("skill") or record.get(
             "forced_skill"
         )
         label = str(skill) if skill else ACTION_SCHEMA["actions"][action]
-        return ([float(value) for value in obs], action, label)
+        return ([float(value) for value in obs], action, label, mask)
 
     obs = record.get("observation")
     action = _int_or_none(record.get("action_index"))
@@ -2057,7 +2070,12 @@ def _behavior_clone_sample_from_record(
         label = (
             str(skill) if isinstance(skill, str) else ACTION_SCHEMA["actions"][action]
         )
-        return ([float(value) for value in obs], action, label)
+        mask = (
+            [bool(value) for value in action_mask]
+            if isinstance(action_mask, list)
+            else None
+        )
+        return ([float(value) for value in obs], action, label, mask)
 
     decision = record.get("metadata", {}).get("policy_decision", {})
     if not isinstance(decision, dict):
@@ -2068,7 +2086,13 @@ def _behavior_clone_sample_from_record(
     action = map_expert_skill_to_ppo_action(skill)
     if action is None:
         return None
-    return (features_from_record(record), action, skill)
+    action_mask = record.get("action_mask")
+    mask = None
+    if isinstance(action_mask, list):
+        if action >= len(action_mask) or not bool(action_mask[action]):
+            return None
+        mask = [bool(value) for value in action_mask]
+    return (features_from_record(record), action, skill, mask)
 
 
 def _int_or_none(value: object) -> int | None:
