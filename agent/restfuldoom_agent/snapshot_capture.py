@@ -21,6 +21,8 @@ from .client import (
 )
 from .env import (
     ACTION_SCHEMA,
+    DoomAgentEnv,
+    DoomEnvConfig,
     OBSERVATION_SCHEMA,
     SKILL_ACTIONS,
     SkillController,
@@ -101,6 +103,7 @@ class SnapshotCaptureConfig:
     settle_states_after_capture: int = 2
     verify_loads: bool = False
     verify_timeout_seconds: float = 4.0
+    ppo_env_capture: bool = False
 
 
 class SnapshotMilestoneTracker:
@@ -600,6 +603,219 @@ async def capture_snapshot_curriculum(config: SnapshotCaptureConfig) -> dict[str
     return manifest
 
 
+async def capture_ppo_env_snapshot_curriculum(
+    config: SnapshotCaptureConfig,
+) -> dict[str, Any]:
+    """Runs PPO through DoomAgentEnv and captures native save slots at milestones."""
+    if config.ppo_checkpoint is None:
+        raise ValueError("--ppo-env-capture requires --ppo-checkpoint")
+
+    trainer = PPOTrainer.load_checkpoint(
+        config.ppo_checkpoint,
+        device=config.ppo_device,
+        target_obs_dim=len(OBSERVATION_SCHEMA["feature_names"]),
+        target_action_dim=len(ACTION_SCHEMA["actions"]),
+    )
+    tracker = SnapshotMilestoneTracker(
+        config.auto_selectors,
+        post_combat_kills=config.post_combat_kills,
+    )
+    run_id = f"ppo-env-snapshot-capture-{uuid.uuid4().hex[:12]}"
+    stages: list[dict[str, Any]] = []
+    records_seen = 0
+    last_capture_index: int | None = None
+    attempt_reports: list[dict[str, Any]] = []
+
+    base_metadata = {
+        "source": "ppo-env-snapshot-capture",
+        "run_id": run_id,
+        "policy_id": config.policy_id,
+        "goal_preset": config.goal_preset,
+        "mission": config.mission,
+        "endpoint_host": safe_endpoint_host(config.endpoint),
+        "memory_path": str(config.memory_path),
+        "selectors": list(config.auto_selectors),
+        "post_combat_kills": int(config.post_combat_kills),
+        "save_slot_base": config.save_slot_base,
+        "attempts": config.attempts,
+        "reset_ready_level_time": int(config.reset_ready_level_time),
+        "ppo_checkpoint": str(config.ppo_checkpoint),
+        "ppo_device": config.ppo_device,
+        "ppo_sample": bool(config.ppo_sample),
+        "allowed_skills": list(config.allowed_skills),
+        "strict_allowed_skills": bool(config.strict_allowed_skills),
+        "ppo_env_capture": True,
+    }
+
+    for attempt in range(1, max(1, config.attempts) + 1):
+        attempt_started_records = records_seen
+        attempt_trajectory = _attempt_trajectory_path(
+            config.trajectory_jsonl,
+            attempt=attempt,
+            attempts=config.attempts,
+        )
+        seed = int(config.reset_seed_base) + max(0, attempt - 1)
+        metadata = {
+            **base_metadata,
+            "attempt": attempt,
+            "trajectory_jsonl": str(attempt_trajectory) if attempt_trajectory else None,
+            "reset": {
+                "schema": "restfuldoom.snapshot_capture_reset.v1",
+                "attempt": int(attempt),
+                "skill": int(config.reset_skill),
+                "episode": int(config.reset_episode),
+                "map": int(config.reset_map),
+                "seed": int(seed),
+            },
+        }
+        attempt_report: dict[str, Any] = {
+            "attempt": attempt,
+            "trajectory_jsonl": str(attempt_trajectory) if attempt_trajectory else None,
+            "records_before": records_seen,
+            "captured_before": sorted(tracker.captured),
+            "seed": seed,
+        }
+        trace_handle = None
+        env = DoomAgentEnv(
+            DoomEnvConfig(
+                endpoint=config.endpoint,
+                token=config.token,
+                agent_port=config.agent_port,
+                tls=config.tls,
+                authority=config.authority,
+                skill=config.reset_skill,
+                episode=config.reset_episode,
+                map=config.reset_map,
+                seed=seed,
+                run_id=f"{run_id}-attempt-{attempt}",
+                goal_preset=config.goal_preset,
+                max_steps=config.max_states,
+                memory_path=config.memory_path,
+                reset_ready_level_time=config.reset_ready_level_time,
+                allowed_skills=config.allowed_skills,
+                strict_allowed_skills=config.strict_allowed_skills,
+            )
+        )
+        try:
+            if attempt_trajectory is not None:
+                attempt_trajectory.parent.mkdir(parents=True, exist_ok=True)
+                trace_handle = attempt_trajectory.open("w", encoding="utf-8")
+            obs = await env.reset(seed=seed)
+            stop_attempt = False
+            for step_index in range(1, int(config.max_states) + 1):
+                action_mask = env.action_mask()
+                action_index, _logprob, _value = trainer.model.act(
+                    obs,
+                    deterministic=not config.ppo_sample,
+                    action_mask=action_mask,
+                )
+                step = await env.step(action_index)
+                record = _record_from_env_step(
+                    policy_id=f"ppo:{config.ppo_checkpoint}",
+                    episode_index=attempt - 1,
+                    seed=seed,
+                    step_index=step_index,
+                    action_index=action_index,
+                    action_mask=action_mask,
+                    reward=step.reward,
+                    done=step.done,
+                    observation=step.observation,
+                    info=step.info,
+                    rollout_metadata=metadata,
+                )
+                if trace_handle is not None:
+                    json.dump(record, trace_handle, default=str, sort_keys=True)
+                    trace_handle.write("\n")
+                    trace_handle.flush()
+                obs = step.observation
+                records_seen += 1
+                selectors = tracker.observe(record)
+                if selectors:
+                    if env.client is None:
+                        raise RuntimeError("Doom environment client is not available")
+                    stage = await _capture_stage(
+                        env.client,
+                        config,
+                        record,
+                        selectors=selectors,
+                        line_index=step_index,
+                        order=len(stages),
+                        trajectory=attempt_trajectory or Path("<ppo-env-stream>"),
+                        run_id=run_id,
+                        attempt=attempt,
+                        global_record_index=records_seen,
+                    )
+                    stages.append(stage)
+                    tracker.mark_captured(selectors)
+                    last_capture_index = records_seen
+                if (
+                    config.stop_after_captured
+                    and tracker.complete
+                    and last_capture_index is not None
+                    and records_seen - last_capture_index >= config.settle_states_after_capture
+                ):
+                    stop_attempt = True
+                    break
+                if step.done:
+                    break
+            attempt_report["records_after"] = records_seen
+            attempt_report["records_seen"] = records_seen - attempt_started_records
+            attempt_report["captured_after"] = sorted(tracker.captured)
+            attempt_report["complete"] = tracker.complete
+            attempt_reports.append(attempt_report)
+            if stop_attempt or tracker.complete:
+                break
+        finally:
+            if trace_handle is not None:
+                trace_handle.close()
+            await env.close()
+
+    if not stages:
+        raise RuntimeError(
+            "snapshot capture finished without matching any requested milestones"
+        )
+
+    if config.verify_loads:
+        client = DoomAgentClient(
+            config.endpoint,
+            token=config.token,
+            agent_port=config.agent_port,
+            tls=config.tls,
+            authority=config.authority,
+        )
+        try:
+            await _verify_captured_slots(
+                client,
+                stages,
+                timeout_seconds=config.verify_timeout_seconds,
+            )
+        finally:
+            await client.close()
+
+    manifest = _build_manifest(
+        config,
+        run_id=run_id,
+        stages=stages,
+        records_seen=records_seen,
+        skill_model_path=None,
+        attempt_reports=attempt_reports,
+    )
+    manifest["source"]["source"] = "ppo-env-snapshot-capture"
+    manifest["source"]["ppo_env_capture"] = True
+    config.output_path.parent.mkdir(parents=True, exist_ok=True)
+    config.output_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    validation = validate_snapshot_curriculum(config.output_path, require_artifacts=False)
+    manifest["validation"] = validation
+    config.output_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return manifest
+
+
 async def _reset_capture_attempt(
     client: DoomAgentClient,
     config: SnapshotCaptureConfig,
@@ -730,6 +946,72 @@ def _record_from_rollout_step(step: RolloutStep) -> dict[str, Any]:
     }
 
 
+def _record_from_env_step(
+    *,
+    policy_id: str,
+    episode_index: int,
+    seed: int,
+    step_index: int,
+    action_index: int,
+    action_mask: list[bool],
+    reward: float,
+    done: bool,
+    observation: list[float],
+    info: dict[str, Any],
+    rollout_metadata: dict[str, Any],
+) -> dict[str, Any]:
+    """Builds a snapshot-selector trajectory row from one DoomAgentEnv step."""
+    transition = info.get("transition")
+    transition_summary = transition if isinstance(transition, dict) else {}
+    reward_summary = {
+        "reward": round(float(reward), 6),
+        "done": bool(done),
+        "done_reason": info.get("done_reason"),
+        **{
+            key: transition_summary.get(key)
+            for key in (
+                "damage_delta",
+                "enemy_distance_delta",
+                "health_delta",
+                "item_delta",
+                "kill_delta",
+                "progress_delta",
+                "secret_delta",
+            )
+            if key in transition_summary
+        },
+    }
+    decision = info.get("decision")
+    policy_decision = dict(decision) if isinstance(decision, dict) else {}
+    policy_decision["ppo_skill"] = info.get("skill")
+    policy_decision["ppo_action_index"] = int(action_index)
+    state = info.get("state")
+    return {
+        "policy_id": policy_id,
+        "episode_index": int(episode_index),
+        "seed": int(seed),
+        "step_index": int(step_index),
+        "index": int(step_index),
+        "action_index": int(action_index),
+        "action_mask": [bool(value) for value in action_mask],
+        "reward": reward_summary,
+        "done": bool(done),
+        "done_reason": info.get("done_reason"),
+        "skill": info.get("skill"),
+        "decision": decision if isinstance(decision, dict) else {},
+        "action": info.get("action", {}),
+        "state": state if isinstance(state, dict) else {},
+        "transition": transition_summary,
+        "route_outcome": info.get("route_outcome", {}),
+        "observation": list(observation),
+        "info": info,
+        "metadata": {
+            "policy_decision": policy_decision,
+            "rollout": rollout_metadata,
+        },
+    }
+
+
 def _build_manifest(
     config: SnapshotCaptureConfig,
     *,
@@ -780,6 +1062,8 @@ def _build_manifest(
         source["ppo_sample"] = bool(config.ppo_sample)
         source["allowed_skills"] = list(config.allowed_skills)
         source["strict_allowed_skills"] = bool(config.strict_allowed_skills)
+    if config.ppo_env_capture:
+        source["ppo_env_capture"] = True
     return {
         "schema": SNAPSHOT_CURRICULUM_SCHEMA,
         "name": config.name,
@@ -925,6 +1209,8 @@ def _config_from_args(args: argparse.Namespace) -> SnapshotCaptureConfig:
         raise ValueError("--post-combat-kills must be non-negative")
     if args.ppo_checkpoint is not None and not args.ppo_checkpoint.exists():
         raise ValueError(f"--ppo-checkpoint does not exist: {args.ppo_checkpoint}")
+    if args.ppo_env_capture and args.ppo_checkpoint is None:
+        raise ValueError("--ppo-env-capture requires --ppo-checkpoint")
     max_requested_slot = int(args.save_slot_base) + len(selectors) - 1
     if args.save_slot_base < 0 or max_requested_slot > MAX_NATIVE_SAVE_SLOT:
         raise ValueError(
@@ -971,6 +1257,7 @@ def _config_from_args(args: argparse.Namespace) -> SnapshotCaptureConfig:
         settle_states_after_capture=args.settle_states_after_capture,
         verify_loads=args.verify_loads,
         verify_timeout_seconds=args.verify_timeout_seconds,
+        ppo_env_capture=bool(args.ppo_env_capture),
     )
 
 
@@ -1056,6 +1343,14 @@ def _main(argv: list[str] | None = None) -> int:
         help="Sample PPO actions during capture instead of deterministic argmax.",
     )
     parser.add_argument(
+        "--ppo-env-capture",
+        action="store_true",
+        help=(
+            "When --ppo-checkpoint is set, drive capture through DoomAgentEnv's "
+            "PPO eval cadence instead of the streamed policy wrapper."
+        ),
+    )
+    parser.add_argument(
         "--allowed-skill",
         action="append",
         default=[],
@@ -1083,7 +1378,10 @@ def _main(argv: list[str] | None = None) -> int:
 
     try:
         config = _config_from_args(args)
-        manifest = asyncio.run(capture_snapshot_curriculum(config))
+        if config.ppo_env_capture:
+            manifest = asyncio.run(capture_ppo_env_snapshot_curriculum(config))
+        else:
+            manifest = asyncio.run(capture_snapshot_curriculum(config))
     except ValueError as error:
         parser.error(str(error))
     except RuntimeError as error:

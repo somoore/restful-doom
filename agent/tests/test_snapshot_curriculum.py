@@ -14,6 +14,7 @@ from restfuldoom_agent.snapshot_capture import (
     _capture_stage,
     _filter_allowed_skill_mask,
     _main as snapshot_capture_main,
+    _record_from_env_step,
 )
 from restfuldoom_agent.env import SKILL_ACTIONS, _verify_snapshot_restored_state
 from restfuldoom_agent.snapshot_builder import (
@@ -443,6 +444,70 @@ def test_native_snapshot_capture_tracker_matches_post_combat_selectors():
     assert exit_control == []
     assert exit_route == ["post-combat-exit-route"]
     assert tracker.complete is True
+
+
+def test_ppo_env_step_record_matches_post_combat_selectors():
+    tracker = SnapshotMilestoneTracker(
+        ("post-combat", "post-combat-exit-route"),
+        post_combat_kills=5,
+    )
+    record = _record_from_env_step(
+        policy_id="ppo:checkpoint.pt",
+        episode_index=0,
+        seed=7,
+        step_index=128,
+        action_index=4,
+        action_mask=[False, False, False, False, True],
+        reward=1.25,
+        done=False,
+        observation=[0.1, 0.2],
+        info={
+            "skill": "route_progression",
+            "decision": {
+                "skill": "route_to_progression_line",
+                "navigation": {
+                    "route_waypoint": {
+                        "exit": True,
+                        "line": {"line_id": 330, "special": 11},
+                    }
+                },
+            },
+            "action": {
+                "raw": {"forward_move": 28, "side_move": 0, "angle_turn": 0},
+                "duration_tics": 4,
+            },
+            "state": {
+                "tick": 900,
+                "level_time": 640,
+                "episode": 1,
+                "map": 1,
+                "health": 88,
+                "kills": 5,
+                "position_fp": [1, 2, 0],
+                "combat": {
+                    "has_shootable_target": False,
+                    "target_is_enemy": False,
+                },
+                "navigation": {
+                    "route_waypoint": {
+                        "exit": True,
+                        "line": {"line_id": 330, "special": 11},
+                    }
+                },
+            },
+            "transition": {"kill_delta": 0, "damage_delta": 0},
+            "route_outcome": {"attempted": True, "exit": True},
+            "had_visible_enemy": False,
+            "had_shootable_target": False,
+        },
+        rollout_metadata={"source": "ppo-env-snapshot-capture"},
+    )
+
+    matches = tracker.observe(record)
+
+    assert matches == ["post-combat", "post-combat-exit-route"]
+    assert record["metadata"]["policy_decision"]["ppo_skill"] == "route_progression"
+    assert record["reward"]["reward"] == 1.25
 
 
 def test_snapshot_capture_allowed_skill_filter_matches_strict_env_fallback():
