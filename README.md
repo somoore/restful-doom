@@ -885,6 +885,7 @@ attempt, and `level_transition_delta=1`.
 ```
 PYTHONPATH=agent python -m restfuldoom_agent.ppo_agent \
     --eval-checkpoint agent_models/ppo/ppo-postcombat2-exitshape-wave3-20260627-a-ppo-0001.pt \
+    --eval-candidate-only \
     --goal-preset exit_seeking \
     --allowed-skill engage \
     --allowed-skill fire \
@@ -912,7 +913,10 @@ with `--min-episodes 5 --min-level-completions 3`. The gate reports reset
 source counts, done reasons, aggregate skill counts, kill gain, damage, route
 progress, exit-route attempts, and bottleneck counts. The bottleneck labels are
 `spawn_route`, `first_contact`, `combat`, `post_combat_route`, and `final_line`;
-use the first failing label to decide the next curriculum target. Multi-seed
+use the first failing label to decide the next curriculum target.
+`--eval-candidate-only` skips the normal baseline comparison so promotion gate
+artifacts contain just the candidate episodes and flush as soon as those
+episodes finish. Multi-seed
 rungs allow diagnostic chain failures as long as `passed_episodes` reaches the
 requested completion quota; integrity failures such as snapshots, disallowed
 skills, invalid actions, or strict-mask fallbacks still block the gate. Because

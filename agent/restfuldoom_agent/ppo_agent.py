@@ -308,6 +308,14 @@ async def evaluate(args: argparse.Namespace) -> dict[str, object]:
         deterministic=not args.eval_sample,
         trace_path=args.eval_trace_jsonl,
     )
+    if getattr(args, "eval_candidate_only", False):
+        return {
+            "schema": "restfuldoom.ppo_eval.v1",
+            "checkpoint_path": str(args.eval_checkpoint),
+            "candidate": candidate.to_dict(),
+            "baseline": None,
+            "promotion": None,
+        }
     if args.eval_baseline == "random":
         baseline = await evaluate_random_policy(
             env_config,
@@ -2678,6 +2686,15 @@ def main() -> None:
         help="Resume from ppo_best_checkpoint in --memory-path.",
     )
     parser.add_argument("--eval-checkpoint", type=Path)
+    parser.add_argument(
+        "--eval-candidate-only",
+        action="store_true",
+        help=(
+            "With --eval-checkpoint, evaluate only the checkpoint policy and skip "
+            "baseline/promotion comparison. Intended for external gates such as "
+            "true_spawn_e2e_gate that consume the candidate episode artifact directly."
+        ),
+    )
     parser.add_argument("--eval-baseline", choices=["random", "heuristic"], default="heuristic")
     parser.add_argument("--eval-episodes", type=int, default=1)
     parser.add_argument("--eval-max-steps", type=int, default=256)

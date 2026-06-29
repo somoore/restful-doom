@@ -7,6 +7,7 @@ import pytest
 from restfuldoom_agent.curriculum import build_curriculum, stage_for_update
 from restfuldoom_agent.env import EnvStep
 from restfuldoom_agent.brain import AgentMemory, _memory_ppo_checkpoint_paths
+import restfuldoom_agent.ppo_agent as ppo_agent_module
 from restfuldoom_agent.ppo_agent import (
     _annotate_buffer_curriculum,
     _append_true_spawn_stage,
@@ -27,6 +28,7 @@ from restfuldoom_agent.ppo_agent import (
     _resolve_resume_checkpoint,
     _should_replace_best_checkpoint,
     _summarize_buffer,
+    evaluate,
 )
 from restfuldoom_agent.learning_trace import LEARNING_TRACE_SCHEMA, build_learning_trace
 from restfuldoom_agent.ppo import (
@@ -173,6 +175,127 @@ def test_checkpoint_eval_trace_path_uses_stage_suffix_for_multi_stage(tmp_path):
             update_index=2,
         )
     )
+
+
+def test_eval_candidate_only_skips_baseline_and_history(monkeypatch, tmp_path):
+    async def fake_evaluate_checkpoint(checkpoint_path, env_config, **kwargs):
+        assert checkpoint_path == str(tmp_path / "candidate.pt")
+        assert kwargs["episodes"] == 5
+        assert kwargs["max_steps"] == 6000
+        assert kwargs["seed"] == 7
+        return _aggregate(
+            "ppo:candidate",
+            [
+                EpisodeEval(
+                    seed=7,
+                    total_reward=100.0,
+                    level_completed=True,
+                    death=False,
+                    max_kills=5,
+                    min_health=40,
+                    steps=1800,
+                    steps_to_exit=1800,
+                    stuck_events=0,
+                    done_reason="level_complete",
+                    start_kills=0,
+                    kill_delta=5,
+                    max_kill_gain=5,
+                    start_episode=1,
+                    start_map=1,
+                    end_episode=1,
+                    end_map=2,
+                    level_transition_delta=1,
+                    reset_source="episode",
+                )
+            ],
+        )
+
+    async def fail_baseline(*args, **kwargs):
+        raise AssertionError("candidate-only eval must not run a baseline")
+
+    def fail_history(*args, **kwargs):
+        raise AssertionError("candidate-only eval must not record promotion history")
+
+    monkeypatch.setattr(ppo_agent_module, "evaluate_checkpoint", fake_evaluate_checkpoint)
+    monkeypatch.setattr(ppo_agent_module, "evaluate_random_policy", fail_baseline)
+    monkeypatch.setattr(ppo_agent_module, "evaluate_heuristic_policy", fail_baseline)
+    monkeypatch.setattr(ppo_agent_module, "_record_eval_history", fail_history)
+
+    args = SimpleNamespace(
+        endpoint="127.0.0.1:50051",
+        token=None,
+        agent_port=50051,
+        tls=False,
+        authority=None,
+        skill=2,
+        episode=1,
+        map=1,
+        seed=7,
+        run_id="candidate-only",
+        goal_preset="exit_seeking",
+        target_x_fp=None,
+        target_y_fp=None,
+        eval_max_steps=6000,
+        level_complete_bonus=100.0,
+        kill_goal_bonus=10.0,
+        required_kills=5,
+        memory_path=None,
+        reset_timeout_seconds=5.0,
+        reset_attempts=2,
+        reset_start_x_fp=None,
+        reset_start_y_fp=None,
+        reset_start_angle_degrees=None,
+        reset_start_face_nearest_enemy=False,
+        reset_start_health=None,
+        reset_start_armor=None,
+        reset_start_ammo_bullets=None,
+        reset_start_trajectory=None,
+        reset_start_index=0,
+        reset_warmup_steps=0,
+        reset_warmup_max_tics=0,
+        reset_warmup_until_visible=False,
+        reset_warmup_until_shootable=False,
+        first_visible_bonus=0.0,
+        first_shootable_bonus=0.0,
+        visible_contact_progress_reward=0.0,
+        visible_contact_loss_penalty=0.0,
+        pre_shootable_route_penalty=0.0,
+        pre_required_kill_route_penalty=0.0,
+        exit_route_progress_reward=0.01,
+        exit_route_reached_reward=0.5,
+        exit_route_failure_penalty=0.05,
+        exit_ready_press_reward=0.0,
+        exit_ready_route_penalty=0.0,
+        terminate_on_first_visible=False,
+        terminate_on_first_shootable=False,
+        terminate_on_required_kills=False,
+        allowed_skill=[],
+        strict_allowed_skills=False,
+        snapshot_verify_restored_state=True,
+        snapshot_verify_tick_tolerance=35,
+        snapshot_verify_stream_tick=False,
+        snapshot_verify_position_tolerance_fp=160 * 65536,
+        eval_checkpoint=tmp_path / "candidate.pt",
+        eval_episodes=5,
+        eval_sample=False,
+        eval_trace_jsonl=tmp_path / "candidate-trace.jsonl",
+        eval_candidate_only=True,
+        eval_baseline="heuristic",
+        device="cpu",
+        promotion_min_completion_delta=0.0,
+        promotion_min_kill_delta=0.0,
+        promotion_min_reward_delta=0.0,
+        promotion_min_completion_rate=1.0,
+        promotion_min_mean_kills=1.0,
+    )
+
+    payload = asyncio.run(evaluate(args))
+
+    assert payload["schema"] == "restfuldoom.ppo_eval.v1"
+    assert payload["checkpoint_path"] == str(tmp_path / "candidate.pt")
+    assert payload["candidate"]["episodes"][0]["level_transition_delta"] == 1
+    assert payload["baseline"] is None
+    assert payload["promotion"] is None
 
 
 def test_checkpoint_eval_stage_order_runs_true_spawn_before_snapshots():
