@@ -10,10 +10,12 @@ from restfuldoom_agent.snapshot_capture import (
     SnapshotCaptureConfig,
     SnapshotMilestoneTracker,
     _attempt_trajectory_path,
+    _build_manifest,
     _capture_stage,
+    _filter_allowed_skill_mask,
     _main as snapshot_capture_main,
 )
-from restfuldoom_agent.env import _verify_snapshot_restored_state
+from restfuldoom_agent.env import SKILL_ACTIONS, _verify_snapshot_restored_state
 from restfuldoom_agent.snapshot_builder import (
     _redact_command,
     build_snapshot_curriculum_from_trajectory,
@@ -441,6 +443,76 @@ def test_native_snapshot_capture_tracker_matches_post_combat_selectors():
     assert exit_control == []
     assert exit_route == ["post-combat-exit-route"]
     assert tracker.complete is True
+
+
+def test_snapshot_capture_allowed_skill_filter_matches_strict_env_fallback():
+    raw = [False for _ in SKILL_ACTIONS]
+    route_index = SKILL_ACTIONS.index("route_progression")
+    fire_index = SKILL_ACTIONS.index("fire")
+    raw[route_index] = True
+
+    filtered, info = _filter_allowed_skill_mask(
+        raw,
+        allowed_skills=("fire",),
+        strict_allowed_skills=True,
+        heuristic_action_index=route_index,
+    )
+
+    assert filtered == [
+        index == fire_index for index, _skill in enumerate(SKILL_ACTIONS)
+    ]
+    assert info["fallback_applied"] is True
+    assert info["fallback_skill"] == "fire"
+    assert info["fallback_reason"] == "first_allowed_skill"
+
+
+def test_snapshot_capture_allowed_skill_filter_can_fall_back_to_unfiltered_mask():
+    raw = [False for _ in SKILL_ACTIONS]
+    route_index = SKILL_ACTIONS.index("route_progression")
+    raw[route_index] = True
+
+    filtered, info = _filter_allowed_skill_mask(
+        raw,
+        allowed_skills=("fire",),
+        strict_allowed_skills=False,
+        heuristic_action_index=route_index,
+    )
+
+    assert filtered == raw
+    assert info["fallback_applied"] is True
+    assert info["fallback_skill"] == "unfiltered_mask"
+
+
+def test_snapshot_capture_manifest_records_ppo_checkpoint_and_mask(tmp_path):
+    checkpoint = tmp_path / "policy.pt"
+    config = SnapshotCaptureConfig(
+        endpoint="127.0.0.1:50051",
+        output_path=tmp_path / "curriculum.json",
+        trajectory_jsonl=tmp_path / "capture.jsonl",
+        ppo_checkpoint=checkpoint,
+        ppo_device="cpu",
+        ppo_sample=True,
+        allowed_skills=("fire", "press_exit"),
+        strict_allowed_skills=True,
+        reset_before_attempt=True,
+        reset_ready_level_time=7,
+    )
+
+    manifest = _build_manifest(
+        config,
+        run_id="snapshot-capture-test",
+        stages=[],
+        records_seen=12,
+        skill_model_path=None,
+        attempt_reports=[],
+    )
+
+    assert manifest["source"]["ppo_checkpoint"] == str(checkpoint)
+    assert manifest["source"]["ppo_device"] == "cpu"
+    assert manifest["source"]["ppo_sample"] is True
+    assert manifest["source"]["allowed_skills"] == ["fire", "press_exit"]
+    assert manifest["source"]["strict_allowed_skills"] is True
+    assert manifest["source"]["reset"]["ready_level_time"] == 7
 
 
 def test_snapshot_builder_first_enemy_shootable_skips_non_enemy_target(tmp_path):

@@ -16,9 +16,19 @@ from .client import (
     BackoffConfig,
     DoomAgentClient,
     RolloutStep,
+    agent_pb2,
     summarize_state,
 )
-from .env import _verify_snapshot_restored_state
+from .env import (
+    ACTION_SCHEMA,
+    OBSERVATION_SCHEMA,
+    SKILL_ACTIONS,
+    SkillController,
+    _has_shootable_enemy,
+    _route_outcome,
+    _verify_snapshot_restored_state,
+)
+from .ppo import PPOTrainer
 from .reward import RewardEngine, goal_preset
 from .rollout_config import safe_endpoint_host
 from .skill_policy import SkillPolicyModel
@@ -78,7 +88,13 @@ class SnapshotCaptureConfig:
     reset_episode: int = 1
     reset_map: int = 1
     reset_seed_base: int = 0
+    reset_ready_level_time: int = 5
     policy_id: str = "snapshot_capture_brain"
+    ppo_checkpoint: Path | None = None
+    ppo_device: str = "cpu"
+    ppo_sample: bool = False
+    allowed_skills: tuple[str, ...] = ()
+    strict_allowed_skills: bool = False
     reconnect: bool = True
     max_reconnects: int = 5
     stop_after_captured: bool = True
@@ -174,6 +190,212 @@ class SnapshotMilestoneTracker:
         )
 
 
+class PPOSnapshotCapturePolicy:
+    """Drives snapshot capture with a trained PPO skill selector."""
+
+    def __init__(
+        self,
+        *,
+        trainer: PPOTrainer,
+        memory: AgentMemory,
+        params: Any,
+        policy_id: str,
+        allowed_skills: tuple[str, ...] = (),
+        strict_allowed_skills: bool = False,
+        deterministic: bool = True,
+        ready_episode: int = 1,
+        ready_map: int = 1,
+        ready_level_time: int = 5,
+    ) -> None:
+        self.trainer = trainer
+        self.controller = SkillController(
+            memory=memory,
+            params=params,
+            policy_id=f"{policy_id}-controller",
+        )
+        self.policy_id = policy_id
+        self.allowed_skills = tuple(allowed_skills)
+        self.strict_allowed_skills = bool(strict_allowed_skills)
+        self.deterministic = bool(deterministic)
+        self.ready_episode = int(ready_episode)
+        self.ready_map = int(ready_map)
+        self.ready_level_time = max(0, int(ready_level_time))
+        self._policy_started = False
+        self.last_decision: dict[str, Any] = {}
+        self.last_error: str | None = None
+        self.error_count = 0
+        self.fallback_count = 0
+        self._previous_state: Any | None = None
+        self._previous_action_index: int | None = None
+        self._previous_decision: dict[str, Any] | None = None
+        self._previous_had_shootable_target = False
+
+    async def next_action(self, state: Any) -> Any:
+        """Selects one PPO skill and dispatches it through SkillController."""
+        if not self._policy_ready(state):
+            self.last_decision = {
+                "policy_source": "ppo_checkpoint",
+                "policy_id": self.policy_id,
+                "ppo_waiting_for_reset_ready": True,
+                "ready_episode": self.ready_episode,
+                "ready_map": self.ready_map,
+                "ready_level_time": self.ready_level_time,
+                "live_episode": _live_state_episode_map(state)[0],
+                "live_map": _live_state_episode_map(state)[1],
+                "live_level_time": _live_state_level_time(state),
+            }
+            return agent_pb2.PlayerAction()
+        if not self._policy_started:
+            self.controller.reset_episode_context()
+            self._policy_started = True
+        self._record_previous_action_outcome(state)
+        observation = self.controller.observation(state)
+        raw_mask = list(self.controller.action_mask(state))
+        action_mask, filter_info = _filter_allowed_skill_mask(
+            raw_mask,
+            allowed_skills=self.allowed_skills,
+            strict_allowed_skills=self.strict_allowed_skills,
+            heuristic_action_index=self.controller.heuristic_action_index(state),
+        )
+        action_index, logprob, value = self.trainer.model.act(
+            observation,
+            action_mask=action_mask,
+            deterministic=self.deterministic,
+        )
+        action, decision = self.controller.action_for(action_index, state)
+        decision = dict(decision)
+        decision["policy_source"] = "ppo_checkpoint"
+        decision["policy_id"] = self.policy_id
+        decision["ppo_logprob"] = round(float(logprob), 6)
+        decision["ppo_value"] = round(float(value), 6)
+        decision["ppo_deterministic"] = self.deterministic
+        decision["action_mask_allowed_count"] = sum(1 for allowed in action_mask if allowed)
+        decision["raw_action_mask_allowed_count"] = sum(1 for allowed in raw_mask if allowed)
+        decision["allowed_skill_filter"] = filter_info
+        if bool(filter_info.get("fallback_applied")):
+            self.fallback_count += 1
+
+        self.controller.last_decision = decision
+        self.controller.policy.last_decision = decision
+        self.last_decision = decision
+        self._previous_state = state
+        self._previous_action_index = action_index
+        self._previous_decision = decision
+        self._previous_had_shootable_target = _has_shootable_enemy(state)
+        return action
+
+    def _policy_ready(self, state: Any) -> bool:
+        episode, map_number = _live_state_episode_map(state)
+        level_time = _live_state_level_time(state)
+        return (
+            episode == self.ready_episode
+            and map_number == self.ready_map
+            and level_time is not None
+            and level_time >= self.ready_level_time
+        )
+
+    def _record_previous_action_outcome(self, current_state: Any) -> None:
+        if self._previous_state is None or self._previous_action_index is None:
+            return
+        if _live_state_episode_map(current_state) != _live_state_episode_map(
+            self._previous_state
+        ):
+            self.controller.reset_episode_context()
+            self._previous_state = None
+            self._previous_action_index = None
+            self._previous_decision = None
+            self._previous_had_shootable_target = False
+            return
+        skill = SKILL_ACTIONS[self._previous_action_index]
+        outcome = _route_outcome(
+            skill,
+            self._previous_state,
+            current_state,
+            decision=self._previous_decision,
+        )
+        self.controller.record_action_history(
+            action_index=self._previous_action_index,
+            had_shootable_target=self._previous_had_shootable_target,
+            route_outcome=outcome,
+        )
+
+
+def _filter_allowed_skill_mask(
+    mask: list[bool],
+    *,
+    allowed_skills: tuple[str, ...],
+    strict_allowed_skills: bool,
+    heuristic_action_index: int | None = None,
+) -> tuple[list[bool], dict[str, Any]]:
+    """Applies the PPO skill allowlist with DoomEnv strict-mask semantics."""
+    allowed_skills = tuple(allowed_skills or ())
+    if not allowed_skills:
+        return mask, {
+            "schema": "restfuldoom.allowed_skill_filter.v1",
+            "configured": False,
+        }
+    allowed = set(allowed_skills)
+    filtered = [
+        bool(value) and skill in allowed
+        for skill, value in zip(SKILL_ACTIONS, mask, strict=False)
+    ]
+    info: dict[str, Any] = {
+        "schema": "restfuldoom.allowed_skill_filter.v1",
+        "configured": True,
+        "strict": bool(strict_allowed_skills),
+        "allowed_skills": list(allowed_skills),
+        "raw_allowed_count": sum(1 for value in mask if value),
+        "filtered_allowed_count": sum(1 for value in filtered if value),
+        "fallback_applied": False,
+        "fallback_skill": None,
+    }
+    if any(filtered):
+        return filtered, info
+    if not strict_allowed_skills:
+        info["fallback_applied"] = True
+        info["fallback_skill"] = "unfiltered_mask"
+        return mask, info
+    if heuristic_action_index is not None and 0 <= heuristic_action_index < len(SKILL_ACTIONS):
+        heuristic_skill = SKILL_ACTIONS[int(heuristic_action_index)]
+        if heuristic_skill in allowed:
+            fallback = [False for _ in SKILL_ACTIONS]
+            fallback[int(heuristic_action_index)] = True
+            info["fallback_applied"] = True
+            info["fallback_skill"] = heuristic_skill
+            info["fallback_reason"] = "heuristic_allowed_skill"
+            info["filtered_allowed_count"] = 1
+            return fallback, info
+    for skill in allowed_skills:
+        if skill in SKILL_ACTIONS:
+            fallback = [False for _ in SKILL_ACTIONS]
+            fallback[SKILL_ACTIONS.index(skill)] = True
+            info["fallback_applied"] = True
+            info["fallback_skill"] = skill
+            info["fallback_reason"] = "first_allowed_skill"
+            info["filtered_allowed_count"] = 1
+            return fallback, info
+    return filtered, info
+
+
+def _live_state_episode_map(state: Any) -> tuple[int | None, int | None]:
+    """Returns episode/map for a live protobuf state or summarized state dict."""
+    if isinstance(state, dict):
+        return _episode_map(state)
+    level = getattr(state, "level", None)
+    return (
+        _int_or_none(getattr(level, "episode", None)),
+        _int_or_none(getattr(level, "map", None)),
+    )
+
+
+def _live_state_level_time(state: Any) -> int | None:
+    """Returns level time for a live protobuf state or summarized state dict."""
+    if isinstance(state, dict):
+        return _int_or_none(state.get("level_time"))
+    level = getattr(state, "level", None)
+    return _int_or_none(getattr(level, "level_time", None))
+
+
 async def capture_snapshot_curriculum(config: SnapshotCaptureConfig) -> dict[str, Any]:
     """Runs the structured brain and captures native save slots at milestones."""
     memory = AgentMemory.load(config.memory_path)
@@ -210,7 +432,14 @@ async def capture_snapshot_curriculum(config: SnapshotCaptureConfig) -> dict[str
         "save_slot_base": config.save_slot_base,
         "attempts": config.attempts,
         "reset_before_attempt": config.reset_before_attempt,
+        "reset_ready_level_time": int(config.reset_ready_level_time),
     }
+    if config.ppo_checkpoint is not None:
+        base_metadata["ppo_checkpoint"] = str(config.ppo_checkpoint)
+        base_metadata["ppo_device"] = config.ppo_device
+        base_metadata["ppo_sample"] = bool(config.ppo_sample)
+        base_metadata["allowed_skills"] = list(config.allowed_skills)
+        base_metadata["strict_allowed_skills"] = bool(config.strict_allowed_skills)
     if skill_model_path is not None:
         base_metadata["skill_model_path"] = str(skill_model_path)
 
@@ -264,12 +493,32 @@ async def capture_snapshot_curriculum(config: SnapshotCaptureConfig) -> dict[str
                     attempt=attempt,
                 )
 
-            policy = BrainPolicy(
-                memory=memory,
-                params=params,
-                policy_id=f"{config.policy_id}-attempt-{attempt}",
-                skill_model=skill_model,
-            )
+            if config.ppo_checkpoint is not None:
+                trainer = PPOTrainer.load_checkpoint(
+                    config.ppo_checkpoint,
+                    device=config.ppo_device,
+                    target_obs_dim=len(OBSERVATION_SCHEMA["feature_names"]),
+                    target_action_dim=len(ACTION_SCHEMA["actions"]),
+                )
+                policy = PPOSnapshotCapturePolicy(
+                    trainer=trainer,
+                    memory=memory,
+                    params=params,
+                    policy_id=f"{config.policy_id}-attempt-{attempt}",
+                    allowed_skills=config.allowed_skills,
+                    strict_allowed_skills=config.strict_allowed_skills,
+                    deterministic=not config.ppo_sample,
+                    ready_episode=int(config.reset_episode),
+                    ready_map=int(config.reset_map),
+                    ready_level_time=int(config.reset_ready_level_time),
+                )
+            else:
+                policy = BrainPolicy(
+                    memory=memory,
+                    params=params,
+                    policy_id=f"{config.policy_id}-attempt-{attempt}",
+                    skill_model=skill_model,
+                )
             reward = RewardEngine(goal_preset(config.goal_preset))
             metadata = {
                 **base_metadata,
@@ -321,7 +570,11 @@ async def capture_snapshot_curriculum(config: SnapshotCaptureConfig) -> dict[str
             )
 
         if config.verify_loads:
-            await _verify_captured_slots(client, stages, timeout_seconds=config.verify_timeout_seconds)
+            await _verify_captured_slots(
+                client,
+                stages,
+                timeout_seconds=config.verify_timeout_seconds,
+            )
     finally:
         await client.close()
 
@@ -517,9 +770,16 @@ def _build_manifest(
             "episode": int(config.reset_episode),
             "map": int(config.reset_map),
             "seed_base": int(config.reset_seed_base),
+            "ready_level_time": int(config.reset_ready_level_time),
         }
     if skill_model_path is not None:
         source["skill_model_path"] = str(skill_model_path)
+    if config.ppo_checkpoint is not None:
+        source["ppo_checkpoint"] = str(config.ppo_checkpoint)
+        source["ppo_device"] = config.ppo_device
+        source["ppo_sample"] = bool(config.ppo_sample)
+        source["allowed_skills"] = list(config.allowed_skills)
+        source["strict_allowed_skills"] = bool(config.strict_allowed_skills)
     return {
         "schema": SNAPSHOT_CURRICULUM_SCHEMA,
         "name": config.name,
@@ -663,6 +923,8 @@ def _config_from_args(args: argparse.Namespace) -> SnapshotCaptureConfig:
         raise ValueError("--attempts must be positive")
     if args.post_combat_kills < 0:
         raise ValueError("--post-combat-kills must be non-negative")
+    if args.ppo_checkpoint is not None and not args.ppo_checkpoint.exists():
+        raise ValueError(f"--ppo-checkpoint does not exist: {args.ppo_checkpoint}")
     max_requested_slot = int(args.save_slot_base) + len(selectors) - 1
     if args.save_slot_base < 0 or max_requested_slot > MAX_NATIVE_SAVE_SLOT:
         raise ValueError(
@@ -696,7 +958,13 @@ def _config_from_args(args: argparse.Namespace) -> SnapshotCaptureConfig:
         reset_episode=args.reset_episode,
         reset_map=args.reset_map,
         reset_seed_base=args.reset_seed_base,
+        reset_ready_level_time=args.reset_ready_level_time,
         policy_id=args.policy_id,
+        ppo_checkpoint=args.ppo_checkpoint,
+        ppo_device=args.ppo_device,
+        ppo_sample=bool(args.ppo_sample),
+        allowed_skills=tuple(args.allowed_skill or ()),
+        strict_allowed_skills=bool(args.strict_allowed_skills),
         reconnect=not args.no_reconnect,
         max_reconnects=args.max_reconnects,
         stop_after_captured=not args.no_stop_after_captured,
@@ -763,7 +1031,48 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reset-episode", type=int, default=1)
     parser.add_argument("--reset-map", type=int, default=1)
     parser.add_argument("--reset-seed-base", type=int, default=0)
+    parser.add_argument(
+        "--reset-ready-level-time",
+        type=int,
+        default=5,
+        help=(
+            "Delay PPO-driven capture until the reset stream reaches this level "
+            "time, matching DoomEnv's true-spawn reset readiness gate."
+        ),
+    )
     parser.add_argument("--policy-id", default="snapshot_capture_brain")
+    parser.add_argument(
+        "--ppo-checkpoint",
+        type=Path,
+        help=(
+            "Drive capture with a trained PPO skill checkpoint instead of the "
+            "structured BrainPolicy."
+        ),
+    )
+    parser.add_argument("--ppo-device", default="cpu")
+    parser.add_argument(
+        "--ppo-sample",
+        action="store_true",
+        help="Sample PPO actions during capture instead of deterministic argmax.",
+    )
+    parser.add_argument(
+        "--allowed-skill",
+        action="append",
+        default=[],
+        choices=ACTION_SCHEMA["actions"],
+        help=(
+            "PPO capture skill allowlist applied after the normal action mask; "
+            "repeat to keep multiple skills."
+        ),
+    )
+    parser.add_argument(
+        "--strict-allowed-skills",
+        action="store_true",
+        help=(
+            "When --allowed-skill filters out every normal PPO action, keep capture "
+            "inside the allowlist instead of falling back to the unfiltered mask."
+        ),
+    )
     parser.add_argument("--no-reconnect", action="store_true")
     parser.add_argument("--max-reconnects", type=int, default=5)
     parser.add_argument("--no-stop-after-captured", action="store_true")
