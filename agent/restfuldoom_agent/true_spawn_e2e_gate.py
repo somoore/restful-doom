@@ -22,6 +22,7 @@ CHAIN_FAILURE_REASONS = {
     "kill_gain_below_threshold",
     "route_attempt_steps_below_threshold",
     "exit_route_attempt_steps_below_threshold",
+    "press_exit_steps_below_threshold",
     "missing_level_transition",
     "missing_level_complete_done",
 }
@@ -39,6 +40,7 @@ def validate_true_spawn_e2e_gate(
     min_kill_gain: int = DEFAULT_MIN_KILL_GAIN,
     min_route_attempt_steps: int = 1,
     min_exit_route_attempt_steps: int = 1,
+    min_press_exit_steps: int = 1,
     require_level_complete: bool = True,
     require_strict_skill_filter: bool = True,
     required_start_episode: int | None = None,
@@ -86,6 +88,7 @@ def validate_true_spawn_e2e_gate(
         "exit_route_reached_steps": 0,
         "exit_route_failed_steps": 0,
         "exit_route_progress_units": 0.0,
+        "press_exit_steps": 0,
         "min_start_kills": None,
         "max_start_kills": None,
         "min_start_items": None,
@@ -212,6 +215,8 @@ def validate_true_spawn_e2e_gate(
             summary["damage_delta_total"] += _int_field(episode, "damage_delta")
             episode_skill_counts = _skill_counts(episode)
             skill_counts.update(episode_skill_counts)
+            press_exit_steps = int(episode_skill_counts.get("press_exit", 0))
+            summary["press_exit_steps"] += press_exit_steps
 
             def fail(reason: str, **details: Any) -> None:
                 failed_episode_keys.add(episode_key)
@@ -227,6 +232,7 @@ def validate_true_spawn_e2e_gate(
                         min_kill_gain=min_kill_gain,
                         min_route_attempt_steps=min_route_attempt_steps,
                         min_exit_route_attempt_steps=min_exit_route_attempt_steps,
+                        min_press_exit_steps=min_press_exit_steps,
                     ),
                     **details,
                 }
@@ -299,6 +305,12 @@ def validate_true_spawn_e2e_gate(
                         "exit_route_attempt_steps",
                     ),
                     minimum=int(min_exit_route_attempt_steps),
+                )
+            if press_exit_steps < int(min_press_exit_steps):
+                fail(
+                    "press_exit_steps_below_threshold",
+                    press_exit_steps=press_exit_steps,
+                    minimum=int(min_press_exit_steps),
                 )
             if level_transition_delta != 1:
                 fail(
@@ -387,6 +399,7 @@ def validate_true_spawn_e2e_gate(
                         min_kill_gain=min_kill_gain,
                         min_route_attempt_steps=min_route_attempt_steps,
                         min_exit_route_attempt_steps=min_exit_route_attempt_steps,
+                        min_press_exit_steps=min_press_exit_steps,
                     )
                 ] += 1
 
@@ -443,6 +456,7 @@ def validate_true_spawn_e2e_gate(
             "min_kill_gain": int(min_kill_gain),
             "min_route_attempt_steps": int(min_route_attempt_steps),
             "min_exit_route_attempt_steps": int(min_exit_route_attempt_steps),
+            "min_press_exit_steps": int(min_press_exit_steps),
             "require_level_complete": bool(require_level_complete),
             "require_strict_skill_filter": bool(require_strict_skill_filter),
             "required_start_episode": required_start_episode,
@@ -548,6 +562,7 @@ def _classify_bottleneck(
     min_kill_gain: int,
     min_route_attempt_steps: int,
     min_exit_route_attempt_steps: int,
+    min_press_exit_steps: int,
 ) -> str:
     if str(episode.get("reset_source") or "") != "episode":
         return "gate_integrity"
@@ -571,6 +586,8 @@ def _classify_bottleneck(
         return "post_combat_route"
     if _int_field(episode, "exit_route_attempt_steps") < int(min_exit_route_attempt_steps):
         return "post_combat_route"
+    if _skill_counts(episode).get("press_exit", 0) < int(min_press_exit_steps):
+        return "final_line"
     if _int_field(episode, "level_transition_delta") != 1 or not _episode_level_completed(
         episode
     ):
@@ -643,6 +660,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-kill-gain", type=int, default=DEFAULT_MIN_KILL_GAIN)
     parser.add_argument("--min-route-attempt-steps", type=int, default=1)
     parser.add_argument("--min-exit-route-attempt-steps", type=int, default=1)
+    parser.add_argument("--min-press-exit-steps", type=int, default=1)
     parser.add_argument("--required-start-episode", type=int)
     parser.add_argument("--required-start-map", type=int)
     parser.add_argument("--allow-missing-level-complete", action="store_true")
@@ -661,6 +679,7 @@ def main(argv: list[str] | None = None) -> int:
         min_kill_gain=args.min_kill_gain,
         min_route_attempt_steps=args.min_route_attempt_steps,
         min_exit_route_attempt_steps=args.min_exit_route_attempt_steps,
+        min_press_exit_steps=args.min_press_exit_steps,
         require_level_complete=not args.allow_missing_level_complete,
         require_strict_skill_filter=not args.allow_nonstrict_skill_filter,
         required_start_episode=args.required_start_episode,

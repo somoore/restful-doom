@@ -24,6 +24,7 @@ def test_true_spawn_e2e_gate_accepts_strict_episode_transition():
     assert report["summary"]["damage_delta_total"] == 42
     assert report["summary"]["route_attempt_steps"] == 8
     assert report["summary"]["exit_route_attempt_steps"] == 3
+    assert report["summary"]["press_exit_steps"] == 1
     assert report["summary"]["skill_counts"] == {
         "fire": 2,
         "press_exit": 1,
@@ -94,6 +95,18 @@ def test_true_spawn_e2e_gate_rejects_missing_chain_links_and_classifies_bottlene
         failure["reason"] == "passed_episode_count_below_threshold"
         for failure in report["failures"]
     )
+
+
+def test_true_spawn_e2e_gate_requires_press_exit_skill():
+    no_press = _episode(skill_counts={"route_progression": 5, "fire": 2})
+
+    report = validate_true_spawn_e2e_gate(_payload([no_press]))
+    reasons = {failure["reason"] for failure in report["failures"]}
+
+    assert report["ok"] is False
+    assert "press_exit_steps_below_threshold" in reasons
+    assert report["summary"]["press_exit_steps"] == 0
+    assert report["summary"]["bottleneck_counts"] == {"final_line": 1}
 
 
 def test_true_spawn_e2e_gate_allows_gate_b_completion_quota_with_diagnostics():

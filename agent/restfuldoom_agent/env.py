@@ -18,8 +18,10 @@ from .brain import (
     AgentMemory,
     BrainPolicy,
     BrainPolicyParams,
+    EXIT_ASSIST_DISTANCE_UNITS,
     EXIT_LINE_SPECIALS,
     MANUAL_USE_LINE_SPECIALS,
+    POST_COMBAT_EXIT_KILLS,
     WALK_TRIGGER_LINE_SPECIALS,
     cell_key,
     extract_features,
@@ -544,8 +546,11 @@ class SkillController:
             if features.health <= self.params.retreat_health:
                 return SKILL_ACTIONS.index("retreat")
             return SKILL_ACTIONS.index("close_visible_contact")
-        local_exit = self.policy._select_local_exit_line(features)
-        if local_exit is not None and self._exit_press_ready(features, local_exit):
+        local_exit = self._exit_press_candidate(features)
+        if local_exit is not None and self._exit_press_available_for_mask(
+            features,
+            local_exit,
+        ):
             return SKILL_ACTIONS.index("press_exit")
         if (
             self.policy._select_nearby_use_line(features) is not None
@@ -688,8 +693,11 @@ class SkillController:
         if stuck:
             mask["recover_stuck"] = True
 
-        local_exit = self.policy._select_local_exit_line(features) if not can_fire else None
-        if local_exit is not None and self._exit_press_ready(features, local_exit):
+        local_exit = self._exit_press_candidate(features) if not can_fire else None
+        if local_exit is not None and self._exit_press_available_for_mask(
+            features,
+            local_exit,
+        ):
             mask["press_exit"] = True
 
         if not any(mask.values()):
@@ -771,6 +779,35 @@ class SkillController:
                 or float(line.get("front_distance", 999999.0)) <= 160.0
             )
         )
+
+    def _exit_press_candidate(self, features: Any) -> dict[str, Any] | None:
+        """Returns the local or remembered exit line the exit option can own."""
+        line = self.policy._select_local_exit_line(features)
+        if line is not None:
+            return line
+        return self.policy._last_post_combat_exit_line_target(features)
+
+    def _exit_press_available_for_mask(
+        self,
+        features: Any,
+        line: dict[str, Any],
+    ) -> bool:
+        """Returns whether PPO may select the exit option for final-line work."""
+        if self._exit_press_ready(features, line):
+            return True
+        if int(line.get("special", 0)) not in EXIT_LINE_SPECIALS:
+            return False
+        if self.policy._shootable_enemy(features) is not None or features.visible_enemies:
+            return False
+        if int(features.kills) < POST_COMBAT_EXIT_KILLS:
+            return False
+        if not self.policy._has_episode_kill(features):
+            return False
+        if self.policy._is_line_blocked(features, line):
+            return False
+        if self.policy._line_control_distance(line) > EXIT_ASSIST_DISTANCE_UNITS:
+            return False
+        return abs(self.policy._line_control_angle_delta(line)) <= 150.0
 
     def _execute_skill(self, skill: str, features: Any, stuck: bool) -> tuple[Any, dict[str, Any]]:
         if features.visible_enemies:

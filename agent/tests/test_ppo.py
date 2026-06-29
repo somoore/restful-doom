@@ -2433,6 +2433,7 @@ def test_true_spawn_promotion_selection_score_requires_full_chain():
                 first_shootable_contacts=1,
                 allowed_skill_filter_steps=1300,
                 strict_allowed_skill_filter_steps=1300,
+                skill_counts={"route_progression": 5, "fire": 2, "press_exit": 1},
                 route_attempt_steps=420,
                 exit_route_attempt_steps=70,
                 exit_route_reached_steps=8,
