@@ -10,6 +10,7 @@ from restfuldoom_agent.brain import AgentMemory, _memory_ppo_checkpoint_paths
 import restfuldoom_agent.ppo_agent as ppo_agent_module
 from restfuldoom_agent.ppo_agent import (
     _annotate_buffer_curriculum,
+    _apply_trainer_config_updates,
     _append_true_spawn_stage,
     _load_behavior_clone_samples,
     _checkpoint_selection_score,
@@ -30,6 +31,7 @@ from restfuldoom_agent.ppo_agent import (
     _resolve_resume_checkpoint,
     _should_replace_best_checkpoint,
     _summarize_buffer,
+    _trainer_config_updates_for_resume,
     evaluate,
 )
 from restfuldoom_agent.learning_trace import LEARNING_TRACE_SCHEMA, build_learning_trace
@@ -3461,6 +3463,64 @@ def test_resolve_resume_best_checkpoint_requires_existing_file(tmp_path):
 
     with pytest.raises(ValueError, match="does not exist"):
         _resolve_resume_checkpoint(args, memory)
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")
+def test_resume_config_cli_overrides_mutable_trainer_config():
+    trainer = PPOTrainer(
+        obs_dim=2,
+        action_dim=2,
+        config=PPOConfig(
+            learning_rate=0.01,
+            gamma=0.9,
+            gae_lambda=0.8,
+            clip_ratio=0.3,
+            entropy_coef=0.02,
+            value_coef=0.4,
+            reference_kl_coef=0.0,
+            aux_bc_coef=0.0,
+            aux_bc_batch_size=8,
+            update_epochs=4,
+            minibatch_size=8,
+            hidden_size=4,
+            rollout_steps=8,
+            seed=1,
+        ),
+    )
+    desired = PPOConfig(
+        learning_rate=1e-6,
+        gamma=0.97,
+        gae_lambda=0.91,
+        clip_ratio=0.11,
+        entropy_coef=0.002,
+        value_coef=0.7,
+        reference_kl_coef=0.4,
+        aux_bc_coef=0.6,
+        aux_bc_batch_size=17,
+        update_epochs=0,
+        minibatch_size=3,
+        hidden_size=99,
+        rollout_steps=19,
+        seed=123,
+    )
+
+    updates = _trainer_config_updates_for_resume(trainer.config, desired)
+    _apply_trainer_config_updates(trainer, updates)
+
+    assert updates["learning_rate"] == 1e-6
+    assert updates["update_epochs"] == 0
+    assert updates["rollout_steps"] == 19
+    assert "hidden_size" not in updates
+    assert trainer.config.learning_rate == 1e-6
+    assert trainer.config.update_epochs == 0
+    assert trainer.config.rollout_steps == 19
+    assert trainer.config.reference_kl_coef == 0.4
+    assert trainer.config.aux_bc_coef == 0.6
+    assert trainer.config.aux_bc_batch_size == 17
+    assert trainer.config.hidden_size == 4
+    assert [group["lr"] for group in trainer.optimizer.param_groups] == [
+        pytest.approx(1e-6)
+    ]
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")

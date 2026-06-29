@@ -30,6 +30,21 @@ from .skill_policy import features_from_record
 from .true_spawn_e2e_gate import validate_true_spawn_e2e_gate
 
 CHECKPOINT_EVAL_SCORE_SCHEMA = "restfuldoom.ppo_checkpoint_eval_score.v5"
+_RESUME_CONFIG_OVERRIDE_FIELDS = (
+    "learning_rate",
+    "gamma",
+    "gae_lambda",
+    "clip_ratio",
+    "entropy_coef",
+    "value_coef",
+    "reference_kl_coef",
+    "aux_bc_coef",
+    "aux_bc_batch_size",
+    "update_epochs",
+    "minibatch_size",
+    "rollout_steps",
+    "seed",
+)
 
 
 async def train(args: argparse.Namespace) -> dict[str, object]:
@@ -74,18 +89,14 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
             config=ppo_config,
             device=args.device,
         )
-    reference_kl_coef = float(getattr(args, "reference_kl_coef", 0.0))
-    aux_bc_coef = float(getattr(args, "aux_bc_coef", 0.0))
-    aux_bc_batch_size = int(getattr(args, "aux_bc_batch_size", 128))
-    config_updates = {}
-    if float(getattr(trainer.config, "reference_kl_coef", 0.0)) != reference_kl_coef:
-        config_updates["reference_kl_coef"] = reference_kl_coef
-    if float(getattr(trainer.config, "aux_bc_coef", 0.0)) != aux_bc_coef:
-        config_updates["aux_bc_coef"] = aux_bc_coef
-    if int(getattr(trainer.config, "aux_bc_batch_size", 128)) != aux_bc_batch_size:
-        config_updates["aux_bc_batch_size"] = aux_bc_batch_size
-    if config_updates:
-        trainer.config = replace(trainer.config, **config_updates)
+    reference_kl_coef = ppo_config.reference_kl_coef
+    aux_bc_coef = ppo_config.aux_bc_coef
+    aux_bc_batch_size = ppo_config.aux_bc_batch_size
+    config_updates = _trainer_config_updates_for_resume(
+        trainer.config,
+        ppo_config,
+    )
+    _apply_trainer_config_updates(trainer, config_updates)
     behavior_clone_summary = None
     if args.bc_trajectory:
         samples, behavior_clone_summary = _load_behavior_clone_samples(args)
@@ -289,6 +300,34 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
         "observation_schema": OBSERVATION_SCHEMA,
         "action_schema": ACTION_SCHEMA,
     }
+
+
+def _trainer_config_updates_for_resume(
+    current_config: PPOConfig,
+    desired_config: PPOConfig,
+) -> dict[str, object]:
+    """Returns mutable train-time config fields that CLI resume should override."""
+    updates: dict[str, object] = {}
+    for field_name in _RESUME_CONFIG_OVERRIDE_FIELDS:
+        current_value = getattr(current_config, field_name)
+        desired_value = getattr(desired_config, field_name)
+        if current_value != desired_value:
+            updates[field_name] = desired_value
+    return updates
+
+
+def _apply_trainer_config_updates(
+    trainer: PPOTrainer,
+    updates: dict[str, object],
+) -> None:
+    """Applies train-time config overrides to a loaded trainer."""
+    if not updates:
+        return
+    trainer.config = replace(trainer.config, **updates)
+    if "learning_rate" not in updates:
+        return
+    for group in trainer.optimizer.param_groups:
+        group["lr"] = trainer.config.learning_rate
 
 
 async def evaluate(args: argparse.Namespace) -> dict[str, object]:
