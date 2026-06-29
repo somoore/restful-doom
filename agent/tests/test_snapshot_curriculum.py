@@ -296,6 +296,11 @@ def test_snapshot_builder_selects_gate_b_failure_anchors(tmp_path):
     assert pre_required["name"] == "0001-pre-required-kill_snapshot"
     assert pre_required["expected_state"]["kills"] == 4
     assert pre_required["expected_state"]["health"] == 30
+    assert pre_required["training"] == {
+        "purpose": "finish the last kill needed before post-combat routing",
+        "required_kills": 1,
+        "terminate_on_required_kills": True,
+    }
     assert (
         post_required_low_health["name"]
         == "0002-post-required-kill-low-health_snapshot"

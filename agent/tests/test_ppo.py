@@ -18,6 +18,7 @@ from restfuldoom_agent.ppo_agent import (
     _checkpoint_eval_stage_order,
     _checkpoint_eval_trace_path,
     _evaluate_checkpoint_curriculum,
+    _env_config_for_stage,
     _redacted_restore_argv,
     _render_snapshot_restore_command,
     _policy_eval_selection_components,
@@ -1297,12 +1298,125 @@ def test_true_spawn_stage_can_be_appended_to_snapshot_curriculum(tmp_path):
     assert true_spawn_stage["evidence"]["true_spawn_promotion_stage"] is True
 
 
+def test_snapshot_stage_training_overrides_required_kill_goal():
+    args = _stage_config_args()
+    curriculum = {
+        "schema": "restfuldoom.ppo_curriculum.v1",
+        "name": "gate-b-anchors",
+        "stages": [],
+    }
+    stage = {
+        "index": 0,
+        "name": "0434-pre-required-kill_snapshot",
+        "reset_mode": "snapshot",
+        "reset_start": {"x_fp": 1, "y_fp": 2},
+        "snapshot": {"id": "slot-5", "slot": 5, "ref": "save_slot:5"},
+        "training": {
+            "required_kills": 1,
+            "terminate_on_required_kills": True,
+        },
+    }
+
+    config = _env_config_for_stage(
+        args,
+        curriculum,
+        stage,
+        run_id="gate-b-pre-required",
+    )
+
+    assert config.required_kills == 1
+    assert config.terminate_on_required_kills is True
+    assert config.reset_mode == "snapshot"
+    assert config.snapshot == {"id": "slot-5", "slot": 5, "ref": "save_slot:5"}
+    assert config.curriculum_stage["training"]["required_kills"] == 1
+
+
+def test_snapshot_stage_training_override_does_not_leak_to_normal_stage():
+    args = _stage_config_args(required_kills=5, terminate_on_required_kills=False)
+    curriculum = {
+        "schema": "restfuldoom.ppo_curriculum.v1",
+        "name": "gate-b-anchors",
+        "stages": [],
+    }
+    stage = {
+        "index": 1,
+        "name": "fresh_spawn_true_spawn_gate",
+        "reset_mode": "episode",
+        "reset_start": {},
+    }
+
+    config = _env_config_for_stage(
+        args,
+        curriculum,
+        stage,
+        run_id="gate-b-true-spawn",
+    )
+
+    assert config.required_kills == 5
+    assert config.terminate_on_required_kills is False
+    assert config.reset_mode == "episode"
+
+
 def test_snapshot_curriculum_manifest_rejects_bad_schema(tmp_path):
     manifest = tmp_path / "bad.json"
     manifest.write_text(json.dumps({"schema": "old", "stages": []}), encoding="utf-8")
 
     with pytest.raises(ValueError, match="expected restfuldoom.snapshot_curriculum.v1"):
         load_snapshot_curriculum(manifest)
+
+
+def _stage_config_args(
+    *,
+    required_kills: int = 5,
+    terminate_on_required_kills: bool = False,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        endpoint="127.0.0.1:50051",
+        token=None,
+        agent_port=50051,
+        tls=False,
+        authority=None,
+        skill=2,
+        episode=1,
+        map=1,
+        seed=7,
+        run_id="stage-config-test",
+        goal_preset="exit_seeking",
+        target_x_fp=None,
+        target_y_fp=None,
+        max_steps=700,
+        level_complete_bonus=100.0,
+        kill_goal_bonus=10.0,
+        required_kills=required_kills,
+        memory_path=None,
+        reset_timeout_seconds=5.0,
+        reset_attempts=2,
+        reset_start_angle_degrees=None,
+        reset_start_face_nearest_enemy=False,
+        reset_start_health=None,
+        reset_start_armor=None,
+        reset_start_ammo_bullets=None,
+        reset_warmup_steps=0,
+        reset_warmup_max_tics=0,
+        reset_warmup_until_visible=False,
+        reset_warmup_until_shootable=False,
+        first_visible_bonus=0.0,
+        first_shootable_bonus=0.0,
+        visible_contact_progress_reward=0.0,
+        visible_contact_loss_penalty=0.0,
+        pre_shootable_route_penalty=0.0,
+        pre_required_kill_route_penalty=0.0,
+        exit_route_progress_reward=0.01,
+        exit_route_reached_reward=0.5,
+        exit_route_failure_penalty=0.05,
+        exit_ready_press_reward=0.0,
+        exit_ready_route_penalty=0.0,
+        terminate_on_first_visible=False,
+        terminate_on_first_shootable=False,
+        terminate_on_required_kills=terminate_on_required_kills,
+        allowed_skill=[],
+        strict_allowed_skills=False,
+    )
 
 
 def test_snapshot_restore_command_rendering_redacts_secrets():

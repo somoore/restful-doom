@@ -302,7 +302,7 @@ def _stage_from_record(
         snapshot["slot"] = int(save_slot)
         snapshot["ref"] = f"save_slot:{int(save_slot)}"
 
-    return {
+    stage = {
         "index": order,
         "name": f"{stage_slug}_snapshot",
         "note": _stage_note(selector),
@@ -321,6 +321,10 @@ def _stage_from_record(
             "transition": _compact_record_value(_record_info(record).get("transition")),
         },
     }
+    training = _stage_training(selector)
+    if training:
+        stage["training"] = training
+    return stage
 
 
 def _run_capture_command(
@@ -773,6 +777,16 @@ def _stage_note(selector: str) -> str:
         "level-transition": "Restore the trajectory state around level transition.",
     }
     return notes.get(selector, notes["explicit"])
+
+
+def _stage_training(selector: str) -> dict[str, Any]:
+    if selector == "pre-required-kill":
+        return {
+            "required_kills": 1,
+            "terminate_on_required_kills": True,
+            "purpose": "finish the last kill needed before post-combat routing",
+        }
+    return {}
 
 
 def _slug(value: str) -> str:

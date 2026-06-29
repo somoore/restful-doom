@@ -577,10 +577,16 @@ def _env_config_for_stage(
     max_steps: int | None = None,
 ) -> DoomEnvConfig:
     """Builds environment config with auditable curriculum metadata."""
+    training_overrides = _stage_training_overrides(curriculum_stage)
     return replace(
         _env_config_for_start(args, curriculum_stage.get("reset_start", {})),
         run_id=run_id,
         max_steps=args.max_steps if max_steps is None else int(max_steps),
+        required_kills=training_overrides.get("required_kills", args.required_kills),
+        terminate_on_required_kills=training_overrides.get(
+            "terminate_on_required_kills",
+            bool(getattr(args, "terminate_on_required_kills", False)),
+        ),
         curriculum=_curriculum_metadata(curriculum),
         curriculum_stage=dict(curriculum_stage),
         reset_mode="snapshot" if _stage_uses_snapshot(curriculum_stage) else "episode",
@@ -588,6 +594,21 @@ def _env_config_for_stage(
         if isinstance(curriculum_stage.get("snapshot"), dict)
         else None,
     )
+
+
+def _stage_training_overrides(curriculum_stage: dict[str, object]) -> dict[str, object]:
+    training = curriculum_stage.get("training")
+    if not isinstance(training, dict):
+        return {}
+    overrides: dict[str, object] = {}
+    required_kills = _positive_int(training.get("required_kills"))
+    if required_kills > 0:
+        overrides["required_kills"] = required_kills
+    if "terminate_on_required_kills" in training:
+        overrides["terminate_on_required_kills"] = bool(
+            training.get("terminate_on_required_kills")
+        )
+    return overrides
 
 
 async def _collect_curriculum_stage_rollout(
