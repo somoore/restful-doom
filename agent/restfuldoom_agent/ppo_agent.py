@@ -49,6 +49,8 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
         entropy_coef=args.entropy_coef,
         value_coef=args.value_coef,
         reference_kl_coef=float(getattr(args, "reference_kl_coef", 0.0)),
+        aux_bc_coef=float(getattr(args, "aux_bc_coef", 0.0)),
+        aux_bc_batch_size=int(getattr(args, "aux_bc_batch_size", 128)),
         update_epochs=args.update_epochs,
         minibatch_size=args.minibatch_size,
         hidden_size=args.hidden_size,
@@ -73,8 +75,17 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
             device=args.device,
         )
     reference_kl_coef = float(getattr(args, "reference_kl_coef", 0.0))
+    aux_bc_coef = float(getattr(args, "aux_bc_coef", 0.0))
+    aux_bc_batch_size = int(getattr(args, "aux_bc_batch_size", 128))
+    config_updates = {}
     if float(getattr(trainer.config, "reference_kl_coef", 0.0)) != reference_kl_coef:
-        trainer.config = replace(trainer.config, reference_kl_coef=reference_kl_coef)
+        config_updates["reference_kl_coef"] = reference_kl_coef
+    if float(getattr(trainer.config, "aux_bc_coef", 0.0)) != aux_bc_coef:
+        config_updates["aux_bc_coef"] = aux_bc_coef
+    if int(getattr(trainer.config, "aux_bc_batch_size", 128)) != aux_bc_batch_size:
+        config_updates["aux_bc_batch_size"] = aux_bc_batch_size
+    if config_updates:
+        trainer.config = replace(trainer.config, **config_updates)
     behavior_clone_summary = None
     if args.bc_trajectory:
         samples, behavior_clone_summary = _load_behavior_clone_samples(args)
@@ -85,6 +96,25 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                 minibatch_size=args.bc_batch_size,
                 learning_rate=args.bc_learning_rate,
             )
+        )
+    if aux_bc_coef > 0.0 and not getattr(args, "aux_bc_trajectory", []):
+        raise ValueError("--aux-bc-coef requires at least one --aux-bc-trajectory")
+    aux_behavior_clone_samples: list[tuple[list[float], int]] = []
+    aux_behavior_clone_summary = None
+    if getattr(args, "aux_bc_trajectory", []):
+        aux_behavior_clone_samples, aux_behavior_clone_summary = (
+            _load_behavior_clone_samples(
+                args,
+                trajectory_attr="aux_bc_trajectory",
+                max_samples_attr="aux_bc_max_samples",
+            )
+        )
+        aux_behavior_clone_summary.update(
+            {
+                "aux_bc_coef": aux_bc_coef,
+                "aux_bc_batch_size": aux_bc_batch_size,
+                "enabled": aux_bc_coef > 0.0,
+            }
         )
     reference_model = (
         trainer.clone_reference_model()
@@ -132,7 +162,11 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                     }
                 )
                 continue
-            metrics = trainer.update(buffer, reference_model=reference_model)
+            metrics = trainer.update(
+                buffer,
+                reference_model=reference_model,
+                behavior_clone_samples=aux_behavior_clone_samples,
+            )
             checkpoint_path = args.checkpoint_dir / f"{args.run_id}-ppo-{update_index:04d}.pt"
             checkpoint_extra = {
                 "buffer_path": str(buffer_path),
@@ -142,6 +176,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
                 "skill": args.skill,
                 "rollout_summary": rollout_summary,
                 "behavior_clone": behavior_clone_summary or {},
+                "aux_behavior_clone": aux_behavior_clone_summary or {},
                 "reset_start": curriculum_stage.get("reset_start", {}),
                 "curriculum": curriculum,
                 "curriculum_stage": curriculum_stage,
@@ -244,6 +279,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
         "run_id": args.run_id,
         "updates": summaries,
         "behavior_clone": behavior_clone_summary or {},
+        "aux_behavior_clone": aux_behavior_clone_summary or {},
         "reset_start": reset_start,
         "curriculum": curriculum,
         "resume_checkpoint": str(resume_checkpoint) if resume_checkpoint else None,
@@ -559,6 +595,9 @@ def _reward_config_from_args(args: argparse.Namespace) -> dict[str, object]:
         "kill_goal_bonus": args.kill_goal_bonus,
         "required_kills": args.required_kills,
         "reference_kl_coef": float(getattr(args, "reference_kl_coef", 0.0)),
+        "aux_bc_coef": float(getattr(args, "aux_bc_coef", 0.0)),
+        "aux_bc_batch_size": int(getattr(args, "aux_bc_batch_size", 128)),
+        "aux_bc_max_samples": int(getattr(args, "aux_bc_max_samples", 20000)),
         "first_visible_bonus": args.first_visible_bonus,
         "first_shootable_bonus": args.first_shootable_bonus,
         "visible_contact_progress_reward": args.visible_contact_progress_reward,
@@ -1937,13 +1976,17 @@ def _resolve_resume_checkpoint(
 
 def _load_behavior_clone_samples(
     args: argparse.Namespace,
+    *,
+    trajectory_attr: str = "bc_trajectory",
+    max_samples_attr: str = "bc_max_samples",
 ) -> tuple[list[tuple[list[float], int]], dict[str, object]]:
     samples: list[tuple[list[float], int]] = []
     label_counts: Counter[str] = Counter()
     mapped_counts: Counter[str] = Counter()
     skipped = 0
-    max_samples = max(1, int(args.bc_max_samples))
-    for path in args.bc_trajectory:
+    max_samples = max(1, int(getattr(args, max_samples_attr)))
+    trajectory_paths = [Path(path) for path in getattr(args, trajectory_attr)]
+    for path in trajectory_paths:
         with Path(path).open("r", encoding="utf-8") as handle:
             for line in handle:
                 if len(samples) >= max_samples:
@@ -1965,7 +2008,7 @@ def _load_behavior_clone_samples(
         raise ValueError("no usable behavior-cloning samples found")
     return samples, {
         "schema": "restfuldoom.ppo_behavior_clone.v1",
-        "trajectory_paths": [str(path) for path in args.bc_trajectory],
+        "trajectory_paths": [str(path) for path in trajectory_paths],
         "samples": len(samples),
         "skipped": skipped,
         "expert_skill_counts": dict(sorted(label_counts.items())),
@@ -1996,6 +2039,24 @@ def _behavior_clone_sample_from_record(
             "forced_skill"
         )
         label = str(skill) if skill else ACTION_SCHEMA["actions"][action]
+        return ([float(value) for value in obs], action, label)
+
+    obs = record.get("observation")
+    action = _int_or_none(record.get("action_index"))
+    if isinstance(obs, list) and action is not None:
+        if action < 0 or action >= len(ACTION_SCHEMA["actions"]):
+            return None
+        action_mask = record.get("action_mask")
+        if (
+            isinstance(action_mask, list)
+            and action < len(action_mask)
+            and not bool(action_mask[action])
+        ):
+            return None
+        skill = record.get("skill")
+        label = (
+            str(skill) if isinstance(skill, str) else ACTION_SCHEMA["actions"][action]
+        )
         return ([float(value) for value in obs], action, label)
 
     decision = record.get("metadata", {}).get("policy_decision", {})
@@ -2827,6 +2888,35 @@ def main() -> None:
     parser.add_argument("--bc-batch-size", type=int, default=128)
     parser.add_argument("--bc-learning-rate", type=float)
     parser.add_argument("--bc-max-samples", type=int, default=20000)
+    parser.add_argument(
+        "--aux-bc-trajectory",
+        type=Path,
+        action="append",
+        default=[],
+        help=(
+            "JSONL expert trace to replay as an auxiliary behavior-cloning loss "
+            "during every PPO update. Use this to preserve a known-good true-spawn "
+            "completion while training on restored bottlenecks."
+        ),
+    )
+    parser.add_argument(
+        "--aux-bc-coef",
+        type=float,
+        default=0.0,
+        help="Loss coefficient for --aux-bc-trajectory samples during PPO updates.",
+    )
+    parser.add_argument(
+        "--aux-bc-batch-size",
+        type=int,
+        default=128,
+        help="Per-minibatch auxiliary behavior-clone replay sample count.",
+    )
+    parser.add_argument(
+        "--aux-bc-max-samples",
+        type=int,
+        default=20000,
+        help="Maximum samples loaded from --aux-bc-trajectory files.",
+    )
     parser.add_argument("--resume-checkpoint", type=Path)
     parser.add_argument(
         "--resume-best-checkpoint",

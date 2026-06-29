@@ -1168,6 +1168,11 @@ def test_behavior_clone_loader_accepts_forced_option_records(tmp_path):
     samples, summary = _load_behavior_clone_samples(
         SimpleNamespace(bc_trajectory=[trajectory], bc_max_samples=16)
     )
+    aux_samples, aux_summary = _load_behavior_clone_samples(
+        SimpleNamespace(aux_bc_trajectory=[trajectory], aux_bc_max_samples=16),
+        trajectory_attr="aux_bc_trajectory",
+        max_samples_attr="aux_bc_max_samples",
+    )
 
     assert len(samples) == 1
     assert samples[0][1] == 8
@@ -1175,6 +1180,51 @@ def test_behavior_clone_loader_accepts_forced_option_records(tmp_path):
     assert summary["samples"] == 1
     assert summary["expert_skill_counts"] == {"close_visible_contact": 1}
     assert summary["ppo_skill_counts"] == {"close_visible_contact": 1}
+    assert aux_samples == samples
+    assert aux_summary["trajectory_paths"] == summary["trajectory_paths"]
+
+
+def test_behavior_clone_loader_accepts_ppo_eval_trace_records(tmp_path):
+    trajectory = tmp_path / "eval-trace.jsonl"
+    trajectory.write_text(
+        json.dumps(
+            {
+                "schema": "restfuldoom.ppo_eval_trace.v1",
+                "policy_id": "ppo:test",
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "observation": [0.5 for _ in OBSERVATION_SCHEMA["feature_names"]],
+                "action_index": 4,
+                "action_mask": [
+                    False,
+                    False,
+                    False,
+                    False,
+                    True,
+                    False,
+                    False,
+                    False,
+                    False,
+                ],
+                "skill": "advance_route",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    samples, summary = _load_behavior_clone_samples(
+        SimpleNamespace(bc_trajectory=[trajectory], bc_max_samples=16)
+    )
+
+    assert len(samples) == 1
+    assert samples[0][1] == 4
+    assert summary["skipped"] == 1
+    assert summary["expert_skill_counts"] == {"advance_route": 1}
+    assert summary["ppo_skill_counts"] == {"route_progression": 1}
 
 
 def test_curriculum_fixed_mode_repeats_start_index_stage():
@@ -3499,6 +3549,8 @@ def test_ppo_update_and_checkpoint_roundtrip(tmp_path):
             minibatch_size=4,
             rollout_steps=8,
             reference_kl_coef=0.25,
+            aux_bc_coef=0.5,
+            aux_bc_batch_size=3,
         ),
     )
 
@@ -3510,6 +3562,8 @@ def test_ppo_update_and_checkpoint_roundtrip(tmp_path):
     assert metrics["value_loss"] >= 0
     assert loaded.update_index == trainer.update_index
     assert loaded.config.reference_kl_coef == 0.25
+    assert loaded.config.aux_bc_coef == 0.5
+    assert loaded.config.aux_bc_batch_size == 3
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")
@@ -3548,6 +3602,41 @@ def test_ppo_update_reports_reference_kl_and_preserves_reference_model():
     assert trainer.update_index == 1
     for name, parameter in reference_model.state_dict().items():
         assert parameter.detach().equal(before[name])
+
+
+@pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")
+def test_ppo_update_reports_aux_behavior_clone_metrics():
+    buffer = RolloutBuffer()
+    for index in range(8):
+        buffer.add(
+            obs=[float(index % 2), 1.0],
+            action_mask=[True, True],
+            action=index % 2,
+            reward=1.0,
+            done=index == 7,
+            value=0.1,
+            logprob=-0.69,
+        )
+    trainer = PPOTrainer(
+        obs_dim=2,
+        action_dim=2,
+        config=PPOConfig(
+            update_epochs=1,
+            minibatch_size=4,
+            rollout_steps=8,
+            aux_bc_coef=0.75,
+            aux_bc_batch_size=4,
+        ),
+    )
+    samples = [([1.0, 0.0], 0) for _ in range(4)] + [
+        ([0.0, 1.0], 1) for _ in range(4)
+    ]
+
+    metrics = trainer.update(buffer, behavior_clone_samples=samples)
+
+    assert metrics["aux_bc_loss"] > 0.0
+    assert 0.0 <= metrics["aux_bc_accuracy"] <= 1.0
+    assert trainer.update_index == 1
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch is not installed")

@@ -41,6 +41,8 @@ class PPOConfig:
     entropy_coef: float = 0.01
     value_coef: float = 0.5
     reference_kl_coef: float = 0.0
+    aux_bc_coef: float = 0.0
+    aux_bc_batch_size: int = 128
     max_grad_norm: float = 0.5
     update_epochs: int = 4
     minibatch_size: int = 128
@@ -327,12 +329,21 @@ class PPOTrainer:
         buffer: RolloutBuffer,
         *,
         reference_model: Any | None = None,
+        behavior_clone_samples: list[tuple[list[float], int]] | None = None,
     ) -> dict[str, float]:
         """Runs PPO epochs over a collected rollout buffer."""
         tensors = buffer.tensors(config=self.config, device=self.device)
         if reference_model is not None:
             reference_model.to(self.device)
             reference_model.eval()
+        aux_bc_tensors = None
+        if behavior_clone_samples and self.config.aux_bc_coef > 0.0:
+            aux_bc_tensors = _behavior_clone_tensors(
+                behavior_clone_samples,
+                obs_dim=self.obs_dim,
+                action_dim=self.action_dim,
+                device=self.device,
+            )
         count = len(buffer)
         indices = torch.arange(count, device=self.device)
         metrics = {
@@ -341,6 +352,8 @@ class PPOTrainer:
             "entropy": 0.0,
             "approx_kl": 0.0,
             "reference_kl": 0.0,
+            "aux_bc_loss": 0.0,
+            "aux_bc_accuracy": 0.0,
         }
         batches = 0
         for _ in range(self.config.update_epochs):
@@ -377,11 +390,36 @@ class PPOTrainer:
                     reference_kl = (
                         reference_probs * (reference_log_probs - current_log_probs)
                     ).sum(dim=-1).mean()
+                aux_bc_loss = torch.tensor(0.0, device=self.device)
+                aux_bc_accuracy = torch.tensor(0.0, device=self.device)
+                if aux_bc_tensors is not None:
+                    aux_count = int(aux_bc_tensors["actions"].shape[0])
+                    aux_batch_size = min(
+                        max(1, int(self.config.aux_bc_batch_size)),
+                        aux_count,
+                    )
+                    aux_indices = torch.randint(
+                        0,
+                        aux_count,
+                        (aux_batch_size,),
+                        device=self.device,
+                    )
+                    aux_logits, _aux_values = self.model(
+                        aux_bc_tensors["obs"][aux_indices]
+                    )
+                    aux_actions = aux_bc_tensors["actions"][aux_indices]
+                    aux_bc_loss = nn.functional.cross_entropy(aux_logits, aux_actions)
+                    with torch.no_grad():
+                        aux_predictions = torch.argmax(aux_logits, dim=-1)
+                        aux_bc_accuracy = (
+                            aux_predictions == aux_actions
+                        ).float().mean()
                 loss = (
                     policy_loss
                     + self.config.value_coef * value_loss
                     - self.config.entropy_coef * entropy
                     + self.config.reference_kl_coef * reference_kl
+                    + self.config.aux_bc_coef * aux_bc_loss
                 )
 
                 self.optimizer.zero_grad()
@@ -396,6 +434,8 @@ class PPOTrainer:
                 metrics["entropy"] += float(entropy.item())
                 metrics["approx_kl"] += float(approx_kl.item())
                 metrics["reference_kl"] += float(reference_kl.item())
+                metrics["aux_bc_loss"] += float(aux_bc_loss.item())
+                metrics["aux_bc_accuracy"] += float(aux_bc_accuracy.item())
                 batches += 1
 
         self.update_index += 1
@@ -802,6 +842,37 @@ def _action_mask_tensor(
             row = [True for _ in range(width)]
         normalized.append(row)
     return torch.tensor(normalized, dtype=torch.bool, device=device)
+
+
+def _behavior_clone_tensors(
+    samples: list[tuple[list[float], int]],
+    *,
+    obs_dim: int,
+    action_dim: int,
+    device: str | Any = "cpu",
+) -> dict[str, Any]:
+    """Convert auxiliary behavior-clone samples into model-ready tensors."""
+    require_torch()
+    observations: list[list[float]] = []
+    actions: list[int] = []
+    for features, action in samples:
+        action_index = int(action)
+        if action_index < 0 or action_index >= action_dim:
+            raise ValueError(
+                "behavior-clone sample action is outside PPO action space: "
+                f"{action_index}"
+            )
+        row = [float(value) for value in features[:obs_dim]]
+        if len(row) < obs_dim:
+            row.extend([0.0] * (obs_dim - len(row)))
+        observations.append(row)
+        actions.append(action_index)
+    if not observations:
+        raise ValueError("cannot apply auxiliary behavior cloning without samples")
+    return {
+        "obs": torch.tensor(observations, dtype=torch.float32, device=device),
+        "actions": torch.tensor(actions, dtype=torch.long, device=device),
+    }
 
 
 def _masked_logits(logits: Any, action_masks: Any) -> Any:
