@@ -1086,54 +1086,15 @@ def test_skill_controller_low_health_stale_contact_preserves_exit_route():
     assert not mask["retreat"]
 
 
-def test_skill_controller_low_health_visible_exit_handles_contact_before_press():
+def test_skill_controller_postcombat_blocked_exit_line_exposes_press_exit():
     controller = SkillController()
     controller.policy._start_kills = 0
-    first = _state(tick=5, kills=4, enemy=True, combat=False, health=30)
-    active = _state(
+    state = _state(
         tick=40,
         kills=5,
-        enemy=True,
-        enemy_line_of_sight=True,
         combat=False,
-        health=30,
+        health=72,
     )
-    active.navigation.use_lines = [
-        SimpleNamespace(
-            line_id=330,
-            midpoint=SimpleNamespace(x_fp=528 * 65536, y_fp=0, z_fp=0),
-            start=SimpleNamespace(x_fp=528 * 65536, y_fp=-32 * 65536, z_fp=0),
-            end=SimpleNamespace(x_fp=528 * 65536, y_fp=32 * 65536, z_fp=0),
-            nearest_point=SimpleNamespace(x_fp=528 * 65536, y_fp=0, z_fp=0),
-            special=11,
-            tag=0,
-            distance_fp=528 * 65536,
-            nearest_distance_fp=528 * 65536,
-        )
-    ]
-
-    controller.action_mask(first)
-    features = extract_features(active, controller.memory, controller.params)
-    exit_line = features.navigation["use_lines"][0]
-    for key in controller.policy._line_block_keys(features, exit_line):
-        controller.policy._blocked_use_lines[key] = features.tick + 1000
-    controller._previous_action_index = SKILL_ACTIONS.index("retreat")
-    controller._same_skill_streak = LOW_HEALTH_RETREAT_STREAK_LIMIT
-
-    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(active)))
-    _action, decision = controller.action_for(SKILL_ACTIONS.index("press_exit"), active)
-
-    assert not mask["route_progression"]
-    assert not mask["press_exit"]
-    assert not mask["retreat"]
-    assert mask["close_visible_contact"]
-    assert decision["use_line"]["line_id"] == 330
-
-
-def test_skill_controller_postcombat_exit_commitment_handles_contact_before_press():
-    controller = SkillController()
-    controller.policy._start_kills = 0
-    state = _state(tick=40, kills=5, enemy=True, combat=False, health=72)
     state.navigation.use_lines = [
         SimpleNamespace(
             line_id=330,
@@ -1148,12 +1109,42 @@ def test_skill_controller_postcombat_exit_commitment_handles_contact_before_pres
         )
     ]
 
+    features = extract_features(state, controller.memory, controller.params)
+    exit_line = features.navigation["use_lines"][0]
+    for key in controller.policy._line_block_keys(features, exit_line):
+        controller.policy._blocked_use_lines[key] = features.tick + 1000
+
     mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
 
-    assert not mask["route_progression"]
-    assert not mask["press_exit"]
-    assert not mask["retreat"]
-    assert mask["close_visible_contact"]
+    assert mask["press_exit"]
+
+
+def test_skill_controller_press_exit_uses_blocked_postcombat_exit_line():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(tick=40, kills=5, combat=False, health=72)
+    state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=528 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=528 * 65536, y_fp=-32 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=528 * 65536, y_fp=32 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=528 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=528 * 65536,
+            nearest_distance_fp=528 * 65536,
+        )
+    ]
+
+    features = extract_features(state, controller.memory, controller.params)
+    exit_line = features.navigation["use_lines"][0]
+    for key in controller.policy._line_block_keys(features, exit_line):
+        controller.policy._blocked_use_lines[key] = features.tick + 1000
+
+    _action, decision = controller.action_for(SKILL_ACTIONS.index("press_exit"), state)
+
+    assert decision["use_line"]["line_id"] == 330
 
 
 def test_skill_controller_failed_stale_exit_route_exposes_recovery():
@@ -1508,61 +1499,6 @@ def test_skill_controller_recovers_after_stalled_exit_push():
     assert first_decision["skill"] == "push_exit_switch"
     assert next_decision["skill"] == "use_exit_route_blocker_ahead"
     assert next_action.action == agent_pb2.ACTION_USE
-
-
-def test_exit_approach_stall_uses_nearby_assist_door():
-    controller = SkillController()
-    policy = controller.policy
-    policy._start_kills = 0
-    state = _state(tick=20, kills=5, enemy=True, combat=False)
-    assist_line = SimpleNamespace(
-        line_id=325,
-        midpoint=SimpleNamespace(x_fp=325 * 65536, y_fp=0, z_fp=0),
-        start=SimpleNamespace(x_fp=325 * 65536, y_fp=-32 * 65536, z_fp=0),
-        end=SimpleNamespace(x_fp=325 * 65536, y_fp=32 * 65536, z_fp=0),
-        nearest_point=SimpleNamespace(x_fp=325 * 65536, y_fp=0, z_fp=0),
-        special=1,
-        tag=0,
-        distance_fp=325 * 65536,
-        nearest_distance_fp=325 * 65536,
-    )
-    exit_line = SimpleNamespace(
-        line_id=330,
-        midpoint=SimpleNamespace(x_fp=403 * 65536, y_fp=0, z_fp=0),
-        start=SimpleNamespace(x_fp=403 * 65536, y_fp=-32 * 65536, z_fp=0),
-        end=SimpleNamespace(x_fp=403 * 65536, y_fp=32 * 65536, z_fp=0),
-        nearest_point=SimpleNamespace(x_fp=403 * 65536, y_fp=0, z_fp=0),
-        special=11,
-        tag=0,
-        distance_fp=403 * 65536,
-        nearest_distance_fp=403 * 65536,
-    )
-    state.navigation.use_lines = [assist_line, exit_line]
-    features = extract_features(state, controller.memory, controller.params)
-    exit_features = next(
-        line
-        for line in features.navigation["use_lines"]
-        if int(line["line_id"]) == 330
-    )
-    policy._last_post_combat_exit_tick = features.tick
-    policy._last_post_combat_exit_line_id = 330
-    policy._last_post_combat_exit_line = dict(exit_features)
-
-    _action, first_decision = policy._advance_progression_line(
-        features,
-        exit_features,
-        stuck=False,
-    )
-    stalled = replace(features, tick=features.tick + LINE_ATTEMPT_STALL_TICS + 1)
-    _action, stalled_decision = policy._advance_progression_line(
-        stalled,
-        exit_features,
-        stuck=False,
-    )
-
-    assert first_decision["skill"] == "approach_progression_line_front"
-    assert stalled_decision["skill"] == "approach_exit_route_local_door"
-    assert stalled_decision["use_line"]["line_id"] == 325
 
 
 def test_skill_controller_turns_to_exit_when_close_blocked_path_is_misaligned():

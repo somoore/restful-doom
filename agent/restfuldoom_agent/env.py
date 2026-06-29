@@ -581,22 +581,20 @@ class SkillController:
             features.health <= self.params.retreat_health
             and (features.visible_enemies or recent_contact_active)
         )
-        exit_commitment_line = (
-            self._exit_commitment_line(features)
-            if int(features.kills) >= POST_COMBAT_EXIT_KILLS and not can_fire
-            else None
-        )
         postcombat_route_available = (
             int(features.kills) >= POST_COMBAT_EXIT_KILLS
+            and not features.visible_enemies
             and not can_fire
-            and (low_health_contact or exit_commitment_line is not None)
+            and low_health_contact
         )
         if postcombat_route_available:
             progression_line = self.policy._select_progression_line(features)
-            postcombat_route_available = (
-                exit_commitment_line is not None
-                or (not features.visible_enemies and progression_line is not None)
-            )
+            postcombat_route_available = progression_line is not None
+        exit_commitment_line = (
+            self._exit_commitment_line(features)
+            if low_health_contact and not features.visible_enemies and not can_fire
+            else None
+        )
         if low_health_contact and self._low_health_retreat_allowed(
             features,
             recent_contact_active=recent_contact_active,
@@ -622,7 +620,6 @@ class SkillController:
             contact_line = self._contact_use_line(features)
             if (
                 not can_fire
-                and not postcombat_route_available
                 and shootable is None
                 and contact_line is not None
                 and self._contact_use_line_ready_for_visible_contact(features, contact_line)
@@ -633,11 +630,8 @@ class SkillController:
                 default=99999.0,
             )
             if (
-                not postcombat_route_available
-                and (
-                    features.health <= self.params.retreat_health
-                    or (not can_fire and nearest_visible <= self.params.close_enemy_units)
-                )
+                features.health <= self.params.retreat_health
+                or (not can_fire and nearest_visible <= self.params.close_enemy_units)
             ):
                 mask["retreat"] = True
         elif recent_contact_active:
@@ -676,12 +670,6 @@ class SkillController:
             features,
             progression_line,
         )
-        exit_commitment_needs_visible_contact = (
-            exit_commitment_line is not None
-            and bool(features.visible_enemies)
-            and not self._exit_press_ready(features, exit_commitment_line)
-        )
-
         if (
             not can_fire
             and not recent_contact_active
@@ -701,11 +689,7 @@ class SkillController:
         ):
             mask["open_use_line"] = True
 
-        if exit_commitment_needs_visible_contact:
-            pass
-        elif exit_commitment_line is not None and not can_fire:
-            mask["route_progression"] = True
-        elif exit_route_recovery:
+        if exit_route_recovery:
             mask["route_progression"] = True
             mask["recover_stuck"] = True
         elif stale_route_recovery:
@@ -831,14 +815,7 @@ class SkillController:
             return True
         if int(line.get("special", 0)) not in EXIT_LINE_SPECIALS:
             return False
-        if self.policy._shootable_enemy(features) is not None:
-            return False
-        if features.visible_enemies and not self._postcombat_exit_recovery_allowed(
-            features,
-            line,
-        ):
-            return False
-        if features.visible_enemies:
+        if self.policy._shootable_enemy(features) is not None or features.visible_enemies:
             return False
         if int(features.kills) < POST_COMBAT_EXIT_KILLS:
             return False
@@ -1035,7 +1012,9 @@ class SkillController:
             )
 
         if skill == "route_progression":
-            line = self._exit_press_candidate(features)
+            line = self.policy._select_local_exit_line(features)
+            if line is None:
+                line = self.policy._last_post_combat_exit_line_target(features)
             if line is not None:
                 return self.policy._advance_progression_line(features, line, stuck)
             line = self.policy._select_progression_line(features)
@@ -1302,7 +1281,13 @@ class SkillController:
 
     def _exit_commitment_line(self, features: Any) -> dict[str, Any] | None:
         """Returns an exit line that should remain available after stale contact."""
-        line = self._exit_press_candidate(features)
+        line = self.policy._select_local_exit_line(features)
+        if _line_is_exit(line):
+            return line
+        line = self.policy._last_post_combat_exit_line_target(features)
+        if _line_is_exit(line):
+            return line
+        line = self.policy._select_progression_line(features)
         if _line_is_exit(line):
             return line
         return None
@@ -1467,6 +1452,7 @@ class DoomAgentEnv:
             self._last_episode_reset = None
             state = await self._reset_from_snapshot()
         elif self.config.reset_mode == "episode":
+            await self._reset_episode_stream()
             await self._ensure_stream()
             state = await self._reset_with_retries(reset_seed)
         else:
@@ -1496,6 +1482,19 @@ class DoomAgentEnv:
         self._episode_seen_visible_enemy = _has_visible_enemy(state)
         self._episode_seen_shootable_enemy = _has_shootable_enemy(state)
         return self.controller.observation(state)
+
+    async def _reset_episode_stream(self) -> None:
+        """Reopens live streams so fresh-spawn evals do not inherit queued actions."""
+        if self._action_queue is not None:
+            try:
+                self._action_queue.put_nowait(None)
+            except asyncio.QueueFull:
+                pass
+        if self.client is not None and self._owns_client:
+            await self.client.close()
+            self.client = None
+        self._state_stream = None
+        self._action_queue = None
 
     def _build_reset_context(
         self,
