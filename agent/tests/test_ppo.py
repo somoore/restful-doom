@@ -1616,6 +1616,7 @@ def test_rollout_summary_counts_first_contact_events():
             "visible_contact_progress_reward": 0.16,
             "visible_contact_loss_penalty": -0.5,
             "pre_shootable_route_penalty": -0.25,
+            "pre_required_kill_route_penalty": -0.3,
             "transition": {},
             "state": {"health": 100, "kills": 0},
         },
@@ -1639,6 +1640,7 @@ def test_rollout_summary_counts_first_contact_events():
             "visible_contact_progress_reward": 0.08,
             "visible_contact_loss_penalty": 0.0,
             "pre_shootable_route_penalty": 0.0,
+            "pre_required_kill_route_penalty": 0.0,
             "transition": {},
             "state": {"health": 100, "kills": 0},
         },
@@ -1662,6 +1664,7 @@ def test_rollout_summary_counts_first_contact_events():
             "visible_contact_progress_reward": 0.0,
             "visible_contact_loss_penalty": -0.25,
             "pre_shootable_route_penalty": 0.0,
+            "pre_required_kill_route_penalty": -0.2,
             "transition": {},
             "state": {"health": 100, "kills": 0},
         },
@@ -1681,6 +1684,7 @@ def test_rollout_summary_counts_first_contact_events():
     assert summary["visible_contact_progress_reward"] == 0.24
     assert summary["visible_contact_loss_penalty"] == -0.75
     assert summary["pre_shootable_route_penalty"] == -0.25
+    assert summary["pre_required_kill_route_penalty"] == -0.5
 
 
 def test_checkpoint_selection_score_prefers_damage_contact_and_fire():

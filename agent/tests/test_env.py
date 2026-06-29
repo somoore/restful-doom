@@ -1984,6 +1984,67 @@ def test_doom_agent_env_penalizes_route_progression_before_first_shootable():
     assert step.reward == pytest.approx(-0.4)
 
 
+def test_doom_agent_env_penalizes_route_progression_before_required_kills():
+    first = _state(tick=1, kills=2, route=True, x_units=0)
+    second = _state(tick=2, kills=2, route=True, x_units=128)
+    client = _DurationAwareFakeClient([first, second])
+    env = DoomAgentEnv(
+        DoomEnvConfig(
+            max_steps=10,
+            goal_preset="custom",
+            max_action_tics=1,
+            required_kills=5,
+            route_progress_reward=0.0,
+            pre_required_kill_route_penalty=0.7,
+        ),
+        client=client,
+        controller=SkillController(),
+    )
+
+    async def run():
+        await env.reset(seed=5)
+        step = await env.step(SKILL_ACTIONS.index("route_progression"))
+        await env.close()
+        return step
+
+    step = asyncio.run(run())
+
+    assert step.info["route_outcome"]["attempted"]
+    assert step.info["pre_required_kill_route_penalty"] == pytest.approx(-0.7)
+    assert step.info["route_action_reward"] == pytest.approx(-0.7)
+    assert step.reward == pytest.approx(-0.7)
+
+
+def test_doom_agent_env_allows_route_progression_after_required_kills():
+    first = _state(tick=1, kills=0, route=True, x_units=0)
+    second = _state(tick=2, kills=5, route=True, x_units=128)
+    client = _DurationAwareFakeClient([first, second])
+    env = DoomAgentEnv(
+        DoomEnvConfig(
+            max_steps=10,
+            goal_preset="custom",
+            max_action_tics=1,
+            required_kills=5,
+            route_progress_reward=0.0,
+            pre_required_kill_route_penalty=0.7,
+        ),
+        client=client,
+        controller=SkillController(),
+    )
+
+    async def run():
+        await env.reset(seed=5)
+        step = await env.step(SKILL_ACTIONS.index("route_progression"))
+        await env.close()
+        return step
+
+    step = asyncio.run(run())
+
+    assert step.info["route_outcome"]["attempted"]
+    assert step.info["pre_required_kill_route_penalty"] == 0.0
+    assert step.info["route_action_reward"] == 0.0
+
+
 def test_doom_agent_env_shapes_exit_ready_handoff_without_forcing_skill():
     def exit_ready_state(tick):
         state = _state(tick=tick, kills=1)
