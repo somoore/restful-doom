@@ -296,6 +296,8 @@ def test_snapshot_builder_selects_gate_b_failure_anchors(tmp_path):
     assert pre_required["name"] == "0001-pre-required-kill_snapshot"
     assert pre_required["expected_state"]["kills"] == 4
     assert pre_required["expected_state"]["health"] == 30
+    assert "shootable_target" not in pre_required["expected_state"]
+    assert "target_is_enemy" not in pre_required["expected_state"]
     assert pre_required["training"] == {
         "purpose": "finish the last kill needed before post-combat routing",
         "required_kills": 1,
@@ -308,6 +310,8 @@ def test_snapshot_builder_selects_gate_b_failure_anchors(tmp_path):
     assert post_required_low_health["expected_state"]["kills"] == 5
     assert post_required_low_health["expected_state"]["health"] == 42
     assert post_required_low_health["expected_state"]["visible_enemy"] is True
+    assert "shootable_target" not in post_required_low_health["expected_state"]
+    assert "target_is_enemy" not in post_required_low_health["expected_state"]
     assert low_health_route["name"] == "0003-post-combat-low-health-exit-route_snapshot"
     assert low_health_route["evidence"]["selectors"] == [
         "post-combat-exit-route",

@@ -309,7 +309,7 @@ def _stage_from_record(
         "validated": False,
         "reset_start": _reset_start_from_state(state),
         "snapshot": snapshot,
-        "expected_state": _expected_state(record),
+        "expected_state": _expected_state(record, selector=selector),
         "evidence": {
             "schema": "restfuldoom.snapshot_stage_evidence.v1",
             "trajectory_jsonl": str(trajectory),
@@ -462,7 +462,11 @@ def _policy_skill(record: dict[str, Any]) -> str | None:
     return info_skill if isinstance(info_skill, str) else None
 
 
-def _expected_state(record: dict[str, Any]) -> dict[str, Any]:
+def _expected_state(
+    record: dict[str, Any],
+    *,
+    selector: str = "explicit",
+) -> dict[str, Any]:
     state = _record_state(record)
     expected: dict[str, Any] = {}
     for key in (
@@ -481,9 +485,14 @@ def _expected_state(record: dict[str, Any]) -> dict[str, Any]:
     if "position_fp" in state:
         expected["position_fp"] = state["position_fp"]
     expected["visible_enemy"] = _has_visible_enemy(record)
-    expected["shootable_target"] = _has_shootable_target(record)
+    verify_combat_target = selector not in {
+        "pre-required-kill",
+        "post-required-kill-low-health",
+    }
+    if verify_combat_target:
+        expected["shootable_target"] = _has_shootable_target(record)
     combat = state.get("combat")
-    if isinstance(combat, dict) and "target_is_enemy" in combat:
+    if verify_combat_target and isinstance(combat, dict) and "target_is_enemy" in combat:
         expected["target_is_enemy"] = bool(combat.get("target_is_enemy"))
     route = _route_waypoint(record)
     if route:
