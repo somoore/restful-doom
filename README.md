@@ -938,9 +938,11 @@ structured skills available under the strict mask.
 For multi-seed failures that reach contact but split between combat and
 post-combat survival, capture curriculum-only anchors with
 `--auto pre-required-kill` for the one-kill-short combat state and
-`--auto post-combat-low-health-exit-route` for low-health exit-route states.
-Those restored anchors are allowed for bottleneck training and regression
-anchors only; they never count as promotion evidence.
+`--auto post-required-kill-low-health` for low-health states after the kill
+threshold. Use `--auto post-combat-low-health-exit-route` when the low-health
+state also satisfies the no-visible-enemy exit-route predicate. Those restored
+anchors are allowed for bottleneck training and regression anchors only; they
+never count as promotion evidence.
 Eval aggregates also include `mean_item_gain`, `mean_secret_gain`, and
 `reset_source_breakdown`, which separates `snapshot_restore` outcomes from
 fresh-reset outcomes and carries the same route diagnostic totals per reset

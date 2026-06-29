@@ -26,6 +26,7 @@ AUTO_SELECTORS = frozenset(
         "first-kill",
         "pre-required-kill",
         "post-combat",
+        "post-required-kill-low-health",
         "post-combat-exit-route",
         "post-combat-low-health-exit-route",
         "level-transition",
@@ -243,6 +244,14 @@ def _first_matching_record(
         if selector == "post-combat" and _is_post_combat(
             record,
             min_kills=post_combat_kills,
+        ):
+            return entry
+        if (
+            selector == "post-required-kill-low-health"
+            and _is_post_required_kill_low_health(
+                record,
+                min_kills=post_combat_kills,
+            )
         ):
             return entry
         if selector == "post-combat-exit-route" and _is_post_combat_exit_route(
@@ -575,6 +584,22 @@ def _is_pre_required_kill(
     return required > 1 and kills == required - 1
 
 
+def _is_post_required_kill_low_health(
+    record: dict[str, Any],
+    *,
+    min_kills: int = POST_COMBAT_KILL_THRESHOLD,
+) -> bool:
+    state = _record_state(record)
+    kills = _int_or_none(state.get("kills"))
+    health = _int_or_none(state.get("health"))
+    return (
+        kills is not None
+        and kills >= int(min_kills)
+        and health is not None
+        and health <= POST_COMBAT_EXIT_ROUTE_LOW_HEALTH
+    )
+
+
 def _is_post_combat_exit_route(
     record: dict[str, Any],
     *,
@@ -736,6 +761,9 @@ def _stage_note(selector: str) -> str:
             "Restore the first trajectory state one kill short of the post-combat threshold."
         ),
         "post-combat": "Restore the first trajectory state after the post-combat kill threshold.",
+        "post-required-kill-low-health": (
+            "Restore the first low-health state after the post-combat kill threshold."
+        ),
         "post-combat-exit-route": (
             "Restore the first post-combat state with an exit route waypoint."
         ),

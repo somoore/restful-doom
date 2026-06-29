@@ -260,7 +260,7 @@ def test_snapshot_builder_selects_gate_b_failure_anchors(tmp_path):
         [
             _trajectory_row(0, visible=True, shootable=True, kills=3),
             _trajectory_row(1, visible=True, shootable=False, kills=4, health=30),
-            _trajectory_row(2, visible=False, shootable=False, kills=5, health=80),
+            _trajectory_row(2, visible=True, shootable=False, kills=5, health=42),
             _trajectory_row(
                 3,
                 visible=False,
@@ -279,6 +279,7 @@ def test_snapshot_builder_selects_gate_b_failure_anchors(tmp_path):
         name="gate-b-failures",
         auto_selectors=[
             "pre-required-kill",
+            "post-required-kill-low-health",
             "post-combat-exit-route",
             "post-combat-low-health-exit-route",
         ],
@@ -288,12 +289,20 @@ def test_snapshot_builder_selects_gate_b_failure_anchors(tmp_path):
 
     assert [stage["evidence"]["source_record_index"] for stage in manifest["stages"]] == [
         1,
+        2,
         3,
     ]
-    pre_required, low_health_route = manifest["stages"]
+    pre_required, post_required_low_health, low_health_route = manifest["stages"]
     assert pre_required["name"] == "0001-pre-required-kill_snapshot"
     assert pre_required["expected_state"]["kills"] == 4
     assert pre_required["expected_state"]["health"] == 30
+    assert (
+        post_required_low_health["name"]
+        == "0002-post-required-kill-low-health_snapshot"
+    )
+    assert post_required_low_health["expected_state"]["kills"] == 5
+    assert post_required_low_health["expected_state"]["health"] == 42
+    assert post_required_low_health["expected_state"]["visible_enemy"] is True
     assert low_health_route["name"] == "0003-post-combat-low-health-exit-route_snapshot"
     assert low_health_route["evidence"]["selectors"] == [
         "post-combat-exit-route",
@@ -302,7 +311,7 @@ def test_snapshot_builder_selects_gate_b_failure_anchors(tmp_path):
     assert low_health_route["expected_state"]["kills"] == 5
     assert low_health_route["expected_state"]["health"] == 42
     assert low_health_route["expected_state"]["route_waypoint_exit"] is True
-    assert low_health_route["snapshot"]["ref"] == "save_slot:2"
+    assert low_health_route["snapshot"]["ref"] == "save_slot:3"
 
 
 def test_snapshot_validation_checks_required_artifacts_and_digests(tmp_path):
@@ -502,6 +511,7 @@ def test_native_snapshot_capture_tracker_matches_gate_b_failure_anchors():
     tracker = SnapshotMilestoneTracker(
         (
             "pre-required-kill",
+            "post-required-kill-low-health",
             "post-combat-exit-route",
             "post-combat-low-health-exit-route",
         ),
@@ -515,9 +525,13 @@ def test_native_snapshot_capture_tracker_matches_gate_b_failure_anchors():
         _trajectory_row(1, visible=True, shootable=False, kills=4, health=30)
     )
     tracker.mark_captured(one_short)
+    post_threshold_low_health = tracker.observe(
+        _trajectory_row(2, visible=True, shootable=False, kills=5, health=42)
+    )
+    tracker.mark_captured(post_threshold_low_health)
     high_health_route = tracker.observe(
         _trajectory_row(
-            2,
+            3,
             visible=False,
             shootable=False,
             kills=5,
@@ -529,7 +543,7 @@ def test_native_snapshot_capture_tracker_matches_gate_b_failure_anchors():
     tracker.mark_captured(high_health_route)
     low_health_route = tracker.observe(
         _trajectory_row(
-            3,
+            4,
             visible=False,
             shootable=False,
             kills=5,
@@ -542,6 +556,7 @@ def test_native_snapshot_capture_tracker_matches_gate_b_failure_anchors():
 
     assert early == []
     assert one_short == ["pre-required-kill"]
+    assert post_threshold_low_health == ["post-required-kill-low-health"]
     assert high_health_route == ["post-combat-exit-route"]
     assert low_health_route == ["post-combat-low-health-exit-route"]
     assert tracker.complete is True

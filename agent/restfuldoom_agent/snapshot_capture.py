@@ -45,6 +45,7 @@ from .snapshot_builder import (
     _is_post_combat,
     _is_post_combat_exit_route,
     _is_post_combat_low_health_exit_route,
+    _is_post_required_kill_low_health,
     _is_pre_required_kill,
     _int_or_none,
     _kill_delta,
@@ -164,6 +165,14 @@ class SnapshotMilestoneTracker:
             elif selector == "post-combat" and _is_post_combat(
                 record,
                 min_kills=self.post_combat_kills,
+            ):
+                matches.append(selector)
+            elif (
+                selector == "post-required-kill-low-health"
+                and _is_post_required_kill_low_health(
+                    record,
+                    min_kills=self.post_combat_kills,
+                )
             ):
                 matches.append(selector)
             elif (
