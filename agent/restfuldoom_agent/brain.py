@@ -2223,6 +2223,24 @@ class BrainPolicy:
             local_door = self._select_exit_route_local_manual_line(features, line)
             if local_door is not None:
                 return self._use_exit_route_local_manual_line(features, local_door, stuck)
+            if (
+                features.kills >= POST_COMBAT_EXIT_KILLS
+                and self._exit_push_stalled(features, line, distance)
+            ):
+                assist_door = self._select_exit_assist_door(features, line)
+                if assist_door is not None:
+                    if int(assist_door.get("special", 0)) == 1:
+                        return self._use_exit_route_local_manual_line(
+                            features,
+                            assist_door,
+                            stuck,
+                        )
+                    return self._use_nearby_line(features, assist_door, stuck)
+                return self._recover_stalled_exit_push(
+                    features,
+                    line_record,
+                    angle_delta,
+                )
             if self._exit_assist_preemption_allowed(features, line):
                 assist_door = self._select_exit_assist_door(features, line)
                 if assist_door is not None:
