@@ -2432,6 +2432,28 @@ class BrainPolicy:
                 front_pulse_distance = USE_LINE_ACTIVATE_DISTANCE_UNITS
             if (
                 int(features.kills) >= POST_COMBAT_EXIT_KILLS
+                and distance <= activate_distance + 32.0
+                and front_distance <= 8.0
+                and abs(front_angle_delta) <= 30
+            ):
+                self._last_use_tick = features.tick
+                return (
+                    raw_ticcmd_action(
+                        buttons=BT_USE,
+                        forward_move=4,
+                        angle_turn=raw_turn_for_delta(front_angle_delta),
+                        duration_tics=1,
+                        tick=features.tick,
+                    ),
+                    self._decision(
+                        "press_exit_front_point",
+                        features,
+                        stuck=stuck,
+                        use_line=line_record,
+                    ),
+                )
+            if (
+                int(features.kills) >= POST_COMBAT_EXIT_KILLS
                 and distance <= 224.0
                 and front_distance <= max(
                     activate_distance,
@@ -2585,6 +2607,30 @@ class BrainPolicy:
             special in EXIT_LINE_SPECIALS
             and distance <= activate_distance
         ):
+            front_distance = float(line.get("front_distance", 999999.0))
+            front_angle_delta = float(line.get("front_angle_delta", angle_delta))
+            if (
+                int(features.kills) >= POST_COMBAT_EXIT_KILLS
+                and int(line.get("side", 0)) == 0
+                and front_distance <= activate_distance
+                and front_distance >= 20.0
+                and abs(front_angle_delta) >= 120.0
+                and features.navigation.get("back_open", False)
+            ):
+                return (
+                    raw_ticcmd_action(
+                        forward_move=-max(4, self.params.retreat_amount),
+                        angle_turn=raw_turn_for_delta(angle_delta),
+                        duration_tics=4,
+                        tick=features.tick,
+                    ),
+                    self._decision(
+                        "recover_exit_switch_front_side",
+                        features,
+                        stuck=stuck,
+                        use_line=line_record,
+                    ),
+                )
             if abs(angle_delta) > 18:
                 return (
                     semantic_action(
@@ -2604,7 +2650,7 @@ class BrainPolicy:
             return (
                 raw_ticcmd_action(
                     buttons=BT_USE,
-                    forward_move=max(4, self.params.move_amount // 2),
+                    forward_move=self.params.move_amount,
                     angle_turn=raw_turn_for_delta(angle_delta),
                     duration_tics=1,
                     tick=features.tick,

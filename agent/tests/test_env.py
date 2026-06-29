@@ -2151,6 +2151,77 @@ def test_skill_controller_postcombat_exit_commitment_suppresses_stale_contact_wo
     assert not mask["retreat"]
 
 
+def test_skill_controller_critical_walk_route_suppresses_far_press_exit():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(
+        tick=120,
+        kills=5,
+        health=7,
+        combat=False,
+        route=True,
+    )
+    route_line = state.navigation.route_waypoint.line
+    route_line.line_id = 195
+    route_line.special = 88
+    route_line.distance_fp = 300 * 65536
+    route_line.nearest_distance_fp = 300 * 65536
+    state.navigation.use_lines.append(
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=1865 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=1865 * 65536, y_fp=-64 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=1865 * 65536, y_fp=64 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=1865 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=1865 * 65536,
+            nearest_distance_fp=1865 * 65536,
+        )
+    )
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+
+    assert mask["route_progression"]
+    assert not mask["press_exit"]
+
+
+def test_skill_controller_critical_far_walk_route_keeps_far_press_exit():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(
+        tick=120,
+        kills=5,
+        health=13,
+        combat=False,
+        hazard=True,
+        route=True,
+    )
+    route_line = state.navigation.route_waypoint.line
+    route_line.line_id = 195
+    route_line.special = 88
+    route_line.distance_fp = 528 * 65536
+    route_line.nearest_distance_fp = 528 * 65536
+    state.navigation.use_lines.append(
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=1865 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=1865 * 65536, y_fp=-64 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=1865 * 65536, y_fp=64 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=1865 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=1865 * 65536,
+            nearest_distance_fp=1865 * 65536,
+        )
+    )
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+
+    assert mask["route_progression"]
+    assert mask["press_exit"]
+
+
 def test_skill_controller_critical_combat_probe_forces_fire_before_far_post_combat_press_exit():
     controller = SkillController()
     controller.policy._start_kills = 0

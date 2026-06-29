@@ -23,6 +23,7 @@ from .brain import (
     MANUAL_USE_LINE_SPECIALS,
     POST_COMBAT_EXIT_KILLS,
     POST_COMBAT_EXIT_ROUTE_DISTANCE_UNITS,
+    POST_COMBAT_ROUTE_WAYPOINT_FINISH_DISTANCE_UNITS,
     WALK_TRIGGER_LINE_SPECIALS,
     cell_key,
     extract_features,
@@ -56,6 +57,7 @@ SKILL_ACTIONS = PPO_SKILL_ACTIONS
 LOW_HEALTH_RETREAT_STREAK_LIMIT = 96
 EXIT_ROUTE_FAILURE_RECOVERY_THRESHOLD = 4
 CONTACT_ROUTE_SUPPRESS_MAX_DISTANCE_UNITS = 768.0
+CRITICAL_WALK_ROUTE_PREEMPT_DISTANCE_UNITS = 384.0
 
 
 def _line_is_exit(line: dict[str, Any] | None) -> bool:
@@ -601,8 +603,16 @@ class SkillController:
             progression_line = self.policy._select_progression_line(features)
             postcombat_route_available = progression_line is not None
         postcombat_exit_line = self._exit_press_candidate(features) if not can_fire else None
+        critical_walk_route_preempts_far_exit = (
+            postcombat_exit_line is not None
+            and self._critical_walk_route_preempts_far_exit(
+                features,
+                postcombat_exit_line,
+            )
+        )
         postcombat_exit_available = (
             postcombat_exit_line is not None
+            and not critical_walk_route_preempts_far_exit
             and self._exit_press_available_for_mask(features, postcombat_exit_line)
         )
         postcombat_exit_commitment = (
@@ -908,6 +918,40 @@ class SkillController:
         if self.policy._line_control_distance(line) > POST_COMBAT_EXIT_ROUTE_DISTANCE_UNITS:
             return False
         return abs(self.policy._line_control_angle_delta(line)) <= 150.0
+
+    def _critical_walk_route_preempts_far_exit(
+        self,
+        features: Any,
+        exit_line: dict[str, Any],
+    ) -> bool:
+        """Keeps critical post-combat health on a nearby walk trigger before far exit."""
+        if int(features.health) > 15:
+            return False
+        if self.policy._shootable_enemy(features) is not None or features.visible_enemies:
+            return False
+        if int(features.kills) < POST_COMBAT_EXIT_KILLS:
+            return False
+        if not self.policy._has_episode_kill(features):
+            return False
+        if self.policy._line_control_distance(exit_line) <= EXIT_ASSIST_DISTANCE_UNITS:
+            return False
+        route = features.navigation.get("route_waypoint", {})
+        if not isinstance(route, dict) or not route.get("walk_trigger"):
+            return False
+        route_line = route.get("line")
+        if not isinstance(route_line, dict):
+            return False
+        if _line_is_exit(route_line):
+            return False
+        if int(route_line.get("special", 0)) not in WALK_TRIGGER_LINE_SPECIALS:
+            return False
+        return (
+            self.policy._line_control_distance(route_line)
+            <= min(
+                POST_COMBAT_ROUTE_WAYPOINT_FINISH_DISTANCE_UNITS,
+                CRITICAL_WALK_ROUTE_PREEMPT_DISTANCE_UNITS,
+            )
+        )
 
     def _execute_skill(self, skill: str, features: Any, stuck: bool) -> tuple[Any, dict[str, Any]]:
         if features.visible_enemies:
