@@ -87,6 +87,7 @@ class DoomEnvConfig:
     memory_path: Path | None = None
     reset_timeout_seconds: float = 5.0
     reset_attempts: int = 2
+    reset_ready_level_time: int = 5
     reset_start_x_fp: int | None = None
     reset_start_y_fp: int | None = None
     reset_start_angle_degrees: int = 0
@@ -2012,6 +2013,7 @@ class DoomAgentEnv:
         assert self._state_stream is not None
         deadline = time.monotonic() + self.config.reset_timeout_seconds
         last_state = None
+        ready_level_time = max(0, int(self.config.reset_ready_level_time))
         while time.monotonic() < deadline:
             state = await asyncio.wait_for(
                 self._state_stream.__anext__(),
@@ -2021,12 +2023,12 @@ class DoomAgentEnv:
             if (
                 state.level.episode == episode
                 and state.level.map == map_number
-                and state.level.level_time <= 5
+                and state.level.level_time == ready_level_time
                 and state.player.health > 0
             ):
                 return state
         raise TimeoutError(
-            "timed out waiting for reset state"
+            f"timed out waiting for reset state at level_time={ready_level_time}"
             + (f"; last_state={summarize_state(last_state)}" if last_state else "")
         )
 

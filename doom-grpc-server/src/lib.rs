@@ -15,7 +15,7 @@ use std::thread;
 use mimalloc::MiMalloc;
 use prost::Message;
 use tokio::runtime::Builder;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{event, Level};
@@ -40,7 +40,8 @@ use proto::{
 const DEFAULT_GRPC_PORT: u16 = 50_051;
 const ACTION_QUEUE_CAPACITY: usize = 256;
 const CONTROL_QUEUE_CAPACITY: usize = 16;
-const STATE_STREAM_CAPACITY: usize = 8;
+const STATE_STREAM_CAPACITY: usize = 256;
+const STATE_BROADCAST_CAPACITY: usize = 4096;
 const MAX_ACTION_DURATION_TICS: u32 = 35;
 const DEFAULT_ACTION_AMOUNT: u32 = 10;
 const MAX_TIC_MOVE: i32 = 50;
@@ -57,14 +58,14 @@ static BRIDGE: OnceLock<Bridge> = OnceLock::new();
 
 #[derive(Debug)]
 struct Bridge {
-    latest_state: watch::Sender<GameState>,
+    state_tx: broadcast::Sender<GameState>,
     action_rx: Mutex<mpsc::Receiver<AgentPlayerAction>>,
     control_rx: Mutex<mpsc::Receiver<AgentControlRequest>>,
 }
 
 #[derive(Clone, Debug)]
 struct AgentRuntime {
-    latest_state: watch::Sender<GameState>,
+    state_tx: broadcast::Sender<GameState>,
     action_tx: mpsc::Sender<AgentPlayerAction>,
     control_tx: mpsc::Sender<AgentControlRequest>,
 }
@@ -95,7 +96,7 @@ impl DoomAgent for AgentRuntime {
         });
 
         Ok(Response::new(stream_states(
-            self.latest_state.subscribe(),
+            self.state_tx.subscribe(),
             true,
         )))
     }
@@ -107,7 +108,7 @@ impl DoomAgent for AgentRuntime {
     ) -> Result<Response<Self::ObserveStream>, Status> {
         let include_delta_state = request.into_inner().include_delta_state;
         Ok(Response::new(stream_states(
-            self.latest_state.subscribe(),
+            self.state_tx.subscribe(),
             include_delta_state,
         )))
     }
@@ -187,7 +188,7 @@ impl AgentRuntime {
 }
 
 fn stream_states(
-    mut rx: watch::Receiver<GameState>,
+    mut rx: broadcast::Receiver<GameState>,
     include_delta_state: bool,
 ) -> ReceiverStream<Result<GameState, Status>> {
     let (tx, output) = mpsc::channel(STATE_STREAM_CAPACITY);
@@ -195,11 +196,14 @@ fn stream_states(
     tokio::spawn(async move {
         let mut previous: Option<GameState> = None;
         loop {
-            if rx.changed().await.is_err() {
-                break;
-            }
-
-            let mut state = rx.borrow().clone();
+            let mut state = match rx.recv().await {
+                Ok(state) => state,
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    previous = None;
+                    continue;
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            };
             if include_delta_state {
                 if let Some(last) = previous.as_ref() {
                     state.delta_state = encode_delta(last, &state);
@@ -673,11 +677,11 @@ pub extern "C" fn restfuldoom_agent_init(port: u16) -> i32 {
         return 0;
     }
 
-    let (state_tx, _state_rx) = watch::channel(GameState::default());
+    let (state_tx, _state_rx) = broadcast::channel(STATE_BROADCAST_CAPACITY);
     let (action_tx, action_rx) = mpsc::channel(ACTION_QUEUE_CAPACITY);
     let (control_tx, control_rx) = mpsc::channel(CONTROL_QUEUE_CAPACITY);
     let bridge = Bridge {
-        latest_state: state_tx.clone(),
+        state_tx: state_tx.clone(),
         action_rx: Mutex::new(action_rx),
         control_rx: Mutex::new(control_rx),
     };
@@ -688,7 +692,7 @@ pub extern "C" fn restfuldoom_agent_init(port: u16) -> i32 {
 
     let bind_port = if port == 0 { DEFAULT_GRPC_PORT } else { port };
     let runtime = AgentRuntime {
-        latest_state: state_tx,
+        state_tx,
         action_tx,
         control_tx,
     };
@@ -760,7 +764,7 @@ pub unsafe extern "C" fn restfuldoom_agent_publish_state(snapshot: *const AgentG
     // for this call. We copy it immediately and never retain the pointer.
     let snapshot = unsafe { &*snapshot };
     let state = state_from_snapshot(snapshot);
-    _ = bridge.latest_state.send(state);
+    _ = bridge.state_tx.send(state);
 }
 
 /// Takes one queued action for the Doom game thread.
@@ -1084,6 +1088,7 @@ mod tests {
     use proto::doom_agent_client::DoomAgentClient;
     use proto::EpisodeStart;
     use tokio::time::{sleep, timeout, Duration};
+    use tokio_stream::StreamExt;
 
     #[test]
     fn semantic_forward_uses_duration() {
@@ -1347,6 +1352,34 @@ mod tests {
         let decoded = StateDelta::decode(encoded.as_slice()).expect("delta decodes");
 
         assert_eq!(decoded.removed_enemy_ids, vec![9]);
+    }
+
+    #[tokio::test]
+    async fn stream_states_delivers_consecutive_ticks() {
+        let (state_tx, state_rx) = broadcast::channel(8);
+        let mut stream = stream_states(state_rx, true);
+
+        for tick in 1..=3 {
+            state_tx
+                .send(GameState {
+                    tick,
+                    player: Some(PlayerState::default()),
+                    ..GameState::default()
+                })
+                .expect("state broadcasts");
+        }
+
+        let mut ticks = Vec::new();
+        for _ in 0..3 {
+            let state = timeout(Duration::from_secs(1), stream.next())
+                .await
+                .expect("state arrives")
+                .expect("stream stays open")
+                .expect("state is valid");
+            ticks.push(state.tick);
+        }
+
+        assert_eq!(ticks, vec![1, 2, 3]);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

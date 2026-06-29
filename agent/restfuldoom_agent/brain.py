@@ -225,6 +225,7 @@ class TacticalFeatures:
     """Compact current-state view used by the policy."""
 
     tick: int
+    level_time: int
     x_units: float
     y_units: float
     angle: float
@@ -633,6 +634,11 @@ class BrainPolicy:
         self._last_post_combat_exit_line_id = None
         self._last_post_combat_exit_line = None
         self._completed_walk_route_line_ids.clear()
+
+    @staticmethod
+    def _phase_tick(features: TacticalFeatures) -> int:
+        """Return an episode-relative tick for deterministic phase choices."""
+        return max(0, int(features.level_time))
 
     async def next_action(self, state: Any) -> Any:
         """Return a fast local action for the current protobuf state."""
@@ -1335,7 +1341,7 @@ class BrainPolicy:
                 buttons=BT_ATTACK,
                 side_move=(
                     self.params.strafe_amount
-                    if (features.tick // 12) % 2
+                    if (self._phase_tick(features) // 12) % 2
                     else -self.params.strafe_amount
                 ),
                 angle_turn=raw_turn_for_delta(angle_delta),
@@ -1608,7 +1614,7 @@ class BrainPolicy:
                         forward_move=-max(8, self.params.retreat_amount // 2),
                         side_move=(
                             self.params.strafe_amount
-                            if (features.tick // 10) % 2
+                            if (self._phase_tick(features) // 10) % 2
                             else -self.params.strafe_amount
                         ),
                         angle_turn=raw_turn_for_delta(enemy["angle_delta"]),
@@ -1627,7 +1633,7 @@ class BrainPolicy:
                     forward_move=-self.params.retreat_amount,
                     side_move=(
                         self.params.strafe_amount
-                        if (features.tick // 10) % 2
+                        if (self._phase_tick(features) // 10) % 2
                         else -self.params.strafe_amount
                     ),
                     angle_turn=raw_turn_for_delta(enemy["angle_delta"]),
@@ -1727,7 +1733,7 @@ class BrainPolicy:
             turn = 384
             side = -max(8, self.params.strafe_amount // 2)
             skill = "wall_follow_left"
-        elif (features.tick // self.params.explore_turn_interval_tics) % 5 == 0:
+        elif (self._phase_tick(features) // self.params.explore_turn_interval_tics) % 5 == 0:
             turn = -256 if self._explore_bias > 0 else 256
             skill = "sweep_frontier"
 
@@ -3738,6 +3744,7 @@ def extract_features(
 
     return TacticalFeatures(
         tick=int(state.tick),
+        level_time=int(state.level.level_time),
         x_units=x,
         y_units=y,
         angle=angle,

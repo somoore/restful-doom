@@ -74,6 +74,27 @@ def test_doom_agent_env_reset_step_with_fake_client():
     assert not step.done
 
 
+def test_doom_agent_env_reset_waits_for_ready_level_time():
+    early = _state(tick=1, level_time=1, enemy=True)
+    ready = _state(tick=5, level_time=5, enemy=True)
+    client = _StreamingFakeClient([early, ready])
+    env = DoomAgentEnv(
+        DoomEnvConfig(goal_preset="combat", reset_ready_level_time=5),
+        client=client,
+        controller=SkillController(),
+    )
+
+    async def run():
+        await env.reset(seed=99)
+        await env.close()
+        return env._current_state
+
+    state = asyncio.run(run())
+
+    assert state.level.level_time == 5
+    assert state.tick == 5
+
+
 def test_doom_agent_env_terminates_on_required_kills_after_reset():
     first = _state(tick=1, kills=0, enemy=True, combat=True)
     second = _state(tick=2, kills=1)
@@ -1681,7 +1702,7 @@ def test_doom_agent_env_snapshot_reset_observes_without_episode_reset():
 
 
 def test_doom_agent_env_episode_reset_context_records_seed_applied():
-    first = _state(tick=710, level_time=1, enemy=True)
+    first = _state(tick=710, level_time=5, enemy=True)
     client = _FakeClient([first], seed_applied=True)
     env = DoomAgentEnv(
         DoomEnvConfig(goal_preset="combat"),
@@ -2463,6 +2484,15 @@ class _DurationAwareFakeClient(_FakeClient):
                 yield self.states.pop(0)
 
 
+class _StreamingFakeClient(_FakeClient):
+    async def session(self, actions):
+        async for action in actions:
+            self.actions.append(action)
+            break
+        while self.states:
+            yield self.states.pop(0)
+
+
 class _FixedDurationController:
     def __init__(self, duration_tics):
         self.duration_tics = duration_tics
@@ -2631,7 +2661,7 @@ def _state(
             episode=1,
             map=1,
             skill=2,
-            level_time=tick if level_time is None else level_time,
+            level_time=5 if level_time is None else level_time,
             total_kills=1,
             total_items=0,
             total_secrets=0,
