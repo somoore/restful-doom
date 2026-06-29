@@ -14,6 +14,7 @@ from restfuldoom_agent.ppo_agent import (
     _checkpoint_selection_score,
     _checkpoint_resume_score,
     _checkpoint_resume_score_source,
+    _checkpoint_eval_stage_order,
     _checkpoint_eval_trace_path,
     _evaluate_checkpoint_curriculum,
     _redacted_restore_argv,
@@ -172,6 +173,36 @@ def test_checkpoint_eval_trace_path_uses_stage_suffix_for_multi_stage(tmp_path):
             update_index=2,
         )
     )
+
+
+def test_checkpoint_eval_stage_order_runs_true_spawn_before_snapshots():
+    stages = [
+        {
+            "index": 0,
+            "name": "1995-post-combat-exit-route_snapshot",
+            "reset_mode": "snapshot",
+        },
+        {
+            "index": 1,
+            "name": "fresh_spawn_true_spawn_gate",
+            "reset_mode": "episode",
+            "evidence": {"true_spawn_promotion_stage": True},
+        },
+        {
+            "index": 2,
+            "name": "visible_contact_snapshot",
+            "reset_mode": "snapshot",
+        },
+    ]
+
+    ordered = _checkpoint_eval_stage_order(stages)
+
+    assert [index for index, _stage in ordered] == [1, 0, 2]
+    assert [stage["name"] for _index, stage in ordered] == [
+        "fresh_spawn_true_spawn_gate",
+        "1995-post-combat-exit-route_snapshot",
+        "visible_contact_snapshot",
+    ]
 
 
 def test_learning_trace_names_observation_mask_and_outcome():
@@ -1962,7 +1993,7 @@ def test_post_combat_snapshot_selection_score_caps_no_exit_credit():
         stage=post_combat_stage,
     )
 
-    assert components["schema"] == "restfuldoom.ppo_checkpoint_eval_score.v4"
+    assert components["schema"] == "restfuldoom.ppo_checkpoint_eval_score.v5"
     assert components["mode"] == "post_combat_exit_routing"
     assert components["exit_success_rate"] == 0.0
     assert components["exit_speed_bonus"] == 0.0
@@ -2068,6 +2099,8 @@ def test_true_spawn_promotion_selection_score_requires_full_chain():
                 level_transition_delta=1,
                 first_visible_contacts=1,
                 first_shootable_contacts=1,
+                allowed_skill_filter_steps=1300,
+                strict_allowed_skill_filter_steps=1300,
                 route_attempt_steps=420,
                 exit_route_attempt_steps=70,
                 exit_route_reached_steps=8,
@@ -2088,6 +2121,10 @@ def test_true_spawn_promotion_selection_score_requires_full_chain():
     assert completed_components["mode"] == "true_spawn_promotion"
     assert kills_only_components["completion_rate"] == 0.0
     assert completed_components["completion_rate"] == 1.0
+    assert kills_only_components["gate_ok"] is False
+    assert completed_components["gate_ok"] is True
+    assert completed_components["true_spawn_gate"]["ok"] is True
+    assert completed_components["true_spawn_gate"]["summary"]["passed_episodes"] == 1
     assert completed_components["selection_score"] > kills_only_components[
         "selection_score"
     ]
@@ -2130,6 +2167,7 @@ def test_true_spawn_promotion_selection_score_penalizes_non_episode_reset():
     assert components["mode"] == "true_spawn_promotion"
     assert components["valid_true_spawn_rate"] == 0.0
     assert components["completion_rate"] == 0.0
+    assert components["true_spawn_gate"]["ok"] is False
 
 
 def test_true_spawn_promotion_selection_score_gates_route_credit_after_kills():
@@ -2542,7 +2580,7 @@ def test_checkpoint_curriculum_eval_restores_snapshot_stages(monkeypatch, tmp_pa
     )
 
     assert payload["schema"] == "restfuldoom.ppo_checkpoint_curriculum_eval.v1"
-    assert payload["score_schema"] == "restfuldoom.ppo_checkpoint_eval_score.v4"
+    assert payload["score_schema"] == "restfuldoom.ppo_checkpoint_eval_score.v5"
     assert seen_configs
     assert seen_trace_paths[0] == (
         tmp_path / "eval-trace-update0002-stage00-first_kill_snapshot.jsonl"
@@ -2725,7 +2763,7 @@ def test_curriculum_eval_best_prefers_current_score_schema():
     }
     current_schema_eval = {
         "selection_score": 536.0,
-        "score_schema": "restfuldoom.ppo_checkpoint_eval_score.v4",
+        "score_schema": "restfuldoom.ppo_checkpoint_eval_score.v5",
         "stage_count": 1,
         "episodes_per_stage": 1,
         "max_steps": 4000,
@@ -2765,7 +2803,7 @@ def test_current_score_schema_does_not_outrank_stronger_eval_protocol():
     }
     weaker_current_schema_eval = {
         "selection_score": 620.0,
-        "score_schema": "restfuldoom.ppo_checkpoint_eval_score.v4",
+        "score_schema": "restfuldoom.ppo_checkpoint_eval_score.v5",
         "stage_count": 1,
         "episodes_per_stage": 1,
         "max_steps": 4000,

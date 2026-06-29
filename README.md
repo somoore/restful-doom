@@ -43,9 +43,10 @@ The punchline is:
   actual exit route waypoint rather than exit-control fallback evidence.
 - Checkpoint curriculum eval restores snapshot stages through the same native
   slot/external restore path and serializes start-vs-earned counters.
-- Checkpoint scorer schema `restfuldoom.ppo_checkpoint_eval_score.v4` separates
-  required-kill, completed-exit, and post-combat exit-routing objectives, with
-  shaped reward capped as a tiebreaker.
+- Checkpoint scorer schema `restfuldoom.ppo_checkpoint_eval_score.v5` scores
+  true-spawn stages through the `true_spawn_e2e_gate` report, while keeping
+  required-kill, completed-exit, and post-combat exit-routing objectives
+  separate with shaped reward capped as a tiebreaker.
 - Full independent PPO level completion from E1M1 spawn is not proven yet.
 - Next major unlock: capture real Hellbox/Shrink progressed-map snapshots and
   train/evaluate PPO through the promotion gate.
@@ -929,7 +930,9 @@ Eval aggregates also include `mean_item_gain`, `mean_secret_gain`, and
 `reset_source_breakdown`, which separates `snapshot_restore` outcomes from
 fresh-reset outcomes and carries the same route diagnostic totals per reset
 source. Checkpoint eval score schema
-`restfuldoom.ppo_checkpoint_eval_score.v4` scores level-complete stages with
+`restfuldoom.ppo_checkpoint_eval_score.v5` scores true-spawn promotion stages
+from the embedded `true_spawn_e2e_gate` report, so the gate pass count is the
+only source of true-spawn completion credit. Level-complete stages use
 `exit_routing_speed`: selection favors reliable and faster exits with shaped
 reward capped as a tiebreaker. Post-combat snapshot stages use
 `post_combat_exit_routing` even before completion, so earned kills/items from a

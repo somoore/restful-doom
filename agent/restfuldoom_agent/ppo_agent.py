@@ -10,9 +10,9 @@ import shlex
 import subprocess
 import time
 from collections import Counter
-from dataclasses import replace
+from dataclasses import asdict, is_dataclass, replace
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from .brain import AgentMemory, POST_COMBAT_EXIT_KILLS
 from .curriculum import build_curriculum, curriculum_names, stage_for_update
@@ -27,8 +27,9 @@ from .ppo_eval import (
 from .schemas import map_expert_skill_to_ppo_action, pad_observation_features
 from .snapshot_curriculum import load_snapshot_curriculum
 from .skill_policy import features_from_record
+from .true_spawn_e2e_gate import validate_true_spawn_e2e_gate
 
-CHECKPOINT_EVAL_SCORE_SCHEMA = "restfuldoom.ppo_checkpoint_eval_score.v4"
+CHECKPOINT_EVAL_SCORE_SCHEMA = "restfuldoom.ppo_checkpoint_eval_score.v5"
 
 
 async def train(args: argparse.Namespace) -> dict[str, object]:
@@ -1016,7 +1017,7 @@ async def _evaluate_checkpoint_curriculum(
         ]
 
     stage_records: list[dict[str, object]] = []
-    for stage_index, stage in enumerate(stages):
+    for stage_index, stage in _checkpoint_eval_stage_order(stages):
         stage_dict = dict(stage) if isinstance(stage, dict) else {}
         stage_name = str(stage_dict.get("name", f"stage_{stage_index}"))
         env_config = _env_config_for_stage(
@@ -1070,16 +1071,21 @@ async def _evaluate_checkpoint_curriculum(
         stage_score_components = _policy_eval_selection_components(
             result,
             stage=stage_dict,
+            allowed_skills=tuple(getattr(args, "allowed_skill", []) or ()),
+            strict_allowed_skills=bool(getattr(args, "strict_allowed_skills", False)),
         )
         stage_score = float(stage_score_components["selection_score"])
-        stage_records.append(
-            {
-                "stage": stage_dict,
-                "selection_score": stage_score,
-                "selection_score_components": stage_score_components,
-                "result": result.to_dict(),
-            }
-        )
+        stage_record = {
+            "stage": stage_dict,
+            "selection_score": stage_score,
+            "selection_score_components": stage_score_components,
+            "result": result.to_dict(),
+        }
+        if isinstance(stage_score_components.get("true_spawn_gate"), dict):
+            stage_record["true_spawn_gate"] = stage_score_components[
+                "true_spawn_gate"
+            ]
+        stage_records.append(stage_record)
 
     stage_scores = [float(record["selection_score"]) for record in stage_records]
     mean_score = sum(stage_scores) / max(1, len(stage_scores))
@@ -1117,6 +1123,18 @@ async def _evaluate_checkpoint_curriculum(
         ),
         "stages": stage_records,
     }
+
+
+def _checkpoint_eval_stage_order(stages: list[object]) -> list[tuple[int, object]]:
+    """Returns checkpoint-eval order, with true-spawn promotion stages isolated first."""
+    indexed = list(enumerate(stages))
+    return sorted(
+        indexed,
+        key=lambda item: (
+            0 if _stage_prefers_true_spawn_promotion_score(item[1]) else 1,
+            item[0],
+        ),
+    )
 
 
 def _checkpoint_eval_trace_path(
@@ -1176,12 +1194,20 @@ def _policy_eval_selection_components(
     eval_result: object,
     *,
     stage: object | None = None,
+    allowed_skills: tuple[str, ...] = (),
+    strict_allowed_skills: bool = False,
 ) -> dict[str, object]:
     """Returns deterministic eval score components for resume selection."""
     result = getattr(eval_result, "result", eval_result)
     episodes = getattr(eval_result, "episodes", [])
     if _stage_prefers_true_spawn_promotion_score(stage):
-        return _true_spawn_promotion_score_components(result, episodes)
+        return _true_spawn_promotion_score_components(
+            eval_result,
+            result,
+            episodes,
+            allowed_skills=allowed_skills,
+            strict_allowed_skills=strict_allowed_skills,
+        )
     force_exit_routing = _stage_prefers_exit_routing_score(stage)
     required_kill_components = _required_kill_score_components(episodes)
     exit_routing_components = _exit_routing_score_components(
@@ -1357,12 +1383,32 @@ def _stage_prefers_true_spawn_promotion_score(stage: object | None) -> bool:
 
 
 def _true_spawn_promotion_score_components(
+    eval_result: object,
     result: object,
     episodes: object,
+    *,
+    allowed_skills: tuple[str, ...] = (),
+    strict_allowed_skills: bool = False,
 ) -> dict[str, object]:
-    """Scores true-spawn stages against the full promotion chain, not kills alone."""
+    """Scores true-spawn stages from the true-spawn gate, not a duplicate pass rule."""
     episode_list = episodes if isinstance(episodes, list) else []
-    episode_count = max(1, len(episode_list))
+    gate_report = _true_spawn_gate_report_for_eval(
+        eval_result,
+        allowed_skills=allowed_skills,
+        strict_allowed_skills=strict_allowed_skills,
+    )
+    gate_summary = gate_report.get("summary", {})
+    gate_episode_count = (
+        int(gate_summary.get("episode_count") or 0)
+        if isinstance(gate_summary, dict)
+        else 0
+    )
+    episode_count = max(1, gate_episode_count, len(episode_list))
+    gate_passed_episodes = (
+        int(gate_summary.get("passed_episodes", 0))
+        if isinstance(gate_summary, dict)
+        else 0
+    )
     valid_episodes = [
         episode
         for episode in episode_list
@@ -1386,6 +1432,7 @@ def _true_spawn_promotion_score_components(
         and int(getattr(episode, "route_attempt_steps", 0) or 0) > 0
         and int(getattr(episode, "exit_route_attempt_steps", 0) or 0) > 0
     ]
+    gate_successes = full_successes if gate_passed_episodes > 0 else []
     contact_rate = _episode_rate(
         episode_list,
         lambda episode: int(getattr(episode, "first_visible_contacts", 0) or 0) > 0,
@@ -1415,7 +1462,7 @@ def _true_spawn_promotion_score_components(
     )
     exit_route_rate /= episode_count
     valid_rate = len(valid_episodes) / episode_count
-    completion_rate = len(full_successes) / episode_count
+    completion_rate = gate_passed_episodes / episode_count
     mean_earned_kills = (
         sum(_episode_earned_kills_for_score(episode) for episode in episode_list)
         / episode_count
@@ -1428,11 +1475,11 @@ def _true_spawn_promotion_score_components(
             for episode in episode_list
         ],
     )
-    if full_successes:
+    if gate_successes:
         mean_steps_to_exit = sum(
             int(getattr(episode, "steps_to_exit", 0) or getattr(episode, "steps", 0))
-            for episode in full_successes
-        ) / len(full_successes)
+            for episode in gate_successes
+        ) / len(gate_successes)
     else:
         mean_steps_to_exit = float(max_steps)
     speed_fraction = completion_rate * max(
@@ -1482,7 +1529,63 @@ def _true_spawn_promotion_score_components(
         "stuck_penalty": round(stuck_penalty, 4),
         "death_penalty": round(death_penalty, 4),
         "required_kill_threshold": POST_COMBAT_EXIT_KILLS,
+        "gate_ok": bool(gate_report.get("ok")),
+        "gate_passed_episodes": gate_passed_episodes,
+        "gate_episode_count": episode_count,
+        "gate_bottleneck_counts": (
+            dict(gate_summary.get("bottleneck_counts", {}))
+            if isinstance(gate_summary, dict)
+            else {}
+        ),
+        "true_spawn_gate": gate_report,
     }
+
+
+def _true_spawn_gate_report_for_eval(
+    eval_result: object,
+    *,
+    allowed_skills: tuple[str, ...] = (),
+    strict_allowed_skills: bool = False,
+) -> dict[str, Any]:
+    """Runs the promotion gate over one PolicyEval-shaped result."""
+    eval_payload = _policy_eval_json_payload(eval_result)
+    eval_payload["allowed_skills"] = list(allowed_skills or [])
+    eval_payload["strict_allowed_skills"] = bool(strict_allowed_skills)
+    episode_count = len(eval_payload.get("episodes", []))
+    return validate_true_spawn_e2e_gate(
+        {"candidate": eval_payload},
+        allowed_skills=tuple(allowed_skills or ()),
+        min_episodes=max(1, episode_count),
+        min_level_completions=1,
+    )
+
+
+def _policy_eval_json_payload(eval_result: object) -> dict[str, Any]:
+    """Returns a JSON-shaped PolicyEval payload from dataclasses or dictionaries."""
+    if hasattr(eval_result, "to_dict"):
+        payload = getattr(eval_result, "to_dict")()
+        if isinstance(payload, dict):
+            return dict(payload)
+    if isinstance(eval_result, dict):
+        if isinstance(eval_result.get("candidate"), dict):
+            return dict(eval_result["candidate"])
+        if isinstance(eval_result.get("result"), dict):
+            return dict(eval_result)
+    result = getattr(eval_result, "result", eval_result)
+    episodes = getattr(eval_result, "episodes", [])
+    episode_list = episodes if isinstance(episodes, list) else []
+    return {
+        "result": _json_value(result),
+        "episodes": [_json_value(episode) for episode in episode_list],
+    }
+
+
+def _json_value(value: object) -> Any:
+    if is_dataclass(value):
+        return asdict(value)
+    if isinstance(value, dict):
+        return dict(value)
+    return {}
 
 
 def _episode_rate(episodes: list[object], predicate: Callable[[object], bool]) -> float:
