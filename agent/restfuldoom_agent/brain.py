@@ -685,6 +685,7 @@ class BrainPolicy:
             return agent_pb2.PlayerAction(), self._decision("dead", features, stuck=stuck)
 
         shootable_enemy = self._shootable_enemy(features)
+        local_exit_line = self._select_local_exit_line(features)
         critical_hazard_escape = (
             self._escape_hazard_cell(features, stuck)
             if self._critical_hazard_escape_allowed(features)
@@ -692,6 +693,13 @@ class BrainPolicy:
         )
         if critical_hazard_escape is not None:
             return critical_hazard_escape
+
+        if self._post_combat_local_exit_commit_allowed(
+            features,
+            local_exit_line,
+            shootable_enemy,
+        ):
+            return self._advance_local_exit_line(features, local_exit_line, stuck)
 
         if features.health <= 15 and (close_enemy is not None or shootable_enemy is not None):
             return self._retreat_or_fire(
@@ -726,7 +734,6 @@ class BrainPolicy:
         if close_enemy:
             return self._engage(features, close_enemy, stuck)
 
-        local_exit_line = self._select_local_exit_line(features)
         if (
             local_exit_line is not None
             and (
@@ -735,17 +742,7 @@ class BrainPolicy:
                 or not features.navigation["forward_open"]
             )
         ):
-            if not features.navigation["forward_open"]:
-                assist_door = self._select_exit_assist_door(features, local_exit_line)
-                if assist_door is not None:
-                    return self._use_nearby_line(features, assist_door, stuck)
-                blocking_line = self._select_stuck_manual_line(features)
-                if (
-                    blocking_line is not None
-                    and int(blocking_line.get("special", 0)) not in EXIT_LINE_SPECIALS
-                ):
-                    return self._use_nearby_line(features, blocking_line, stuck)
-            return self._advance_progression_line(features, local_exit_line, stuck)
+            return self._advance_local_exit_line(features, local_exit_line, stuck)
 
         hazard_escape = self._escape_hazard_cell(features, stuck)
         if hazard_escape is not None:
@@ -1942,6 +1939,40 @@ class BrainPolicy:
                 abs(float(line["angle_delta"])),
             ),
         )
+
+    def _post_combat_local_exit_commit_allowed(
+        self,
+        features: TacticalFeatures,
+        local_exit_line: dict[str, Any] | None,
+        shootable_enemy: dict[str, Any] | None,
+    ) -> bool:
+        if local_exit_line is None:
+            return False
+        if int(features.kills) < POST_COMBAT_EXIT_KILLS:
+            return False
+        if shootable_enemy is not None:
+            return False
+        if self._line_control_distance(local_exit_line) > EXIT_ASSIST_DISTANCE_UNITS:
+            return False
+        return bool(features.visible_enemies)
+
+    def _advance_local_exit_line(
+        self,
+        features: TacticalFeatures,
+        local_exit_line: dict[str, Any],
+        stuck: bool,
+    ) -> tuple[Any, dict[str, Any]]:
+        if not features.navigation["forward_open"]:
+            assist_door = self._select_exit_assist_door(features, local_exit_line)
+            if assist_door is not None:
+                return self._use_nearby_line(features, assist_door, stuck)
+            blocking_line = self._select_stuck_manual_line(features)
+            if (
+                blocking_line is not None
+                and int(blocking_line.get("special", 0)) not in EXIT_LINE_SPECIALS
+            ):
+                return self._use_nearby_line(features, blocking_line, stuck)
+        return self._advance_progression_line(features, local_exit_line, stuck)
 
     def _select_progression_line(
         self,

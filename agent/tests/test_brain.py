@@ -1703,6 +1703,40 @@ def test_far_exit_preference_does_not_preempt_visible_combat(tmp_path):
     assert policy.last_decision.get("use_line", {}).get("line_id") != 330
 
 
+def test_post_combat_local_exit_preempts_nonshootable_visible_contact(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    asyncio.run(policy.next_action(state(tick=1)))
+
+    game_state = state(
+        tick=40,
+        x=8,
+        enemy={"x": 180, "y": 0, "distance": 180, "line_of_sight": False},
+    )
+    game_state.player.kills = 5
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=500 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=500 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=500 * 65536,
+            nearest_distance_fp=500 * 65536,
+        )
+    ]
+
+    action = asyncio.run(policy.next_action(game_state))
+
+    assert policy.last_decision["skill"] == "approach_progression_line"
+    assert policy.last_decision["use_line"]["line_id"] == 330
+    assert action.raw.forward_move > 0
+
+
 def test_post_kill_policy_delays_far_walk_trigger_to_hunt_remaining_enemy(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
