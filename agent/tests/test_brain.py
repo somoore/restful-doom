@@ -2238,6 +2238,51 @@ def test_post_kill_policy_uses_exit_line_at_close_range(tmp_path):
     assert release_action.duration_tics == 1
 
 
+def test_stalled_close_final_line_pulses_use_with_moderate_angle(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    policy._start_kills = 0
+    line = {
+        "line_id": 330,
+        "special": 11,
+        "tag": 0,
+        "distance": 17.36,
+        "distance_fp": int(17.36 * 65536),
+        "nearest_distance_fp": int(17.36 * 65536),
+        "angle_delta": 27.17,
+        "side": 0,
+        "front_distance": 80.0,
+        "front_angle_delta": -145.83,
+    }
+    first_state = state(tick=40)
+    first_state.player.kills = 6
+    first_features = extract_features(first_state, memory, policy.params)
+
+    _first_action, first_decision = policy._advance_progression_line(
+        first_features,
+        line,
+        stuck=False,
+    )
+
+    stalled_state = state(tick=40 + LINE_ATTEMPT_STALL_TICS + 1)
+    stalled_state.player.kills = 6
+    stalled_features = extract_features(stalled_state, memory, policy.params)
+    action, decision = policy._advance_progression_line(
+        stalled_features,
+        line,
+        stuck=False,
+    )
+
+    assert first_decision["skill"] == "turn_to_exit_switch"
+    assert decision["skill"] == "press_exit_switch"
+    assert action.raw.buttons & 2
+    assert action.duration_tics == 1
+
+
 def test_close_exit_press_preempts_blocked_front_routing(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(

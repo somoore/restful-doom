@@ -2677,6 +2677,28 @@ class BrainPolicy:
                         use_line=line_record,
                     ),
                 )
+            if (
+                int(features.kills) >= POST_COMBAT_EXIT_KILLS
+                and distance <= EXIT_LINE_CONFIRMED_USE_DISTANCE_UNITS
+                and abs(angle_delta) <= 45.0
+                and self._exit_push_stalled(features, line, distance)
+            ):
+                self._last_use_tick = features.tick
+                return (
+                    raw_ticcmd_action(
+                        buttons=BT_USE,
+                        forward_move=self.params.move_amount,
+                        angle_turn=raw_turn_for_delta(angle_delta),
+                        duration_tics=1,
+                        tick=features.tick,
+                    ),
+                    self._decision(
+                        "press_exit_switch",
+                        features,
+                        stuck=stuck,
+                        use_line=line_record,
+                    ),
+                )
             if abs(angle_delta) > 18:
                 return (
                     semantic_action(
