@@ -638,14 +638,55 @@ class SkillController:
             else None
         )
         critical_shootable_fire = can_fire and int(features.health) <= 15
+        critical_exit_escape_line = (
+            self._critical_postcombat_exit_escape_line(features)
+            if critical_shootable_fire
+            else None
+        )
+        critical_hazard_exit_escape = (
+            threatened_exit_line is not None
+            and self._critical_postcombat_hazard_exit_allowed(
+                features,
+                threatened_exit_line,
+            )
+        )
+        low_health_shootable_fire_guard = (
+            can_fire
+            and int(features.health) <= 20
+            and critical_exit_escape_line is None
+            and not critical_hazard_exit_escape
+        )
+        contact_threat_line = contact_exit_line or threatened_exit_line
+        low_health_shootable_cooldown_guard = (
+            shootable is not None
+            and not can_fire
+            and int(features.health) <= 20
+            and critical_exit_escape_line is None
+            and not critical_hazard_exit_escape
+            and (
+                contact_threat_line is None
+                or self.policy._line_control_distance(contact_threat_line) > 224.0
+            )
+        )
         if low_health_retreat_allowed and exit_commitment_line is None and not postcombat_route_available and threatened_exit_line is None and contact_exit_line is None and not self._low_health_damaging_sector_combat(features) and not critical_shootable_fire:
             mask["retreat"] = True
             if stuck:
                 mask["recover_stuck"] = True
             return [mask[skill] for skill in SKILL_ACTIONS]
+        if low_health_shootable_cooldown_guard:
+            mask["retreat"] = True
+            if stuck:
+                mask["recover_stuck"] = True
+            return [mask[skill] for skill in SKILL_ACTIONS]
         if can_fire:
+            if critical_exit_escape_line is not None:
+                mask["press_exit"] = True
+                mask["route_progression"] = True
+                if stuck:
+                    mask["recover_stuck"] = True
+                return [mask[skill] for skill in SKILL_ACTIONS]
             mask["fire"] = True
-            if critical_shootable_fire:
+            if low_health_shootable_fire_guard:
                 return [mask[skill] for skill in SKILL_ACTIONS]
             if threatened_exit_line is not None or contact_exit_line is not None:
                 mask["press_exit"] = True
@@ -904,6 +945,33 @@ class SkillController:
             return line
         return self._blocked_postcombat_exit_line(features)
 
+    def _critical_postcombat_exit_escape_line(
+        self,
+        features: Any,
+    ) -> dict[str, Any] | None:
+        """Keeps a committed final-line escape from yielding back to fatal combat."""
+        if int(features.kills) < POST_COMBAT_EXIT_KILLS:
+            return None
+        if int(features.health) > 15:
+            return None
+        if not self.policy._has_episode_kill(features):
+            return None
+        previous_skill = (
+            SKILL_ACTIONS[self._previous_action_index]
+            if self._previous_action_index is not None
+            else None
+        )
+        if previous_skill not in {"press_exit", "route_progression"}:
+            return None
+        line = self._postcombat_contact_exit_line(features)
+        if line is None:
+            line = self._postcombat_exit_under_threat_line(features)
+        if line is None:
+            line = self.policy._select_local_exit_line(features)
+        if line is None:
+            return None
+        return line
+
     def _exit_press_available_for_mask(
         self,
         features: Any,
@@ -1030,6 +1098,27 @@ class SkillController:
             enemy = self.policy._shootable_enemy(features)
             if enemy is not None and self.policy._can_shoot(features, enemy):
                 self.policy._last_shot_tick = features.tick
+                if int(features.health) <= 20 and float(enemy["distance"]) <= 220.0:
+                    return (
+                        raw_ticcmd_action(
+                            buttons=BT_ATTACK,
+                            forward_move=-max(8, self.params.retreat_amount // 2),
+                            side_move=(
+                                self.params.strafe_amount
+                                if (self.policy._phase_tick(features) // 10) % 2
+                                else -self.params.strafe_amount
+                            ),
+                            angle_turn=raw_turn_for_delta(enemy["angle_delta"]),
+                            duration_tics=1,
+                            tick=features.tick,
+                        ),
+                        self.policy._decision(
+                            "ppo_defensive_fire",
+                            features,
+                            enemy=enemy,
+                            stuck=stuck,
+                        ),
+                    )
                 return (
                     raw_ticcmd_action(
                         buttons=BT_ATTACK,

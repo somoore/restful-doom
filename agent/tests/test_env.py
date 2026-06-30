@@ -8,6 +8,7 @@ from restfuldoom_agent.client import EpisodeReset
 from restfuldoom_agent.client import agent_pb2
 from restfuldoom_agent.brain import (
     AgentMemory,
+    BT_ATTACK,
     BT_USE,
     LINE_ATTEMPT_STALL_TICS,
     _NON_LOCOMOTION_SKILLS,
@@ -2398,6 +2399,137 @@ def test_skill_controller_critical_hazard_keeps_blocked_final_line_legal():
     assert not mask["retreat"]
     assert decision["use_line"]["line_id"] == 330
     assert action.raw.forward_move > 0
+
+
+def test_skill_controller_critical_exit_commitment_suppresses_fire_for_final_escape():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(
+        kills=5,
+        health=7,
+        enemy=True,
+        enemy_line_of_sight=True,
+        combat=True,
+        route=True,
+    )
+    state.navigation.use_lines.append(
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=668 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=668 * 65536, y_fp=-64 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=668 * 65536, y_fp=64 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=668 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=668 * 65536,
+            nearest_distance_fp=668 * 65536,
+        )
+    )
+    controller._previous_action_index = SKILL_ACTIONS.index("press_exit")
+    controller._same_skill_streak = 1
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+    action, decision = controller.action_for(SKILL_ACTIONS.index("press_exit"), state)
+
+    assert not mask["fire"]
+    assert mask["press_exit"]
+    assert mask["route_progression"]
+    assert not mask["retreat"]
+    assert decision["use_line"]["line_id"] == 330
+    assert action.raw.forward_move > 0
+
+
+def test_skill_controller_mid_critical_shootable_blocks_distant_final_escape():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(
+        kills=5,
+        health=17,
+        enemy=True,
+        enemy_line_of_sight=True,
+        combat=True,
+        route=True,
+    )
+    state.navigation.use_lines.append(
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=616 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=616 * 65536, y_fp=-64 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=616 * 65536, y_fp=64 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=616 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=616 * 65536,
+            nearest_distance_fp=616 * 65536,
+        )
+    )
+    controller._previous_action_index = SKILL_ACTIONS.index("route_progression")
+    controller._same_skill_streak = 12
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+
+    assert mask["fire"]
+    assert not mask["press_exit"]
+    assert not mask["route_progression"]
+    assert not mask["retreat"]
+
+
+def test_skill_controller_low_health_close_fire_uses_defensive_movement():
+    controller = SkillController()
+    state = _state(
+        health=17,
+        enemy=True,
+        enemy_line_of_sight=True,
+        enemy_distance=164,
+        combat=True,
+    )
+    state.combat.target_distance_fp = 164 * 65536
+
+    action, decision = controller.action_for(SKILL_ACTIONS.index("fire"), state)
+
+    assert decision["skill"] == "ppo_defensive_fire"
+    assert action.raw.buttons & BT_ATTACK
+    assert action.raw.forward_move < 0
+    assert action.raw.side_move != 0
+
+
+def test_skill_controller_low_health_shootable_cooldown_defers_distant_exit():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(
+        tick=100,
+        kills=5,
+        health=17,
+        enemy=True,
+        enemy_line_of_sight=True,
+        enemy_distance=120,
+        combat=True,
+        route=True,
+    )
+    state.combat.target_distance_fp = 120 * 65536
+    state.navigation.use_lines.append(
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=576 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=576 * 65536, y_fp=-64 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=576 * 65536, y_fp=64 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=576 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=576 * 65536,
+            nearest_distance_fp=576 * 65536,
+        )
+    )
+    controller.policy._last_shot_tick = state.tick
+    controller._previous_action_index = SKILL_ACTIONS.index("fire")
+    controller._same_skill_streak = 15
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+
+    assert mask["retreat"]
+    assert not mask["fire"]
+    assert not mask["press_exit"]
+    assert not mask["route_progression"]
 
 
 def test_skill_controller_allows_press_exit_inside_activation_range():
