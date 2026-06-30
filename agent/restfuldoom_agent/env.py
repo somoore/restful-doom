@@ -999,7 +999,15 @@ class SkillController:
             if self._previous_action_index is not None
             else None
         )
-        if previous_skill not in {"press_exit", "route_progression"}:
+        recent_exit_commitment = self.policy._recent_post_combat_exit_line_active(
+            features,
+            allow_visible_contact=True,
+            allow_shootable_contact=True,
+        )
+        if (
+            previous_skill not in {"press_exit", "route_progression"}
+            and not recent_exit_commitment
+        ):
             return None
         line = self._postcombat_contact_exit_line(features)
         if line is None:

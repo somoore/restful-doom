@@ -2135,10 +2135,11 @@ class BrainPolicy:
         features: TacticalFeatures,
         *,
         allow_visible_contact: bool = False,
+        allow_shootable_contact: bool = False,
     ) -> bool:
         if self._last_post_combat_exit_line_id is None:
             return False
-        if self._shootable_enemy(features) is not None:
+        if self._shootable_enemy(features) is not None and not allow_shootable_contact:
             return False
         if features.visible_enemies and not allow_visible_contact:
             return False
@@ -2251,15 +2252,27 @@ class BrainPolicy:
             if release is not None:
                 return release
         if special in EXIT_LINE_SPECIALS and distance > 224.0:
-            local_door = self._select_exit_route_local_manual_line(features, line)
-            if local_door is not None:
-                return self._use_exit_route_local_manual_line(features, local_door, stuck)
-            if self._exit_assist_preemption_allowed(features, line):
-                assist_door = self._select_exit_assist_door(features, line)
-                if assist_door is not None:
-                    return self._use_nearby_line(features, assist_door, stuck)
+            if not self._critical_aligned_exit_owns_approach(features, line):
+                local_door = self._select_exit_route_local_manual_line(features, line)
+                if local_door is not None:
+                    return self._use_exit_route_local_manual_line(features, local_door, stuck)
+                if self._exit_assist_preemption_allowed(features, line):
+                    assist_door = self._select_exit_assist_door(features, line)
+                    if assist_door is not None:
+                        return self._use_nearby_line(features, assist_door, stuck)
 
         activate_distance = self._line_activate_distance(features, line)
+        front_distance = float(line.get("front_distance", distance))
+        exit_push_stalled = False
+        if (
+            special in EXIT_LINE_SPECIALS
+            and distance > activate_distance
+            and (
+                distance <= 224.0
+                or front_distance <= 160.0
+            )
+        ):
+            exit_push_stalled = self._exit_push_stalled(features, line, distance)
         if (
             special in EXIT_LINE_SPECIALS
             and distance > max(activate_distance, EXIT_ASSIST_DISTANCE_UNITS)
@@ -2285,8 +2298,6 @@ class BrainPolicy:
             and distance > activate_distance
             and distance <= 224.0
         ):
-            front_distance = float(line.get("front_distance", distance))
-            exit_push_stalled = self._exit_push_stalled(features, line, distance)
             if not bool(features.navigation.get("forward_open", True)):
                 front_angle_delta = float(line.get("front_angle_delta", angle_delta))
                 front_pulse_distance = EXIT_FRONT_EARLY_USE_DISTANCE_UNITS
@@ -2919,6 +2930,23 @@ class BrainPolicy:
             return True
         return int(exit_line.get("line_id", 0)) != self._last_post_combat_exit_line_id
 
+    def _critical_aligned_exit_owns_approach(
+        self,
+        features: TacticalFeatures,
+        exit_line: dict[str, Any],
+    ) -> bool:
+        if int(features.kills) < POST_COMBAT_EXIT_KILLS:
+            return False
+        if int(features.health) > 15:
+            return False
+        if int(exit_line.get("special", 0)) not in EXIT_LINE_SPECIALS:
+            return False
+        if int(exit_line.get("side", 0)) != 0:
+            return False
+        if self._line_control_distance(exit_line) > 512.0:
+            return False
+        return abs(self._line_control_angle_delta(exit_line)) <= 45.0
+
     def _select_exit_route_local_manual_line(
         self,
         features: TacticalFeatures,
@@ -2930,6 +2958,8 @@ class BrainPolicy:
         ):
             return None
         exit_distance = self._line_control_distance(exit_line)
+        if self._critical_aligned_exit_owns_approach(features, exit_line):
+            return None
         candidates = []
         for line in features.navigation.get("use_lines", []):
             if int(line.get("line_id", -1)) == int(exit_line.get("line_id", -2)):
