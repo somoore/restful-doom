@@ -2595,6 +2595,51 @@ def test_skill_controller_critical_exit_commitment_survives_intervening_fire():
     assert action.raw.forward_move > 0
 
 
+def test_skill_controller_critical_visible_exit_focus_overrides_retreat():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    committed = _state(
+        tick=100,
+        kills=5,
+        health=18,
+        enemy=False,
+    )
+    committed.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=1112 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=1112 * 65536, y_fp=-64 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=1112 * 65536, y_fp=64 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=1112 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=1112 * 65536,
+            nearest_distance_fp=1112 * 65536,
+        )
+    ]
+    controller.action_for(SKILL_ACTIONS.index("press_exit"), committed)
+
+    threatened = _state(
+        tick=140,
+        kills=5,
+        health=13,
+        enemy=True,
+        enemy_line_of_sight=True,
+        enemy_distance=64,
+        combat=False,
+    )
+    threatened.navigation.use_lines = committed.navigation.use_lines
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(threatened)))
+    action, decision = controller.action_for(SKILL_ACTIONS.index("press_exit"), threatened)
+
+    assert mask["press_exit"]
+    assert not mask["retreat"]
+    assert not mask["close_visible_contact"]
+    assert decision["use_line"]["line_id"] == 330
+    assert action.raw.forward_move > 0
+
+
 def test_skill_controller_mid_critical_shootable_blocks_distant_final_escape():
     controller = SkillController()
     controller.policy._start_kills = 0
@@ -2786,7 +2831,7 @@ def test_skill_controller_approaches_postcombat_exit_at_front_plateau():
     assert action.duration_tics == 4
 
 
-def test_skill_controller_recovers_stalled_postcombat_exit_front_plateau():
+def test_skill_controller_pushes_stalled_postcombat_exit_front_plateau():
     controller = SkillController()
     controller.policy._start_kills = 0
     state = _state(tick=80, kills=5, enemy=False)
@@ -2822,10 +2867,9 @@ def test_skill_controller_recovers_stalled_postcombat_exit_front_plateau():
         stuck=False,
     )
 
-    assert decision["skill"] == "recover_exit_switch_approach"
-    assert action.raw.forward_move < 0
-    assert action.raw.side_move != 0
-    assert not action.raw.buttons
+    assert decision["skill"] == "push_exit_switch"
+    assert action.raw.buttons & BT_USE
+    assert action.raw.forward_move > 0
 
 
 def test_skill_controller_critical_aligned_exit_skips_local_assist_door():
@@ -2878,6 +2922,89 @@ def test_skill_controller_critical_aligned_exit_skips_local_assist_door():
     assert decision["use_line"]["line_id"] == 330
     assert decision["skill"] == "approach_progression_line"
     assert action.raw.forward_move > 0
+
+
+def test_skill_controller_direct_aligned_exit_skips_local_door_before_critical_health():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(tick=120, kills=5, health=81, enemy=False)
+    state.navigation.forward_open = False
+    state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=227 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=227 * 65536, y_fp=64 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=227 * 65536, y_fp=-64 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=227 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=227 * 65536,
+            nearest_distance_fp=227 * 65536,
+        ),
+        SimpleNamespace(
+            line_id=325,
+            midpoint=SimpleNamespace(x_fp=107 * 65536, y_fp=64 * 65536, z_fp=0),
+            start=SimpleNamespace(x_fp=107 * 65536, y_fp=0, z_fp=0),
+            end=SimpleNamespace(x_fp=107 * 65536, y_fp=128 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=107 * 65536, y_fp=64 * 65536),
+            special=1,
+            tag=0,
+            distance_fp=107 * 65536,
+            nearest_distance_fp=107 * 65536,
+        ),
+    ]
+    features = extract_features(state, controller.memory, controller.params)
+    exit_line = dict(
+        next(
+            line
+            for line in features.navigation["use_lines"]
+            if int(line["line_id"]) == 330
+        )
+    )
+    exit_line["side"] = 0
+    exit_line["angle_delta"] = 2.0
+    exit_line["front_angle_delta"] = 28.0
+    exit_line["front_distance"] = 209.0
+
+    _action, decision = controller.policy._advance_progression_line(
+        features,
+        exit_line,
+        stuck=False,
+    )
+
+    assert decision["use_line"]["line_id"] == 330
+    assert decision["skill"] != "use_exit_route_local_door"
+    assert decision["skill"] != "approach_nearby_use_line"
+
+
+def test_skill_controller_stuck_aligned_exit_slides_inside_assist_range():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(tick=120, kills=6, health=12, enemy=False)
+    state.navigation.left_open = True
+    state.navigation.right_open = False
+    features = extract_features(state, controller.memory, controller.params)
+    line = {
+        "line_id": 330,
+        "special": 11,
+        "tag": 0,
+        "distance": 402.0,
+        "angle_delta": 0.5,
+        "side": 0,
+        "front_distance": 410.0,
+        "front_angle_delta": 14.0,
+    }
+
+    action, decision = controller.policy._advance_progression_line(
+        features,
+        line,
+        stuck=True,
+    )
+
+    assert decision["skill"] == "recover_aligned_exit_slide"
+    assert decision["use_line"]["line_id"] == 330
+    assert action.raw.forward_move > 0
+    assert action.raw.side_move < 0
 
 
 def test_skill_controller_recovers_close_exit_push_from_wrong_front_side():

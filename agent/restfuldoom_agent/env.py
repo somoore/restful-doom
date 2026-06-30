@@ -60,6 +60,8 @@ RECOVER_STUCK_ROUTE_STREAK_LIMIT = 32
 EXIT_ROUTE_FAILURE_RECOVERY_THRESHOLD = 4
 CONTACT_ROUTE_SUPPRESS_MAX_DISTANCE_UNITS = 768.0
 CRITICAL_WALK_ROUTE_PREEMPT_DISTANCE_UNITS = 384.0
+CRITICAL_VISIBLE_EXIT_FOCUS_DISTANCE_UNITS = 1200.0
+CRITICAL_VISIBLE_EXIT_FOCUS_ANGLE_DEGREES = 75.0
 
 
 def _line_is_exit(line: dict[str, Any] | None) -> bool:
@@ -1082,17 +1084,31 @@ class SkillController:
             return False
         if self.policy._shootable_enemy(features) is not None:
             return False
-        if int(features.health) <= 15:
-            return False
-        if int(features.health) > self.params.retreat_health:
-            return False
         if int(features.kills) < POST_COMBAT_EXIT_KILLS:
             return False
         if not self.policy._has_episode_kill(features):
             return False
-        if self.policy._line_control_distance(line) > POST_COMBAT_EXIT_ROUTE_DISTANCE_UNITS:
+        distance = self.policy._line_control_distance(line)
+        angle_delta = abs(self.policy._line_control_angle_delta(line))
+        if distance > POST_COMBAT_EXIT_ROUTE_DISTANCE_UNITS:
             return False
-        if abs(self.policy._line_control_angle_delta(line)) > 45.0:
+        recent_exit_commitment = self.policy._recent_post_combat_exit_line_active(
+            features,
+            allow_visible_contact=True,
+            allow_shootable_contact=True,
+        )
+        if (
+            int(features.health) <= 20
+            and distance <= CRITICAL_VISIBLE_EXIT_FOCUS_DISTANCE_UNITS
+            and angle_delta <= CRITICAL_VISIBLE_EXIT_FOCUS_ANGLE_DEGREES
+            and (recent_exit_commitment or int(features.health) <= 15)
+        ):
+            return True
+        if int(features.health) <= 15:
+            return False
+        if int(features.health) > self.params.retreat_health:
+            return False
+        if angle_delta > 45.0:
             return False
         nearest_visible = min(
             (float(enemy.get("distance", 999999.0)) for enemy in features.visible_enemies),
