@@ -42,6 +42,8 @@ EXIT_ASSIST_DOOR_CLOSE_USE_ANGLE_DEGREES = 48.0
 EXIT_ROUTE_LOCAL_DOOR_DISTANCE_UNITS = 192.0
 EXIT_ROUTE_LOCAL_DOOR_ANGLE_DEGREES = 60.0
 EXIT_ROUTE_LOCAL_DOOR_USE_COOLDOWN_TICS = 8
+EXIT_ROUTE_FRONT_BLOCKER_MAX_USES = 18
+EXIT_ROUTE_FRONT_BLOCKER_EXIT_TURN_DEGREES = 30.0
 EXIT_USE_RELEASE_TICS = 1
 EXIT_DIRECT_APPROACH_OWN_DISTANCE_UNITS = 256.0
 EXIT_DIRECT_APPROACH_OWN_ANGLE_DEGREES = 45.0
@@ -607,6 +609,7 @@ class BrainPolicy:
         self._blocked_use_lines: dict[str, int] = {}
         self._line_attempts: dict[str, dict[str, Any]] = {}
         self._exit_push_attempts: dict[str, dict[str, Any]] = {}
+        self._exit_route_front_blocker_uses: dict[str, dict[str, Any]] = {}
         self._episode_cell_visits: dict[str, int] = {}
         self._start_kills: int | None = None
         self._last_visible_enemy_tick = -9999
@@ -632,6 +635,7 @@ class BrainPolicy:
         self._blocked_use_lines.clear()
         self._line_attempts.clear()
         self._exit_push_attempts.clear()
+        self._exit_route_front_blocker_uses.clear()
         self._episode_cell_visits.clear()
         self._start_kills = None
         self._last_visible_enemy_tick = -9999
@@ -2248,6 +2252,133 @@ class BrainPolicy:
             ),
         )
 
+    def _exit_route_front_blocker_key(
+        self,
+        features: TacticalFeatures,
+        blocker_line: dict[str, Any],
+        exit_line: dict[str, Any],
+    ) -> str:
+        return (
+            f"{int(features.episode)}:{int(features.map)}:{features.cell}:"
+            f"{int(exit_line.get('line_id', -1))}:{int(blocker_line.get('line_id', -1))}"
+        )
+
+    def _record_exit_route_front_blocker_use(
+        self,
+        features: TacticalFeatures,
+        blocker_line: dict[str, Any],
+        exit_line: dict[str, Any],
+    ) -> dict[str, Any]:
+        key = self._exit_route_front_blocker_key(features, blocker_line, exit_line)
+        record = self._exit_route_front_blocker_uses.setdefault(
+            key,
+            {
+                "first_tick": int(features.tick),
+                "count": 0,
+                "best_exit_distance": float(
+                    exit_line.get("distance", self._line_control_distance(exit_line))
+                ),
+            },
+        )
+        record["count"] = int(record.get("count", 0)) + 1
+        record["last_tick"] = int(features.tick)
+        record["best_exit_distance"] = min(
+            float(record.get("best_exit_distance", 999999.0)),
+            float(exit_line.get("distance", self._line_control_distance(exit_line))),
+        )
+        return record
+
+    def _exit_route_front_blocker_exhausted(
+        self,
+        features: TacticalFeatures,
+        blocker_line: dict[str, Any],
+        exit_line: dict[str, Any],
+    ) -> bool:
+        key = self._exit_route_front_blocker_key(features, blocker_line, exit_line)
+        record = self._exit_route_front_blocker_uses.get(key)
+        if record is None:
+            return False
+        return int(record.get("count", 0)) >= EXIT_ROUTE_FRONT_BLOCKER_MAX_USES
+
+    def _recover_after_exit_route_front_blocker_exhausted(
+        self,
+        features: TacticalFeatures,
+        blocker_line: dict[str, Any],
+        exit_line: dict[str, Any],
+        exit_line_record: dict[str, Any],
+        stuck: bool,
+    ) -> tuple[Any, dict[str, Any]]:
+        angle_delta = self._line_control_angle_delta(exit_line)
+        if abs(angle_delta) > EXIT_ROUTE_FRONT_BLOCKER_EXIT_TURN_DEGREES:
+            return (
+                semantic_action(
+                    turn_action_for_delta(angle_delta),
+                    amount=self.params.turn_amount,
+                    duration_tics=2,
+                    tick=features.tick,
+                ),
+                self._decision(
+                    "turn_to_exit_switch",
+                    features,
+                    stuck=stuck,
+                    use_line=exit_line_record,
+                    exhausted_blocker_line=self._line_record(blocker_line),
+                    blocker_use_count=int(
+                        self._exit_route_front_blocker_uses[
+                            self._exit_route_front_blocker_key(
+                                features,
+                                blocker_line,
+                                exit_line,
+                            )
+                        ].get("count", 0)
+                    ),
+                ),
+            )
+        front_angle_delta = float(exit_line.get("front_angle_delta", angle_delta))
+        return (
+            raw_ticcmd_action(
+                forward_move=self.params.move_amount,
+                angle_turn=raw_turn_for_delta(front_angle_delta),
+                duration_tics=4,
+                tick=features.tick,
+            ),
+            self._decision(
+                "approach_exit_switch_front",
+                features,
+                stuck=stuck,
+                use_line=exit_line_record,
+                exhausted_blocker_line=self._line_record(blocker_line),
+            ),
+        )
+
+    def _try_exit_route_front_blocker_line(
+        self,
+        features: TacticalFeatures,
+        exit_line: dict[str, Any],
+        exit_line_record: dict[str, Any],
+        stuck: bool,
+    ) -> tuple[Any, dict[str, Any]] | None:
+        blocker_line = self._select_exit_route_front_blocker_line(
+            features,
+            exit_line,
+        )
+        if blocker_line is None:
+            return None
+        if self._exit_route_front_blocker_exhausted(features, blocker_line, exit_line):
+            return self._recover_after_exit_route_front_blocker_exhausted(
+                features,
+                blocker_line,
+                exit_line,
+                exit_line_record,
+                stuck,
+            )
+        return self._use_exit_route_front_blocker_line(
+            features,
+            blocker_line,
+            exit_line_record,
+            stuck,
+        )
+
     def _use_exit_route_front_blocker_line(
         self,
         features: TacticalFeatures,
@@ -2256,6 +2387,11 @@ class BrainPolicy:
         stuck: bool,
     ) -> tuple[Any, dict[str, Any]]:
         angle_delta = self._line_control_angle_delta(blocker_line)
+        usage = self._record_exit_route_front_blocker_use(
+            features,
+            blocker_line,
+            exit_line_record,
+        )
         self._last_use_tick = features.tick
         return (
             raw_ticcmd_action(
@@ -2277,6 +2413,8 @@ class BrainPolicy:
                 front_blocking_line_special=int(
                     features.navigation.get("front_blocking_line_special", 0)
                 ),
+                blocker_use_count=int(usage.get("count", 0)),
+                blocker_use_max=EXIT_ROUTE_FRONT_BLOCKER_MAX_USES,
             ),
         )
 
@@ -2421,17 +2559,14 @@ class BrainPolicy:
                             else EXIT_ROUTE_LOCAL_DOOR_USE_COOLDOWN_TICS
                         ),
                     ):
-                        blocker_line = self._select_exit_route_front_blocker_line(
+                        front_blocker = self._try_exit_route_front_blocker_line(
                             features,
                             line,
+                            line_record,
+                            stuck,
                         )
-                        if blocker_line is not None:
-                            return self._use_exit_route_front_blocker_line(
-                                features,
-                                blocker_line,
-                                line_record,
-                                stuck,
-                            )
+                        if front_blocker is not None:
+                            return front_blocker
                         self._last_use_tick = features.tick
                         return (
                             semantic_action(
@@ -2750,17 +2885,14 @@ class BrainPolicy:
                         else EXIT_ROUTE_LOCAL_DOOR_USE_COOLDOWN_TICS
                     ),
                 ):
-                    blocker_line = self._select_exit_route_front_blocker_line(
+                    front_blocker = self._try_exit_route_front_blocker_line(
                         features,
                         line,
+                        line_record,
+                        stuck,
                     )
-                    if blocker_line is not None:
-                        return self._use_exit_route_front_blocker_line(
-                            features,
-                            blocker_line,
-                            line_record,
-                            stuck,
-                        )
+                    if front_blocker is not None:
+                        return front_blocker
                     self._last_use_tick = features.tick
                     return (
                         semantic_action(

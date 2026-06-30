@@ -7,6 +7,7 @@ from restfuldoom_agent.brain import (
     BrainPolicy,
     BrainPolicyParams,
     EpisodeStats,
+    EXIT_ROUTE_FRONT_BLOCKER_MAX_USES,
     LINE_ATTEMPT_STALL_TICS,
     cell_key,
     combat_from_state,
@@ -3302,6 +3303,93 @@ def test_stalled_exit_push_targets_nearby_front_blocker_line(tmp_path):
     assert action.raw.buttons & 2
     assert action.raw.forward_move > 0
     assert action.raw.angle_turn != 0
+
+
+def test_exhausted_front_blocker_turns_back_to_exit_line(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    game_state = state(tick=100)
+    game_state.player.kills = 6
+    game_state.navigation.forward_open = False
+    game_state.navigation.back_open = True
+    game_state.navigation.use_line_ahead = True
+    game_state.navigation.front_blocking_line_special = 1
+    game_state.navigation.front_block_distance_fp = 16 * 65536
+    features = extract_features(game_state, memory, BrainPolicyParams())
+    exit_line = {
+        "line_id": 330,
+        "special": 11,
+        "tag": 0,
+        "distance": 176.0,
+        "distance_fp": 176 * 65536,
+        "nearest_distance_fp": 176 * 65536,
+        "angle_delta": -43.0,
+        "side": 0,
+        "front_distance": 121.1,
+        "front_angle_delta": 21.4,
+        "x_units": 176.0,
+        "y_units": -45.0,
+        "nearest_x_units": 176.0,
+        "nearest_y_units": -45.0,
+        "start_x_units": 176.0,
+        "start_y_units": -109.0,
+        "end_x_units": 176.0,
+        "end_y_units": 19.0,
+    }
+    blocker_line = {
+        "line_id": 325,
+        "special": 1,
+        "tag": 0,
+        "distance": 16.0,
+        "distance_fp": 16 * 65536,
+        "nearest_distance_fp": 16 * 65536,
+        "angle_delta": 7.0,
+        "side": 0,
+        "front_distance": 80.0,
+        "front_angle_delta": 180.0,
+        "x_units": 14.0,
+        "y_units": 8.0,
+        "nearest_x_units": 14.0,
+        "nearest_y_units": 8.0,
+        "start_x_units": 14.0,
+        "start_y_units": -56.0,
+        "end_x_units": 14.0,
+        "end_y_units": 72.0,
+    }
+    features.navigation["use_lines"] = [blocker_line, exit_line]
+    policy._exit_push_attempts[policy._line_key(features.cell, exit_line)] = {
+        "first_tick": 40,
+        "best_distance": 176.0,
+        "signature": {
+            "cell": features.cell,
+            "episode": features.episode,
+            "map": features.map,
+            "kills": features.kills,
+            "items": features.items,
+        },
+    }
+    blocker_key = policy._exit_route_front_blocker_key(
+        features,
+        blocker_line,
+        exit_line,
+    )
+    policy._exit_route_front_blocker_uses[blocker_key] = {
+        "first_tick": 80,
+        "last_tick": 99,
+        "count": EXIT_ROUTE_FRONT_BLOCKER_MAX_USES,
+        "best_exit_distance": 176.0,
+    }
+
+    action, decision = policy._advance_progression_line(features, exit_line, stuck=True)
+
+    assert decision["skill"] == "turn_to_exit_switch"
+    assert decision["use_line"]["line_id"] == 330
+    assert decision["exhausted_blocker_line"]["line_id"] == 325
+    assert action.action == turn_action_for_delta(-43.0)
 
 
 def test_stalled_exit_push_approaches_from_front_side_until_real_range(tmp_path):
