@@ -18,8 +18,10 @@ from restfuldoom_agent.env import (
     DoomEnvConfig,
     EXIT_ROUTE_FAILURE_RECOVERY_THRESHOLD,
     LOW_HEALTH_RETREAT_STREAK_LIMIT,
+    RECOVER_STUCK_ROUTE_STREAK_LIMIT,
     SKILL_ACTIONS,
     SkillController,
+    VISIBLE_CONTACT_RETREAT_STREAK_LIMIT,
     _route_outcome,
 )
 from restfuldoom_agent.schemas import OBSERVATION_SCHEMA
@@ -424,12 +426,27 @@ def test_skill_controller_low_health_contact_forces_retreat():
     assert not visible_mask["close_visible_contact"]
 
 
-def test_skill_controller_healthy_close_visible_contact_does_not_unmask_retreat():
-    # Regression: a full-health agent facing a close, visible, non-shootable
-    # enemy must close in, not be free to retreat out of the step budget.
+def test_skill_controller_healthy_close_visible_contact_caps_retreat_loop():
     controller = SkillController()
     state = _state(enemy=True, combat=False, health=100, enemy_distance=200)
 
+    initial_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+    controller._previous_action_index = SKILL_ACTIONS.index("retreat")
+    controller._same_skill_streak = VISIBLE_CONTACT_RETREAT_STREAK_LIMIT
+    capped_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+
+    assert initial_mask["close_visible_contact"]
+    assert initial_mask["retreat"]
+    assert capped_mask["close_visible_contact"]
+    assert not capped_mask["retreat"]
+
+
+def test_skill_controller_low_health_visible_contact_respects_retreat_loop_cap():
+    controller = SkillController()
+    state = _state(enemy=True, combat=False, health=30, enemy_distance=200)
+
+    controller._previous_action_index = SKILL_ACTIONS.index("retreat")
+    controller._same_skill_streak = LOW_HEALTH_RETREAT_STREAK_LIMIT
     mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
 
     assert mask["close_visible_contact"]
@@ -2506,6 +2523,23 @@ def test_unstick_turn_does_not_reset_recovery_phase():
     assert policy._last_progress_tick == 10
     _next_action, next_decision = policy._recover_from_stuck(next_features)
     assert next_decision["stuck_phase"] == 4
+
+
+def test_skill_controller_caps_recover_stuck_when_route_available():
+    controller = SkillController()
+    initial = _state(tick=10, route=True)
+    stuck_state = _state(tick=40, route=True)
+
+    controller.action_mask(initial)
+    initial_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(stuck_state)))
+    controller._previous_action_index = SKILL_ACTIONS.index("recover_stuck")
+    controller._same_skill_streak = RECOVER_STUCK_ROUTE_STREAK_LIMIT
+    capped_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(stuck_state)))
+
+    assert initial_mask["route_progression"]
+    assert initial_mask["recover_stuck"]
+    assert capped_mask["route_progression"]
+    assert not capped_mask["recover_stuck"]
 
 
 def test_stuck_walk_trigger_route_yields_to_recovery():

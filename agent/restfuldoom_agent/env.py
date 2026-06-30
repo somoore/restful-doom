@@ -55,6 +55,8 @@ from .skill_policy import features_from_tactical
 
 SKILL_ACTIONS = PPO_SKILL_ACTIONS
 LOW_HEALTH_RETREAT_STREAK_LIMIT = 96
+VISIBLE_CONTACT_RETREAT_STREAK_LIMIT = 32
+RECOVER_STUCK_ROUTE_STREAK_LIMIT = 32
 EXIT_ROUTE_FAILURE_RECOVERY_THRESHOLD = 4
 CONTACT_ROUTE_SUPPRESS_MAX_DISTANCE_UNITS = 768.0
 CRITICAL_WALK_ROUTE_PREEMPT_DISTANCE_UNITS = 384.0
@@ -599,6 +601,10 @@ class SkillController:
             and not can_fire
             and low_health_contact
         )
+        low_health_retreat_allowed = low_health_contact and self._low_health_retreat_allowed(
+            features,
+            recent_contact_active=recent_contact_active,
+        )
         if postcombat_route_available:
             progression_line = self.policy._select_progression_line(features)
             postcombat_route_available = progression_line is not None
@@ -627,10 +633,7 @@ class SkillController:
             else None
         )
         critical_shootable_fire = can_fire and int(features.health) <= 15
-        if low_health_contact and self._low_health_retreat_allowed(
-            features,
-            recent_contact_active=recent_contact_active,
-        ) and exit_commitment_line is None and not postcombat_route_available and threatened_exit_line is None and contact_exit_line is None and not self._low_health_damaging_sector_combat(features) and not critical_shootable_fire:
+        if low_health_retreat_allowed and exit_commitment_line is None and not postcombat_route_available and threatened_exit_line is None and contact_exit_line is None and not self._low_health_damaging_sector_combat(features) and not critical_shootable_fire:
             mask["retreat"] = True
             if stuck:
                 mask["recover_stuck"] = True
@@ -674,8 +677,15 @@ class SkillController:
                 and self._contact_use_line_ready_for_visible_contact(features, contact_line)
             ):
                 mask["open_use_line"] = True
-            if contact_exit_line is None and features.health <= self.params.retreat_health:
-                mask["retreat"] = True
+            if contact_exit_line is None:
+                if features.health <= self.params.retreat_health:
+                    if low_health_retreat_allowed:
+                        mask["retreat"] = True
+                elif self._healthy_visible_contact_retreat_allowed(
+                    features,
+                    can_fire=can_fire,
+                ):
+                    mask["retreat"] = True
         elif recent_contact_active:
             if (
                 not postcombat_exit_commitment
@@ -776,6 +786,9 @@ class SkillController:
 
         if stuck:
             mask["recover_stuck"] = True
+
+        if self._recover_stuck_route_loop_capped(mask):
+            mask["recover_stuck"] = False
 
         if postcombat_exit_available:
             mask["press_exit"] = True
@@ -1468,6 +1481,8 @@ class SkillController:
     ) -> bool:
         """Avoids trapping low-health no-LOS states in endless retreat."""
         if features.visible_enemies:
+            if self._previous_action_index == SKILL_ACTIONS.index("retreat"):
+                return self._same_skill_streak < LOW_HEALTH_RETREAT_STREAK_LIMIT
             return True
         if not recent_contact_active:
             return False
@@ -1484,6 +1499,36 @@ class SkillController:
         if self._previous_action_index != SKILL_ACTIONS.index("retreat"):
             return True
         return self._same_skill_streak < LOW_HEALTH_RETREAT_STREAK_LIMIT
+
+    def _healthy_visible_contact_retreat_allowed(
+        self,
+        features: Any,
+        *,
+        can_fire: bool,
+    ) -> bool:
+        """Allow short tactical retreats from close contact without retreat loops."""
+        if can_fire or not features.visible_enemies:
+            return False
+        nearest_visible = min(
+            (float(enemy["distance"]) for enemy in features.visible_enemies),
+            default=99999.0,
+        )
+        if nearest_visible > self.params.close_enemy_units:
+            return False
+        if (
+            self._previous_action_index == SKILL_ACTIONS.index("retreat")
+            and self._same_skill_streak >= VISIBLE_CONTACT_RETREAT_STREAK_LIMIT
+        ):
+            return False
+        return True
+
+    def _recover_stuck_route_loop_capped(self, mask: dict[str, bool]) -> bool:
+        """Force routing again after repeated recovery when route is legal."""
+        if not mask.get("recover_stuck") or not mask.get("route_progression"):
+            return False
+        if self._previous_action_index != SKILL_ACTIONS.index("recover_stuck"):
+            return False
+        return self._same_skill_streak >= RECOVER_STUCK_ROUTE_STREAK_LIMIT
 
     def _low_health_damaging_sector_combat(self, features: Any) -> bool:
         """Avoids retreat-only masks when combat must be finished inside damage."""
