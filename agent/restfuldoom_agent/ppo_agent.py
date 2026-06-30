@@ -16,7 +16,13 @@ from typing import Any, Callable
 
 from .brain import AgentMemory, POST_COMBAT_EXIT_KILLS
 from .curriculum import build_curriculum, curriculum_names, stage_for_update
-from .env import ACTION_SCHEMA, OBSERVATION_SCHEMA, DoomAgentEnv, DoomEnvConfig
+from .env import (
+    ACTION_SCHEMA,
+    OBSERVATION_SCHEMA,
+    PRIMITIVE_ACTIONS,
+    DoomAgentEnv,
+    DoomEnvConfig,
+)
 from .ppo import BehaviorCloneSample, PPOConfig, PPOTrainer, require_torch
 from .ppo_eval import (
     decide_promotion,
@@ -45,6 +51,13 @@ _RESUME_CONFIG_OVERRIDE_FIELDS = (
     "rollout_steps",
     "seed",
 )
+
+
+def _action_dim_for(args: argparse.Namespace) -> int:
+    """Returns the PPO action_dim for the configured action space."""
+    if bool(getattr(args, "primitive_actions", False)):
+        return len(PRIMITIVE_ACTIONS)
+    return len(ACTION_SCHEMA["actions"])
 
 
 async def train(args: argparse.Namespace) -> dict[str, object]:
@@ -80,12 +93,12 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
             resume_checkpoint,
             device=args.device,
             target_obs_dim=len(OBSERVATION_SCHEMA["feature_names"]),
-            target_action_dim=len(ACTION_SCHEMA["actions"]),
+            target_action_dim=_action_dim_for(args),
         )
     else:
         trainer = PPOTrainer(
             obs_dim=len(OBSERVATION_SCHEMA["feature_names"]),
-            action_dim=len(ACTION_SCHEMA["actions"]),
+            action_dim=_action_dim_for(args),
             config=ppo_config,
             device=args.device,
         )
@@ -403,6 +416,7 @@ async def evaluate(args: argparse.Namespace) -> dict[str, object]:
         ),
         allowed_skills=tuple(getattr(args, "allowed_skill", []) or ()),
         strict_allowed_skills=bool(getattr(args, "strict_allowed_skills", False)),
+        primitive_actions=bool(getattr(args, "primitive_actions", False)),
         snapshot_verify_restored_state=args.snapshot_verify_restored_state,
         snapshot_verify_tick_tolerance=args.snapshot_verify_tick_tolerance,
         snapshot_verify_stream_tick=args.snapshot_verify_stream_tick,
@@ -559,6 +573,7 @@ def _env_config_for_start(
         ),
         allowed_skills=tuple(getattr(args, "allowed_skill", []) or ()),
         strict_allowed_skills=bool(getattr(args, "strict_allowed_skills", False)),
+        primitive_actions=bool(getattr(args, "primitive_actions", False)),
     )
 
 
@@ -2891,6 +2906,14 @@ def main() -> None:
             "When --allowed-skill filters out every normal action, keep the policy "
             "inside the allowlist instead of falling back to the unfiltered mask. "
             "Use this for exact bottleneck ladder evals."
+        ),
+    )
+    parser.add_argument(
+        "--primitive-actions",
+        action="store_true",
+        help=(
+            "proof-of-life mode: use the primitive per-tic RawTiccmd action space "
+            "instead of the high-level skill action space"
         ),
     )
     parser.add_argument("--updates", type=int, default=1)
