@@ -2288,6 +2288,39 @@ class BrainPolicy:
             front_distance = float(line.get("front_distance", distance))
             if not bool(features.navigation.get("forward_open", True)):
                 front_angle_delta = float(line.get("front_angle_delta", angle_delta))
+                front_pulse_distance = EXIT_FRONT_EARLY_USE_DISTANCE_UNITS
+                if (
+                    bool(features.navigation.get("use_line_ahead"))
+                    and int(features.navigation.get("front_blocking_line_special", 0)) == 0
+                ):
+                    front_pulse_distance = USE_LINE_ACTIVATE_DISTANCE_UNITS
+                if (
+                    int(features.kills) >= POST_COMBAT_EXIT_KILLS
+                    and int(line.get("side", 0)) == 0
+                    and front_distance <= max(
+                        activate_distance,
+                        front_pulse_distance,
+                    )
+                    + 16.0
+                    and abs(front_angle_delta) <= 30
+                    and abs(angle_delta) <= 45.0
+                ):
+                    self._last_use_tick = features.tick
+                    return (
+                        raw_ticcmd_action(
+                            buttons=BT_USE,
+                            forward_move=max(4, self.params.move_amount // 2),
+                            angle_turn=raw_turn_for_delta(front_angle_delta),
+                            duration_tics=1,
+                            tick=features.tick,
+                        ),
+                        self._decision(
+                            "push_exit_switch",
+                            features,
+                            stuck=stuck,
+                            use_line=line_record,
+                        ),
+                    )
                 if (
                     int(features.navigation.get("front_blocking_line_special", 0)) == 0
                     and min(distance, front_distance) > activate_distance
@@ -2378,6 +2411,34 @@ class BrainPolicy:
                     front_pulse_distance = USE_LINE_ACTIVATE_DISTANCE_UNITS
                 if (
                     int(features.kills) >= POST_COMBAT_EXIT_KILLS
+                    and int(line.get("side", 0)) == 0
+                    and distance <= 224.0
+                    and front_distance <= max(
+                        activate_distance,
+                        front_pulse_distance,
+                    )
+                    + 16.0
+                    and abs(front_angle_delta) <= 30
+                    and abs(angle_delta) <= 45.0
+                ):
+                    self._last_use_tick = features.tick
+                    return (
+                        raw_ticcmd_action(
+                            buttons=BT_USE,
+                            forward_move=max(4, self.params.move_amount // 2),
+                            angle_turn=raw_turn_for_delta(front_angle_delta),
+                            duration_tics=1,
+                            tick=features.tick,
+                        ),
+                        self._decision(
+                            "push_exit_switch",
+                            features,
+                            stuck=stuck,
+                            use_line=line_record,
+                        ),
+                    )
+                if (
+                    int(features.kills) >= POST_COMBAT_EXIT_KILLS
                     and front_distance <= max(
                         activate_distance,
                         front_pulse_distance,
@@ -2444,6 +2505,33 @@ class BrainPolicy:
                     ),
                     self._decision(
                         "approach_exit_switch_real_range",
+                        features,
+                        stuck=stuck,
+                        use_line=line_record,
+                    ),
+                )
+            if (
+                int(features.kills) >= POST_COMBAT_EXIT_KILLS
+                and distance <= 224.0
+                and front_distance <= max(
+                    activate_distance,
+                    front_pulse_distance,
+                )
+                + 16.0
+                and abs(front_angle_delta) <= 30
+                and abs(angle_delta) <= 45.0
+            ):
+                self._last_use_tick = features.tick
+                return (
+                    raw_ticcmd_action(
+                        buttons=BT_USE,
+                        forward_move=max(4, self.params.move_amount // 2),
+                        angle_turn=raw_turn_for_delta(front_angle_delta),
+                        duration_tics=1,
+                        tick=features.tick,
+                    ),
+                    self._decision(
+                        "push_exit_switch",
                         features,
                         stuck=stuck,
                         use_line=line_record,

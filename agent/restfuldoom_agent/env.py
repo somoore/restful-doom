@@ -637,6 +637,7 @@ class SkillController:
         low_health_retreat_allowed = low_health_contact and self._low_health_retreat_allowed(
             features,
             recent_contact_active=recent_contact_active,
+            stuck=stuck,
         )
         if postcombat_route_available:
             progression_line = self.policy._select_progression_line(features)
@@ -1184,8 +1185,12 @@ class SkillController:
             enemy = self.policy._shootable_enemy(features)
             if enemy is not None and self.policy._can_shoot(features, enemy):
                 self.policy._last_shot_tick = features.tick
-                if int(features.health) <= 20 and float(enemy["distance"]) <= 220.0:
-                    critical_health = int(features.health) <= 10
+                critical_health = int(features.health) <= 10
+                defensive_fire_distance = 640.0 if critical_health else 220.0
+                if (
+                    int(features.health) <= 20
+                    and float(enemy["distance"]) <= defensive_fire_distance
+                ):
                     return (
                         raw_ticcmd_action(
                             buttons=BT_ATTACK,
@@ -1665,9 +1670,12 @@ class SkillController:
         features: Any,
         *,
         recent_contact_active: bool,
+        stuck: bool,
     ) -> bool:
         """Avoids trapping low-health no-LOS states in endless retreat."""
         if features.visible_enemies:
+            if stuck and self.policy._shootable_enemy(features) is None:
+                return False
             if self._previous_action_index == SKILL_ACTIONS.index("retreat"):
                 return self._same_skill_streak < LOW_HEALTH_RETREAT_STREAK_LIMIT
             return True

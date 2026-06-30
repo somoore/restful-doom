@@ -454,6 +454,25 @@ def test_skill_controller_low_health_visible_contact_respects_retreat_loop_cap()
     assert not mask["retreat"]
 
 
+def test_skill_controller_stuck_low_health_visible_contact_blocks_retreat():
+    controller = SkillController()
+    state = _state(
+        tick=controller.params.stuck_window_tics + 5,
+        enemy=True,
+        combat=False,
+        health=30,
+        enemy_distance=200,
+    )
+    controller.policy._last_position = (0.0, 0.0)
+    controller.policy._last_progress_tick = 0
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+
+    assert mask["close_visible_contact"]
+    assert mask["recover_stuck"]
+    assert not mask["retreat"]
+
+
 def test_skill_controller_low_health_damaging_sector_combat_allows_fire():
     controller = SkillController()
     state = _state(enemy=True, combat=True, health=5, hazard=True)
@@ -2546,6 +2565,26 @@ def test_skill_controller_low_health_close_fire_uses_defensive_movement():
     assert action.raw.side_move != 0
 
 
+def test_skill_controller_critical_health_far_fire_uses_defensive_movement():
+    controller = SkillController()
+    state = _state(
+        health=9,
+        enemy=True,
+        enemy_line_of_sight=True,
+        enemy_distance=536,
+        combat=True,
+    )
+    state.combat.target_distance_fp = 536 * 65536
+
+    action, decision = controller.action_for(SKILL_ACTIONS.index("fire"), state)
+
+    assert decision["skill"] == "ppo_defensive_fire"
+    assert action.raw.buttons & BT_ATTACK
+    assert action.raw.forward_move < 0
+    assert action.raw.side_move != 0
+    assert action.duration_tics == 2
+
+
 def test_skill_controller_low_health_shootable_cooldown_defers_distant_exit():
     controller = SkillController()
     controller.policy._start_kills = 0
@@ -2632,6 +2671,35 @@ def test_skill_controller_approaches_exit_before_push_window():
 
     assert mask["press_exit"]
     assert decision["skill"] == "approach_exit_switch_front"
+
+
+def test_skill_controller_pulses_postcombat_exit_at_front_plateau():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    state = _state(tick=20, kills=5, enemy=False)
+    state.navigation.forward_open = False
+    features = extract_features(state, controller.memory, controller.params)
+    line = {
+        "line_id": 330,
+        "special": 11,
+        "tag": 0,
+        "distance": 176.0,
+        "angle_delta": -24.0,
+        "side": 0,
+        "front_distance": 148.0,
+        "front_angle_delta": 12.0,
+    }
+
+    action, decision = controller.policy._advance_progression_line(
+        features,
+        line,
+        stuck=False,
+    )
+
+    assert decision["skill"] == "push_exit_switch"
+    assert action.raw.buttons & BT_USE
+    assert action.raw.forward_move > 0
+    assert action.duration_tics == 1
 
 
 def test_skill_controller_pushes_exit_when_close_front_path_is_blocked():
