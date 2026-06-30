@@ -118,6 +118,7 @@ class DoomEnvConfig:
     shootable_fire_reward: float = 0.5
     missed_fire_penalty: float = 0.05
     blind_fire_penalty: float = 0.02
+    step_time_penalty: float = 0.0
     route_progress_reward: float = 0.01
     route_reached_reward: float = 0.25
     route_failure_penalty: float = 0.03
@@ -671,7 +672,7 @@ class SkillController:
         critical_shootable_fire = can_fire and int(features.health) <= 15
         critical_exit_escape_line = (
             self._critical_postcombat_exit_escape_line(features)
-            if critical_shootable_fire
+            if shootable is not None and int(features.health) <= 15
             else None
         )
         critical_hazard_exit_escape = (
@@ -699,7 +700,7 @@ class SkillController:
                 or self.policy._line_control_distance(contact_threat_line) > 224.0
             )
         )
-        if low_health_retreat_allowed and not late_visible_contact_closure and exit_commitment_line is None and not postcombat_route_available and threatened_exit_line is None and visible_contact_exit_line is None and not self._low_health_damaging_sector_combat(features) and not critical_shootable_fire:
+        if low_health_retreat_allowed and not late_visible_contact_closure and exit_commitment_line is None and not postcombat_route_available and not postcombat_exit_available and critical_exit_escape_line is None and threatened_exit_line is None and visible_contact_exit_line is None and not self._low_health_damaging_sector_combat(features) and not critical_shootable_fire:
             mask["retreat"] = True
             if stuck:
                 mask["recover_stuck"] = True
@@ -1017,6 +1018,10 @@ class SkillController:
             line = self._postcombat_exit_under_threat_line(features)
         if line is None:
             line = self.policy._select_local_exit_line(features)
+        if line is None:
+            line = self._postcombat_far_exit_line(features)
+        if line is None:
+            line = self._blocked_postcombat_exit_line(features)
         if line is None:
             return None
         return line
@@ -1988,7 +1993,21 @@ class SkillController:
             return False
         if not self.policy._has_episode_kill(features):
             return False
-        if self.policy._line_control_distance(line) > EXIT_ASSIST_DISTANCE_UNITS:
+        distance_limit = EXIT_ASSIST_DISTANCE_UNITS
+        sector = features.navigation.get("current_sector", {}) or {}
+        damaging_sector = bool(sector.get("damaging")) or int(
+            sector.get("damage_per_32_tics", 0)
+        ) > 0
+        if (
+            not features.visible_enemies
+            and self.policy._shootable_enemy(features) is None
+            and (
+                damaging_sector
+                or int(features.health) <= self.params.retreat_health + 5
+            )
+        ):
+            distance_limit = POST_COMBAT_EXIT_ROUTE_DISTANCE_UNITS
+        if self.policy._line_control_distance(line) > distance_limit:
             return False
         return abs(self.policy._line_control_angle_delta(line)) <= 150.0
 
@@ -2544,6 +2563,8 @@ class DoomAgentEnv:
         )
         action_reward = combat_action_reward + route_action_reward + exit_ready_action_reward
         total_reward += action_reward
+        # ponytail: per-macro-step time cost (subtracted once per step(), not per tic).
+        total_reward -= self.config.step_time_penalty
         self._current_state = current
         if hasattr(self.controller, "record_action_history"):
             self.controller.record_action_history(

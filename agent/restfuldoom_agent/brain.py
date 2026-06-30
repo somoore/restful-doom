@@ -3069,6 +3069,10 @@ class BrainPolicy:
                 and abs(front_angle_delta) >= 120.0
                 and features.navigation.get("back_open", False)
                 and self._exit_push_stalled(features, line, distance)
+                and not (
+                    raw_distance <= EXIT_LINE_CONFIRMED_USE_DISTANCE_UNITS
+                    and 18.0 < abs(angle_delta) <= 45.0
+                )
             ):
                 return (
                     raw_ticcmd_action(

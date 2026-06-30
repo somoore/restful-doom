@@ -365,6 +365,10 @@ async def evaluate(args: argparse.Namespace) -> dict[str, object]:
         reset_warmup_max_tics=args.reset_warmup_max_tics,
         reset_warmup_until_visible=args.reset_warmup_until_visible,
         reset_warmup_until_shootable=args.reset_warmup_until_shootable,
+        shootable_fire_reward=float(getattr(args, "shootable_fire_reward", 0.5)),
+        missed_fire_penalty=float(getattr(args, "missed_fire_penalty", 0.05)),
+        blind_fire_penalty=float(getattr(args, "blind_fire_penalty", 0.02)),
+        step_time_penalty=float(getattr(args, "step_time_penalty", 0.0)),
         first_visible_bonus=args.first_visible_bonus,
         first_shootable_bonus=args.first_shootable_bonus,
         visible_contact_progress_reward=args.visible_contact_progress_reward,
@@ -517,6 +521,10 @@ def _env_config_for_start(
         reset_warmup_max_tics=args.reset_warmup_max_tics,
         reset_warmup_until_visible=args.reset_warmup_until_visible,
         reset_warmup_until_shootable=args.reset_warmup_until_shootable,
+        shootable_fire_reward=float(getattr(args, "shootable_fire_reward", 0.5)),
+        missed_fire_penalty=float(getattr(args, "missed_fire_penalty", 0.05)),
+        blind_fire_penalty=float(getattr(args, "blind_fire_penalty", 0.02)),
+        step_time_penalty=float(getattr(args, "step_time_penalty", 0.0)),
         first_visible_bonus=args.first_visible_bonus,
         first_shootable_bonus=args.first_shootable_bonus,
         visible_contact_progress_reward=args.visible_contact_progress_reward,
@@ -2840,6 +2848,10 @@ def main() -> None:
     parser.add_argument("--reset-warmup-max-tics", type=int, default=0)
     parser.add_argument("--reset-warmup-until-visible", action="store_true")
     parser.add_argument("--reset-warmup-until-shootable", action="store_true")
+    parser.add_argument("--shootable-fire-reward", type=float, default=0.5)
+    parser.add_argument("--missed-fire-penalty", type=float, default=0.05)
+    parser.add_argument("--blind-fire-penalty", type=float, default=0.02)
+    parser.add_argument("--step-time-penalty", type=float, default=0.0)
     parser.add_argument("--first-visible-bonus", type=float, default=0.0)
     parser.add_argument("--first-shootable-bonus", type=float, default=0.0)
     parser.add_argument("--visible-contact-progress-reward", type=float, default=0.0)
