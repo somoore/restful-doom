@@ -424,6 +424,18 @@ def test_skill_controller_low_health_contact_forces_retreat():
     assert not visible_mask["close_visible_contact"]
 
 
+def test_skill_controller_healthy_close_visible_contact_does_not_unmask_retreat():
+    # Regression: a full-health agent facing a close, visible, non-shootable
+    # enemy must close in, not be free to retreat out of the step budget.
+    controller = SkillController()
+    state = _state(enemy=True, combat=False, health=100, enemy_distance=200)
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+
+    assert mask["close_visible_contact"]
+    assert not mask["retreat"]
+
+
 def test_skill_controller_low_health_damaging_sector_combat_allows_fire():
     controller = SkillController()
     state = _state(enemy=True, combat=True, health=5, hazard=True)

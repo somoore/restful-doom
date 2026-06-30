@@ -674,14 +674,7 @@ class SkillController:
                 and self._contact_use_line_ready_for_visible_contact(features, contact_line)
             ):
                 mask["open_use_line"] = True
-            nearest_visible = min(
-                (float(enemy["distance"]) for enemy in features.visible_enemies),
-                default=99999.0,
-            )
-            if contact_exit_line is None and (
-                features.health <= self.params.retreat_health
-                or (not can_fire and nearest_visible <= self.params.close_enemy_units)
-            ):
+            if contact_exit_line is None and features.health <= self.params.retreat_health:
                 mask["retreat"] = True
         elif recent_contact_active:
             if (
