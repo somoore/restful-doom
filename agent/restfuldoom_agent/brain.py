@@ -32,6 +32,7 @@ BT_ATTACK = 1
 BT_USE = 2
 USE_LINE_ACTIVATE_DISTANCE_UNITS = 160.0
 EXIT_LINE_USE_DISTANCE_UNITS = 96.0
+EXIT_LINE_CONFIRMED_USE_DISTANCE_UNITS = 64.0
 EXIT_FRONT_EARLY_USE_DISTANCE_UNITS = 144.0
 EXIT_ASSIST_DISTANCE_UNITS = 900.0
 EXIT_ASSIST_DOOR_USE_DISTANCE_UNITS = 384.0
@@ -2383,17 +2384,15 @@ class BrainPolicy:
                     )
                     and abs(front_angle_delta) <= 30
                 ):
-                    self._last_use_tick = features.tick
                     return (
                         raw_ticcmd_action(
-                            buttons=BT_USE,
                             forward_move=self.params.move_amount,
                             angle_turn=raw_turn_for_delta(front_angle_delta),
-                            duration_tics=1,
+                            duration_tics=4,
                             tick=features.tick,
                         ),
                         self._decision(
-                            "push_exit_switch",
+                            "approach_exit_switch_real_range",
                             features,
                             stuck=stuck,
                             use_line=line_record,
@@ -2436,17 +2435,15 @@ class BrainPolicy:
                 and front_distance <= 8.0
                 and abs(front_angle_delta) <= 30
             ):
-                self._last_use_tick = features.tick
                 return (
                     raw_ticcmd_action(
-                        buttons=BT_USE,
-                        forward_move=4,
+                        forward_move=max(4, self.params.move_amount // 2),
                         angle_turn=raw_turn_for_delta(front_angle_delta),
-                        duration_tics=1,
+                        duration_tics=4,
                         tick=features.tick,
                     ),
                     self._decision(
-                        "press_exit_front_point",
+                        "approach_exit_switch_real_range",
                         features,
                         stuck=stuck,
                         use_line=line_record,
@@ -2461,17 +2458,15 @@ class BrainPolicy:
                 )
                 and abs(front_angle_delta) <= 30
             ):
-                self._last_use_tick = features.tick
                 return (
                     raw_ticcmd_action(
-                        buttons=BT_USE,
                         forward_move=self.params.move_amount,
                         angle_turn=raw_turn_for_delta(front_angle_delta),
-                        duration_tics=1,
+                        duration_tics=4,
                         tick=features.tick,
                     ),
                     self._decision(
-                        "push_exit_switch",
+                        "approach_exit_switch_real_range",
                         features,
                         stuck=stuck,
                         use_line=line_record,
@@ -2487,6 +2482,26 @@ class BrainPolicy:
                     ),
                     self._decision(
                         "approach_exit_switch_front",
+                        features,
+                        stuck=stuck,
+                        use_line=line_record,
+                    ),
+                )
+            if (
+                int(features.kills) >= POST_COMBAT_EXIT_KILLS
+                and distance <= activate_distance + 32.0
+                and front_distance <= activate_distance
+                and abs(angle_delta) <= 90.0
+            ):
+                return (
+                    raw_ticcmd_action(
+                        forward_move=self.params.move_amount,
+                        angle_turn=raw_turn_for_delta(angle_delta),
+                        duration_tics=4,
+                        tick=features.tick,
+                    ),
+                    self._decision(
+                        "approach_exit_switch_real_range",
                         features,
                         stuck=stuck,
                         use_line=line_record,
@@ -2609,13 +2624,44 @@ class BrainPolicy:
         ):
             front_distance = float(line.get("front_distance", 999999.0))
             front_angle_delta = float(line.get("front_angle_delta", angle_delta))
+            if distance > EXIT_LINE_CONFIRMED_USE_DISTANCE_UNITS:
+                if abs(angle_delta) > 90.0:
+                    return (
+                        semantic_action(
+                            turn_action_for_delta(angle_delta),
+                            amount=self.params.turn_amount,
+                            duration_tics=2,
+                            tick=features.tick,
+                        ),
+                        self._decision(
+                            "turn_to_exit_switch",
+                            features,
+                            stuck=stuck,
+                            use_line=line_record,
+                        ),
+                    )
+                return (
+                    raw_ticcmd_action(
+                        forward_move=self.params.move_amount,
+                        angle_turn=raw_turn_for_delta(angle_delta),
+                        duration_tics=4,
+                        tick=features.tick,
+                    ),
+                    self._decision(
+                        "approach_exit_switch_real_range",
+                        features,
+                        stuck=stuck,
+                        use_line=line_record,
+                    ),
+                )
             if (
                 int(features.kills) >= POST_COMBAT_EXIT_KILLS
                 and int(line.get("side", 0)) == 0
                 and front_distance <= activate_distance
                 and front_distance >= 20.0
-                and abs(front_angle_delta) >= 120.0
+                and abs(front_angle_delta) >= 150.0
                 and features.navigation.get("back_open", False)
+                and self._exit_push_stalled(features, line, distance)
             ):
                 return (
                     raw_ticcmd_action(
@@ -3938,7 +3984,7 @@ def extract_features(
 
     return TacticalFeatures(
         tick=int(state.tick),
-        level_time=int(state.level.level_time),
+        level_time=int(getattr(state.level, "level_time", state.tick)),
         x_units=x,
         y_units=y,
         angle=angle,

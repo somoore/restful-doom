@@ -2211,12 +2211,12 @@ def test_post_kill_policy_uses_exit_line_at_close_range(tmp_path):
     game_state.navigation.use_lines = [
         SimpleNamespace(
             line_id=330,
-            midpoint=SimpleNamespace(x_fp=80 * 65536, y_fp=0, z_fp=0),
-            nearest_point=SimpleNamespace(x_fp=80 * 65536, y_fp=0, z_fp=0),
+            midpoint=SimpleNamespace(x_fp=60 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=60 * 65536, y_fp=0, z_fp=0),
             special=11,
             tag=0,
-            distance_fp=80 * 65536,
-            nearest_distance_fp=80 * 65536,
+            distance_fp=60 * 65536,
+            nearest_distance_fp=60 * 65536,
         )
     ]
 
@@ -2718,7 +2718,7 @@ def test_close_exit_line_approaches_front_before_push_window(tmp_path):
     assert action.raw.forward_move > 0
 
 
-def test_close_exit_line_pushes_when_front_point_is_in_use_range(tmp_path):
+def test_close_exit_line_approaches_until_real_line_is_in_use_range(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
         memory=memory,
@@ -2750,13 +2750,13 @@ def test_close_exit_line_pushes_when_front_point_is_in_use_range(tmp_path):
 
     action, decision = policy._advance_progression_line(features, line, stuck=False)
 
-    assert decision["skill"] == "push_exit_switch"
+    assert decision["skill"] == "approach_exit_switch_real_range"
     assert decision["use_line"]["line_id"] == 330
-    assert action.raw.buttons & 2
+    assert not action.raw.buttons
     assert action.raw.forward_move > 0
 
 
-def test_close_exit_line_backs_out_when_front_side_is_behind_in_use_range(tmp_path):
+def test_close_exit_line_does_not_back_out_before_real_use_range(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
         memory=memory,
@@ -2770,30 +2770,30 @@ def test_close_exit_line_backs_out_when_front_side_is_behind_in_use_range(tmp_pa
     game_state.navigation.use_lines = [
         SimpleNamespace(
             line_id=330,
-            midpoint=SimpleNamespace(x_fp=64 * 65536, y_fp=0, z_fp=0),
-            nearest_point=SimpleNamespace(x_fp=64 * 65536, y_fp=0, z_fp=0),
+            midpoint=SimpleNamespace(x_fp=75 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=75 * 65536, y_fp=0, z_fp=0),
             special=11,
             tag=0,
-            distance_fp=64 * 65536,
-            nearest_distance_fp=64 * 65536,
+            distance_fp=75 * 65536,
+            nearest_distance_fp=75 * 65536,
         )
     ]
     features = extract_features(game_state, memory, BrainPolicyParams())
     line = features.navigation["use_lines"][0]
     line["angle_delta"] = 0.0
     line["front_angle_delta"] = 180.0
-    line["front_distance"] = 34.0
+    line["front_distance"] = 22.0
     line["side"] = 0
 
     action, decision = policy._advance_progression_line(features, line, stuck=False)
 
-    assert decision["skill"] == "recover_exit_switch_front_side"
+    assert decision["skill"] == "approach_exit_switch_real_range"
     assert decision["use_line"]["line_id"] == 330
     assert not action.raw.buttons
-    assert action.raw.forward_move < 0
+    assert action.raw.forward_move > 0
 
 
-def test_close_exit_line_presses_when_front_point_is_directly_underfoot(tmp_path):
+def test_close_exit_line_approaches_when_only_front_point_is_directly_underfoot(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
         memory=memory,
@@ -2824,13 +2824,13 @@ def test_close_exit_line_presses_when_front_point_is_directly_underfoot(tmp_path
 
     action, decision = policy._advance_progression_line(features, line, stuck=False)
 
-    assert decision["skill"] == "press_exit_switch"
+    assert decision["skill"] == "approach_exit_switch_real_range"
     assert decision["use_line"]["line_id"] == 330
-    assert action.raw.buttons & 2
+    assert not action.raw.buttons
     assert action.raw.forward_move > 0
 
 
-def test_close_exit_line_uses_stationary_front_point_pulse(tmp_path):
+def test_close_exit_line_does_not_use_stationary_front_point_outside_real_range(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
         memory=memory,
@@ -2860,10 +2860,47 @@ def test_close_exit_line_uses_stationary_front_point_pulse(tmp_path):
 
     action, decision = policy._advance_progression_line(features, line, stuck=False)
 
-    assert decision["skill"] == "press_exit_front_point"
+    assert decision["skill"] == "approach_exit_switch_real_range"
     assert decision["use_line"]["line_id"] == 330
-    assert action.raw.buttons & 2
-    assert action.raw.forward_move == 4
+    assert not action.raw.buttons
+    assert action.raw.forward_move > 0
+
+
+def test_close_exit_line_moves_while_turning_before_real_use_range(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    game_state = state(tick=40)
+    game_state.player.kills = 6
+    game_state.navigation.forward_open = True
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=103 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=103 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=103 * 65536,
+            nearest_distance_fp=103 * 65536,
+        )
+    ]
+    features = extract_features(game_state, memory, BrainPolicyParams())
+    line = features.navigation["use_lines"][0]
+    line["angle_delta"] = -70.0
+    line["front_angle_delta"] = -70.0
+    line["front_distance"] = 7.0
+    line["side"] = 0
+
+    action, decision = policy._advance_progression_line(features, line, stuck=False)
+
+    assert decision["skill"] == "approach_exit_switch_real_range"
+    assert decision["use_line"]["line_id"] == 330
+    assert not action.raw.buttons
+    assert action.raw.forward_move > 0
+    assert action.raw.angle_turn < 0
 
 
 def test_close_exit_line_pushes_before_side_manual_probe(tmp_path):
@@ -3037,7 +3074,7 @@ def test_stalled_exit_push_uses_front_blocker_before_recovery(tmp_path):
     assert action.action == agent_pb2.ACTION_USE
 
 
-def test_stalled_exit_push_closes_from_front_side_when_front_point_is_near(tmp_path):
+def test_stalled_exit_push_approaches_from_front_side_until_real_range(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(
         memory=memory,
@@ -3076,9 +3113,9 @@ def test_stalled_exit_push_closes_from_front_side_when_front_point_is_near(tmp_p
 
     action, decision = policy._advance_progression_line(features, exit_line, stuck=False)
 
-    assert decision["skill"] == "push_exit_switch"
+    assert decision["skill"] == "approach_exit_switch_real_range"
     assert decision["use_line"]["line_id"] == 330
-    assert action.raw.buttons & 2
+    assert not action.raw.buttons
     assert action.raw.forward_move > 0
 
 

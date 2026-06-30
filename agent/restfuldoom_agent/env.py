@@ -2923,6 +2923,7 @@ def _route_attempted_for_outcome(
     if not bool(_line_value(route, "exit", False)):
         return False
     return decision_skill in {
+            "approach_exit_switch_real_range",
             "approach_exit_switch_front",
             "approach_exit_route_local_door",
             "use_exit_route_blocker_ahead",

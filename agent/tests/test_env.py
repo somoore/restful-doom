@@ -3139,14 +3139,14 @@ def test_doom_agent_env_shapes_exit_ready_handoff_without_forcing_skill():
         state = _state(tick=tick, kills=1)
         exit_line = SimpleNamespace(
             line_id=330,
-            midpoint=SimpleNamespace(x_fp=80 * 65536, y_fp=0, z_fp=0),
-            start=SimpleNamespace(x_fp=80 * 65536, y_fp=32 * 65536, z_fp=0),
-            end=SimpleNamespace(x_fp=80 * 65536, y_fp=-32 * 65536, z_fp=0),
-            nearest_point=SimpleNamespace(x_fp=80 * 65536, y_fp=0, z_fp=0),
+            midpoint=SimpleNamespace(x_fp=60 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=60 * 65536, y_fp=32 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=60 * 65536, y_fp=-32 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=60 * 65536, y_fp=0, z_fp=0),
             special=11,
             tag=0,
-            distance_fp=80 * 65536,
-            nearest_distance_fp=80 * 65536,
+            distance_fp=60 * 65536,
+            nearest_distance_fp=60 * 65536,
         )
         state.navigation.use_lines.append(exit_line)
         state.navigation.route_waypoint = SimpleNamespace(

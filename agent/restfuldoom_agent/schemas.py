@@ -164,6 +164,7 @@ EXPERT_TO_PPO_SKILL_ACTION = {
     "unstick_slide_to_exit_line": "route_progression",
     "unstick_backtrack": "recover_stuck",
     "unstick_turn": "recover_stuck",
+    "approach_exit_switch_real_range": "press_exit",
     "approach_exit_switch_front": "press_exit",
     "press_exit_switch": "press_exit",
     "push_exit_switch": "press_exit",
