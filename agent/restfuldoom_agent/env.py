@@ -1053,11 +1053,44 @@ class SkillController:
             return False
         if (
             contact_exit_line is not None
+            and self._postcombat_visible_exit_focus_allowed(features, contact_exit_line)
+        ):
+            return False
+        if (
+            contact_exit_line is not None
             and int(features.health) <= 20
             and self.policy._line_control_distance(contact_exit_line) <= 384.0
         ):
             return False
         return self.policy._shootable_enemy(features) is None
+
+    def _postcombat_visible_exit_focus_allowed(
+        self,
+        features: Any,
+        line: dict[str, Any],
+    ) -> bool:
+        """Allows a committed final-exit approach to ignore stale visible contact."""
+        if not _line_is_exit(line):
+            return False
+        if self.policy._shootable_enemy(features) is not None:
+            return False
+        if int(features.health) <= 15:
+            return False
+        if int(features.health) > self.params.retreat_health:
+            return False
+        if int(features.kills) < POST_COMBAT_EXIT_KILLS:
+            return False
+        if not self.policy._has_episode_kill(features):
+            return False
+        if self.policy._line_control_distance(line) > POST_COMBAT_EXIT_ROUTE_DISTANCE_UNITS:
+            return False
+        if abs(self.policy._line_control_angle_delta(line)) > 45.0:
+            return False
+        nearest_visible = min(
+            (float(enemy.get("distance", 999999.0)) for enemy in features.visible_enemies),
+            default=999999.0,
+        )
+        return nearest_visible > 700.0
 
     def _exit_press_available_for_mask(
         self,

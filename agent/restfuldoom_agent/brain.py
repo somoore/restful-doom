@@ -2286,6 +2286,7 @@ class BrainPolicy:
             and distance <= 224.0
         ):
             front_distance = float(line.get("front_distance", distance))
+            exit_push_stalled = self._exit_push_stalled(features, line, distance)
             if not bool(features.navigation.get("forward_open", True)):
                 front_angle_delta = float(line.get("front_angle_delta", angle_delta))
                 front_pulse_distance = EXIT_FRONT_EARLY_USE_DISTANCE_UNITS
@@ -2294,54 +2295,7 @@ class BrainPolicy:
                     and int(features.navigation.get("front_blocking_line_special", 0)) == 0
                 ):
                     front_pulse_distance = USE_LINE_ACTIVATE_DISTANCE_UNITS
-                if (
-                    int(features.kills) >= POST_COMBAT_EXIT_KILLS
-                    and int(line.get("side", 0)) == 0
-                    and front_distance <= max(
-                        activate_distance,
-                        front_pulse_distance,
-                    )
-                    + 16.0
-                    and abs(front_angle_delta) <= 30
-                    and abs(angle_delta) <= 45.0
-                ):
-                    self._last_use_tick = features.tick
-                    return (
-                        raw_ticcmd_action(
-                            buttons=BT_USE,
-                            forward_move=max(4, self.params.move_amount // 2),
-                            angle_turn=raw_turn_for_delta(front_angle_delta),
-                            duration_tics=1,
-                            tick=features.tick,
-                        ),
-                        self._decision(
-                            "push_exit_switch",
-                            features,
-                            stuck=stuck,
-                            use_line=line_record,
-                        ),
-                    )
-                if (
-                    int(features.navigation.get("front_blocking_line_special", 0)) == 0
-                    and min(distance, front_distance) > activate_distance
-                    and front_distance < distance
-                    and abs(front_angle_delta) <= 60.0
-                ):
-                    return (
-                        raw_ticcmd_action(
-                            forward_move=self.params.move_amount,
-                            angle_turn=raw_turn_for_delta(front_angle_delta),
-                            duration_tics=4,
-                            tick=features.tick,
-                        ),
-                        self._decision(
-                            "approach_exit_switch_front",
-                            features,
-                            stuck=stuck,
-                            use_line=line_record,
-                        ),
-                    )
-                if self._exit_push_stalled(features, line, distance):
+                if exit_push_stalled and abs(front_angle_delta) <= 30.0:
                     if self._exit_route_blocker_ahead_ready(features):
                         self._last_use_tick = features.tick
                         return (
@@ -2369,6 +2323,26 @@ class BrainPolicy:
                         features,
                         line_record,
                         angle_delta,
+                    )
+                if (
+                    int(features.navigation.get("front_blocking_line_special", 0)) == 0
+                    and min(distance, front_distance) > activate_distance
+                    and front_distance < distance
+                    and abs(front_angle_delta) <= 60.0
+                ):
+                    return (
+                        raw_ticcmd_action(
+                            forward_move=self.params.move_amount,
+                            angle_turn=raw_turn_for_delta(front_angle_delta),
+                            duration_tics=4,
+                            tick=features.tick,
+                        ),
+                        self._decision(
+                            "approach_exit_switch_front",
+                            features,
+                            stuck=stuck,
+                            use_line=line_record,
+                        ),
                     )
                 if abs(angle_delta) > 18:
                     return (
@@ -2409,33 +2383,11 @@ class BrainPolicy:
                     and int(features.navigation.get("front_blocking_line_special", 0)) == 0
                 ):
                     front_pulse_distance = USE_LINE_ACTIVATE_DISTANCE_UNITS
-                if (
-                    int(features.kills) >= POST_COMBAT_EXIT_KILLS
-                    and int(line.get("side", 0)) == 0
-                    and distance <= 224.0
-                    and front_distance <= max(
-                        activate_distance,
-                        front_pulse_distance,
-                    )
-                    + 16.0
-                    and abs(front_angle_delta) <= 30
-                    and abs(angle_delta) <= 45.0
-                ):
-                    self._last_use_tick = features.tick
-                    return (
-                        raw_ticcmd_action(
-                            buttons=BT_USE,
-                            forward_move=max(4, self.params.move_amount // 2),
-                            angle_turn=raw_turn_for_delta(front_angle_delta),
-                            duration_tics=1,
-                            tick=features.tick,
-                        ),
-                        self._decision(
-                            "push_exit_switch",
-                            features,
-                            stuck=stuck,
-                            use_line=line_record,
-                        ),
+                if exit_push_stalled and abs(front_angle_delta) <= 30.0:
+                    return self._recover_stalled_exit_push(
+                        features,
+                        line_record,
+                        front_angle_delta,
                     )
                 if (
                     int(features.kills) >= POST_COMBAT_EXIT_KILLS
@@ -2517,33 +2469,6 @@ class BrainPolicy:
                     activate_distance,
                     front_pulse_distance,
                 )
-                + 16.0
-                and abs(front_angle_delta) <= 30
-                and abs(angle_delta) <= 45.0
-            ):
-                self._last_use_tick = features.tick
-                return (
-                    raw_ticcmd_action(
-                        buttons=BT_USE,
-                        forward_move=max(4, self.params.move_amount // 2),
-                        angle_turn=raw_turn_for_delta(front_angle_delta),
-                        duration_tics=1,
-                        tick=features.tick,
-                    ),
-                    self._decision(
-                        "push_exit_switch",
-                        features,
-                        stuck=stuck,
-                        use_line=line_record,
-                    ),
-                )
-            if (
-                int(features.kills) >= POST_COMBAT_EXIT_KILLS
-                and distance <= 224.0
-                and front_distance <= max(
-                    activate_distance,
-                    front_pulse_distance,
-                )
                 and abs(front_angle_delta) <= 30
             ):
                 return (
@@ -2595,7 +2520,6 @@ class BrainPolicy:
                         use_line=line_record,
                     ),
                 )
-            exit_push_stalled = self._exit_push_stalled(features, line, distance)
             if exit_push_stalled:
                 retry_door = self._select_retry_exit_assist_door(features, line)
                 if retry_door is not None:
@@ -2747,7 +2671,7 @@ class BrainPolicy:
                 and int(line.get("side", 0)) == 0
                 and front_distance <= activate_distance
                 and front_distance >= 20.0
-                and abs(front_angle_delta) >= 150.0
+                and abs(front_angle_delta) >= 120.0
                 and features.navigation.get("back_open", False)
                 and self._exit_push_stalled(features, line, distance)
             ):
