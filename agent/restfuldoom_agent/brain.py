@@ -44,6 +44,11 @@ EXIT_ROUTE_LOCAL_DOOR_ANGLE_DEGREES = 60.0
 EXIT_ROUTE_LOCAL_DOOR_USE_COOLDOWN_TICS = 8
 EXIT_ROUTE_FRONT_BLOCKER_MAX_USES = 18
 EXIT_ROUTE_FRONT_BLOCKER_EXIT_TURN_DEGREES = 30.0
+# ponytail: a true exit dead-end (player wedged at a door that will not open
+# from this side, e.g. seed 9/10/17 frozen 160u from the switch pressing USE
+# for hundreds of tics) needs a much longer no-progress window than the normal
+# 45-tic push stall before we give up the local approach and route around.
+EXIT_DEADEND_STALL_TICS = 200
 EXIT_USE_RELEASE_TICS = 1
 EXIT_DIRECT_APPROACH_OWN_DISTANCE_UNITS = 256.0
 EXIT_DIRECT_APPROACH_OWN_ANGLE_DEGREES = 45.0
@@ -2551,6 +2556,20 @@ class BrainPolicy:
             exit_push_stalled = self._exit_push_stalled(features, line, distance)
         if (
             special in EXIT_LINE_SPECIALS
+            and exit_push_stalled
+            and self._exit_push_deadend(features, line)
+        ):
+            # ponytail: the exit switch will not open from here (wedged at a
+            # one-sided/unopenable door). Stop mashing USE, blacklist this
+            # approach for this cell, and explore to route around toward an
+            # approach that works. Cleared when the player leaves the cell.
+            self._blocked_use_lines[self._line_key(features.cell, line)] = (
+                features.tick + LINE_ATTEMPT_BLOCK_TICS
+            )
+            self._exit_push_attempts.pop(self._line_key(features.cell, line), None)
+            return self._explore(features, stuck)
+        if (
+            special in EXIT_LINE_SPECIALS
             and distance > max(activate_distance, EXIT_ASSIST_DISTANCE_UNITS)
             and abs(angle_delta) <= 90.0
             and bool(features.navigation.get("forward_open", True))
@@ -4060,6 +4079,23 @@ class BrainPolicy:
             return False
 
         return features.tick - int(previous["first_tick"]) >= LINE_ATTEMPT_STALL_TICS
+
+    def _exit_push_deadend(
+        self,
+        features: TacticalFeatures,
+        line: dict[str, Any],
+    ) -> bool:
+        # ponytail: deep dead-end = one exit line made no real progress for far
+        # longer than the normal stall window. Reuses _exit_push_stalled's
+        # best_distance/first_tick bookkeeping; no new per-step state. (A
+        # cell-level timer was tried to also catch seed 9's multi-approach
+        # thrash, but it fired too early and regressed seed 10's working
+        # approach, so the trigger stays line-scoped.)
+        previous = self._exit_push_attempts.get(self._line_key(features.cell, line))
+        return previous is not None and (
+            features.tick - int(previous.get("first_tick", features.tick))
+            >= EXIT_DEADEND_STALL_TICS
+        )
 
     def _is_line_blocked(
         self,

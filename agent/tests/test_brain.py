@@ -7,6 +7,7 @@ from restfuldoom_agent.brain import (
     BrainPolicy,
     BrainPolicyParams,
     EpisodeStats,
+    EXIT_DEADEND_STALL_TICS,
     EXIT_ROUTE_FRONT_BLOCKER_MAX_USES,
     LINE_ATTEMPT_STALL_TICS,
     cell_key,
@@ -3946,3 +3947,63 @@ def test_policy_blacklists_repeated_line_attempt_in_same_cell(tmp_path):
 
     assert policy._record_line_attempt(later_features, later_line) is False
     assert policy._is_line_blocked(later_features, later_line) is True
+
+
+def test_deep_stalled_exit_push_explores_to_route_around_deadend(tmp_path):
+    # Reproduces the seed 9/10/17 dead-end: the exit switch (line 330) never
+    # opens because the player is wedged on the wrong side of a door. After a
+    # long no-progress window the brain must STOP mashing the exit and explore
+    # to route around, blacklisting this exit approach for the current cell.
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    game_state = state(tick=1000)
+    game_state.player.kills = 6
+    game_state.navigation.forward_open = False
+    game_state.navigation.back_open = True
+    game_state.navigation.front_blocking_line_special = 1
+    game_state.navigation.front_block_distance_fp = 16 * 65536
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=200 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=160 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=160 * 65536,
+            nearest_distance_fp=160 * 65536,
+        )
+    ]
+    features = extract_features(game_state, memory, BrainPolicyParams())
+    exit_line = features.navigation["use_lines"][0]
+    exit_key = policy._line_key(features.cell, exit_line)
+    # No real progress since tick 700 -> stall age 300 >= EXIT_DEADEND_STALL_TICS.
+    policy._exit_push_attempts[exit_key] = {
+        "first_tick": 1000 - (EXIT_DEADEND_STALL_TICS + 100),
+        "best_distance": 160.0,
+        "signature": {
+            "cell": features.cell,
+            "episode": features.episode,
+            "map": features.map,
+            "kills": features.kills,
+            "items": features.items,
+        },
+    }
+
+    _action, decision = policy._advance_progression_line(features, exit_line, stuck=False)
+
+    # Escaped the exit mash: no longer running an exit-switch USE skill, and
+    # the dead-end exit approach is blacklisted for this cell so it routes away.
+    exit_mash_skills = {
+        "press_exit_switch",
+        "push_exit_switch",
+        "use_exit_route_blocker_ahead",
+        "approach_exit_switch_front",
+        "turn_to_exit_switch",
+        "recover_exit_switch_approach",
+    }
+    assert decision["skill"] not in exit_mash_skills
+    assert policy._is_line_blocked(features, exit_line)
