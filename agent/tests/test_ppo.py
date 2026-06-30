@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from restfuldoom_agent.curriculum import build_curriculum, stage_for_update
-from restfuldoom_agent.env import EnvStep
+from restfuldoom_agent.env import EnvStep, SkillController
 from restfuldoom_agent.brain import AgentMemory, _memory_ppo_checkpoint_paths
 import restfuldoom_agent.ppo_agent as ppo_agent_module
 from restfuldoom_agent.ppo_agent import (
@@ -66,6 +66,96 @@ from restfuldoom_agent.schemas import (
     map_expert_skill_to_ppo_action,
 )
 from restfuldoom_agent.skill_policy import FEATURE_NAMES
+
+
+def _fp(units: float) -> int:
+    return int(units * 65536)
+
+
+def _point(x: float, y: float, z: float = 0.0) -> SimpleNamespace:
+    return SimpleNamespace(x_fp=_fp(x), y_fp=_fp(y), z_fp=_fp(z))
+
+
+def _ppo_state(
+    *,
+    tick: int = 1,
+    x: float = 0.0,
+    y: float = 0.0,
+    angle: float = 0.0,
+    health: int = 100,
+    kills: int = 0,
+    enemy: dict[str, float | int | bool] | None = None,
+    use_lines: list[SimpleNamespace] | None = None,
+) -> SimpleNamespace:
+    player = SimpleNamespace(
+        object=SimpleNamespace(position=_point(x, y), angle_degrees=angle),
+        health=health,
+        ammo=SimpleNamespace(bullets=40),
+        kills=kills,
+        items=0,
+        secrets=0,
+    )
+    enemies = []
+    if enemy is not None:
+        enemies.append(
+            SimpleNamespace(
+                object=SimpleNamespace(
+                    id=int(enemy.get("id", 7)),
+                    position=_point(float(enemy["x"]), float(enemy["y"])),
+                    distance_fp=_fp(float(enemy["distance"])),
+                    health=int(enemy.get("health", 60)),
+                ),
+                line_of_sight=bool(enemy.get("line_of_sight", True)),
+            )
+        )
+    navigation = SimpleNamespace(
+        forward_open=False,
+        back_open=True,
+        left_open=True,
+        right_open=True,
+        use_line_ahead=False,
+        front_blocking_line_special=0,
+        front_block_distance_fp=_fp(96),
+        probe_distance_fp=_fp(96),
+        use_lines=use_lines or [],
+    )
+    combat = SimpleNamespace(
+        has_shootable_target=False,
+        target_id=0,
+        target_health=0,
+        target_distance_fp=0,
+        aim_slope_fp=0,
+        range_fp=0,
+        target_is_enemy=False,
+    )
+    return SimpleNamespace(
+        tick=tick,
+        player=player,
+        enemies=enemies,
+        level=SimpleNamespace(episode=1, map=1, level_time=tick),
+        navigation=navigation,
+        combat=combat,
+    )
+
+
+def _exit_line(
+    *,
+    line_id: int = 330,
+    x: float = 200.0,
+    y: float = 0.0,
+    distance: float = 200.0,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        line_id=line_id,
+        midpoint=_point(x, y),
+        nearest_point=_point(x, y),
+        start=_point(x, y + 64.0),
+        end=_point(x, y - 64.0),
+        special=11,
+        tag=0,
+        distance_fp=_fp(distance),
+        nearest_distance_fp=_fp(distance),
+    )
 
 
 def test_rollout_buffer_saves_jsonl(tmp_path):
@@ -136,6 +226,57 @@ def test_ppo_eval_trace_writer_serializes_steps(tmp_path):
         "duration_tics": 4,
     }
     assert rows[1]["action_mask"] == [False, False, False, False, True]
+
+
+def test_committed_visible_contact_exit_focus_keeps_press_exit_mask(tmp_path):
+    controller = SkillController(
+        memory=AgentMemory.load(tmp_path / "memory.json"),
+        policy_id="test-controller",
+    )
+    exit_line = _exit_line(x=260.0, distance=260.0)
+    controller.policy._last_post_combat_exit_line_id = 330
+    controller.policy._last_post_combat_exit_tick = 90
+    controller.policy._last_post_combat_exit_line = {
+        "line_id": 330,
+        "x_units": 260.0,
+        "y_units": 0.0,
+        "nearest_x_units": 260.0,
+        "nearest_y_units": 0.0,
+        "start_x_units": 260.0,
+        "start_y_units": 64.0,
+        "end_x_units": 260.0,
+        "end_y_units": -64.0,
+        "special": 11,
+        "tag": 0,
+        "distance": 260.0,
+        "angle_delta": 0.0,
+        "side": 0,
+    }
+    controller.record_action_history(
+        action_index=PPO_SKILL_ACTIONS.index("press_exit"),
+        had_shootable_target=False,
+        route_outcome={
+            "attempted": True,
+            "exit": True,
+            "failed": True,
+            "line_id": 330,
+            "progress_units": -1.0,
+        },
+    )
+
+    mask = controller.action_mask(
+        _ppo_state(
+            tick=100,
+            health=42,
+            kills=5,
+            enemy={"x": -190.0, "y": 0.0, "distance": 190.0, "line_of_sight": True},
+            use_lines=[exit_line],
+        )
+    )
+
+    assert mask[PPO_SKILL_ACTIONS.index("press_exit")] is True
+    assert mask[PPO_SKILL_ACTIONS.index("retreat")] is False
+    assert mask[PPO_SKILL_ACTIONS.index("close_visible_contact")] is False
 
 
 def test_checkpoint_eval_trace_path_uses_stage_suffix_for_multi_stage(tmp_path):

@@ -746,6 +746,7 @@ class SkillController:
                 not can_fire
                 and not critical_contact_exit
                 and not postcombat_visible_route_recovery
+                and visible_contact_exit_line is None
             ):
                 mask["close_visible_contact"] = True
             if visible_contact_exit_line is not None:
@@ -1102,6 +1103,13 @@ class SkillController:
             and distance <= CRITICAL_VISIBLE_EXIT_FOCUS_DISTANCE_UNITS
             and angle_delta <= CRITICAL_VISIBLE_EXIT_FOCUS_ANGLE_DEGREES
             and (recent_exit_commitment or int(features.health) <= 15)
+        ):
+            return True
+        if (
+            recent_exit_commitment
+            and int(line.get("side", 0)) == 0
+            and distance <= EXIT_ASSIST_DISTANCE_UNITS
+            and angle_delta <= CRITICAL_VISIBLE_EXIT_FOCUS_ANGLE_DEGREES
         ):
             return True
         if int(features.health) <= 15:
