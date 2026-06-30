@@ -2201,6 +2201,85 @@ class BrainPolicy:
             and features.tick - self._last_use_tick >= cooldown_tics
         )
 
+    def _select_exit_route_front_blocker_line(
+        self,
+        features: TacticalFeatures,
+        exit_line: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if (
+            int(features.navigation.get("front_blocking_line_special", 0))
+            not in MANUAL_USE_LINE_SPECIALS
+        ):
+            return None
+        front_block_distance = (
+            float(features.navigation.get("front_block_distance_fp", 0)) / FP
+        )
+        candidates = []
+        for line in features.navigation.get("use_lines", []):
+            if int(line.get("line_id", -1)) == int(exit_line.get("line_id", -2)):
+                continue
+            if int(line.get("special", 0)) != int(
+                features.navigation.get("front_blocking_line_special", 0)
+            ):
+                continue
+            if self._is_line_blocked(features, line):
+                continue
+            distance = float(line.get("distance", 999999.0))
+            front_distance = float(line.get("front_distance", distance))
+            angle_delta = self._line_control_angle_delta(line)
+            if min(distance, front_distance) > EXIT_ASSIST_DOOR_CLOSE_USE_DISTANCE_UNITS:
+                continue
+            if front_block_distance > 0 and distance > front_block_distance + 64.0:
+                continue
+            if abs(angle_delta) > EXIT_ASSIST_DOOR_CLOSE_USE_ANGLE_DEGREES:
+                continue
+            candidates.append(line)
+        if not candidates:
+            return None
+        return min(
+            candidates,
+            key=lambda line: (
+                min(
+                    float(line.get("distance", 999999.0)),
+                    float(line.get("front_distance", 999999.0)),
+                ),
+                abs(self._line_control_angle_delta(line)),
+                self._line_center_distance(line, exit_line),
+            ),
+        )
+
+    def _use_exit_route_front_blocker_line(
+        self,
+        features: TacticalFeatures,
+        blocker_line: dict[str, Any],
+        exit_line_record: dict[str, Any],
+        stuck: bool,
+    ) -> tuple[Any, dict[str, Any]]:
+        angle_delta = self._line_control_angle_delta(blocker_line)
+        self._last_use_tick = features.tick
+        return (
+            raw_ticcmd_action(
+                buttons=BT_USE,
+                forward_move=max(4, self.params.move_amount // 2),
+                angle_turn=raw_turn_for_delta(angle_delta),
+                duration_tics=2,
+                tick=features.tick,
+            ),
+            self._decision(
+                "use_exit_route_blocker_ahead",
+                features,
+                stuck=stuck,
+                use_line=self._line_record(blocker_line),
+                exit_line=exit_line_record,
+                front_block_distance_fp=int(
+                    features.navigation.get("front_block_distance_fp", 0)
+                ),
+                front_blocking_line_special=int(
+                    features.navigation.get("front_blocking_line_special", 0)
+                ),
+            ),
+        )
+
     def _recover_stalled_exit_push(
         self,
         features: TacticalFeatures,
@@ -2342,6 +2421,17 @@ class BrainPolicy:
                             else EXIT_ROUTE_LOCAL_DOOR_USE_COOLDOWN_TICS
                         ),
                     ):
+                        blocker_line = self._select_exit_route_front_blocker_line(
+                            features,
+                            line,
+                        )
+                        if blocker_line is not None:
+                            return self._use_exit_route_front_blocker_line(
+                                features,
+                                blocker_line,
+                                line_record,
+                                stuck,
+                            )
                         self._last_use_tick = features.tick
                         return (
                             semantic_action(
@@ -2660,6 +2750,17 @@ class BrainPolicy:
                         else EXIT_ROUTE_LOCAL_DOOR_USE_COOLDOWN_TICS
                     ),
                 ):
+                    blocker_line = self._select_exit_route_front_blocker_line(
+                        features,
+                        line,
+                    )
+                    if blocker_line is not None:
+                        return self._use_exit_route_front_blocker_line(
+                            features,
+                            blocker_line,
+                            line_record,
+                            stuck,
+                        )
                     self._last_use_tick = features.tick
                     return (
                         semantic_action(
