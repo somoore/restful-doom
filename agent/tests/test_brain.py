@@ -3337,6 +3337,105 @@ def test_stalled_exit_push_targets_nearby_front_blocker_line(tmp_path):
     assert action.raw.buttons & 2
     assert action.raw.forward_move > 0
     assert action.raw.angle_turn != 0
+    assert action.duration_tics == 1
+
+
+def test_front_blocker_use_releases_before_next_press(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    game_state = state(tick=100)
+    game_state.player.kills = 6
+    game_state.navigation.forward_open = False
+    game_state.navigation.back_open = True
+    game_state.navigation.use_line_ahead = True
+    game_state.navigation.front_blocking_line_special = 1
+    game_state.navigation.front_block_distance_fp = 18 * 65536
+    features = extract_features(game_state, memory, BrainPolicyParams())
+    exit_line = {
+        "line_id": 330,
+        "special": 11,
+        "tag": 0,
+        "distance": 176.0,
+        "distance_fp": 176 * 65536,
+        "nearest_distance_fp": 176 * 65536,
+        "angle_delta": -14.0,
+        "side": 0,
+        "front_distance": 121.1,
+        "front_angle_delta": 21.4,
+        "x_units": 176.0,
+        "y_units": -45.0,
+        "nearest_x_units": 176.0,
+        "nearest_y_units": -45.0,
+        "start_x_units": 176.0,
+        "start_y_units": -109.0,
+        "end_x_units": 176.0,
+        "end_y_units": 19.0,
+    }
+    blocker_line = {
+        "line_id": 325,
+        "special": 1,
+        "tag": 0,
+        "distance": 16.0,
+        "distance_fp": 16 * 65536,
+        "nearest_distance_fp": 16 * 65536,
+        "angle_delta": 29.0,
+        "side": 0,
+        "front_distance": 80.0,
+        "front_angle_delta": -151.0,
+        "x_units": 14.0,
+        "y_units": 8.0,
+        "nearest_x_units": 14.0,
+        "nearest_y_units": 8.0,
+        "start_x_units": 14.0,
+        "start_y_units": -56.0,
+        "end_x_units": 14.0,
+        "end_y_units": 72.0,
+    }
+    features.navigation["use_lines"] = [blocker_line, exit_line]
+    policy._exit_push_attempts[policy._line_key(features.cell, exit_line)] = {
+        "first_tick": 40,
+        "best_distance": 176.0,
+        "signature": {
+            "cell": features.cell,
+            "episode": features.episode,
+            "map": features.map,
+            "kills": features.kills,
+            "items": features.items,
+        },
+    }
+
+    first_action, first_decision = policy._advance_progression_line(
+        features,
+        exit_line,
+        stuck=False,
+    )
+
+    release_state = state(tick=101)
+    release_state.player.kills = 6
+    release_state.navigation.forward_open = False
+    release_state.navigation.back_open = True
+    release_state.navigation.use_line_ahead = True
+    release_state.navigation.front_blocking_line_special = 1
+    release_state.navigation.front_block_distance_fp = 18 * 65536
+    release_features = extract_features(release_state, memory, BrainPolicyParams())
+    release_features.navigation["use_lines"] = [blocker_line, exit_line]
+
+    release_action, release_decision = policy._advance_progression_line(
+        release_features,
+        exit_line,
+        stuck=False,
+    )
+
+    assert first_decision["skill"] == "use_exit_route_blocker_ahead"
+    assert first_action.raw.buttons & 2
+    assert first_action.duration_tics == 1
+    assert release_decision["skill"] == "release_exit_use"
+    assert release_decision["use_line"]["line_id"] == 330
+    assert release_action.raw.buttons == 0
 
 
 def test_exhausted_front_blocker_turns_back_to_exit_line(tmp_path):
@@ -3424,6 +3523,117 @@ def test_exhausted_front_blocker_turns_back_to_exit_line(tmp_path):
     assert decision["use_line"]["line_id"] == 330
     assert decision["exhausted_blocker_line"]["line_id"] == 325
     assert action.action == turn_action_for_delta(-43.0)
+
+
+def test_exhausted_front_blocker_tries_alternate_door_side_before_exit_line(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    game_state = state(tick=100)
+    game_state.player.kills = 6
+    game_state.navigation.forward_open = False
+    game_state.navigation.back_open = True
+    game_state.navigation.use_line_ahead = True
+    game_state.navigation.front_blocking_line_special = 1
+    game_state.navigation.front_block_distance_fp = 16 * 65536
+    features = extract_features(game_state, memory, BrainPolicyParams())
+    exit_line = {
+        "line_id": 330,
+        "special": 11,
+        "tag": 0,
+        "distance": 176.0,
+        "distance_fp": 176 * 65536,
+        "nearest_distance_fp": 176 * 65536,
+        "angle_delta": -38.0,
+        "side": 0,
+        "front_distance": 121.1,
+        "front_angle_delta": -1.8,
+        "x_units": 176.0,
+        "y_units": -45.0,
+        "nearest_x_units": 176.0,
+        "nearest_y_units": -45.0,
+        "start_x_units": 176.0,
+        "start_y_units": -109.0,
+        "end_x_units": 176.0,
+        "end_y_units": 19.0,
+    }
+    exhausted_blocker_line = {
+        "line_id": 325,
+        "special": 1,
+        "tag": 0,
+        "distance": 16.0,
+        "distance_fp": 16 * 65536,
+        "nearest_distance_fp": 16 * 65536,
+        "angle_delta": 3.0,
+        "side": 0,
+        "front_distance": 80.0,
+        "front_angle_delta": -177.0,
+        "x_units": 14.0,
+        "y_units": 8.0,
+        "nearest_x_units": 14.0,
+        "nearest_y_units": 8.0,
+        "start_x_units": 14.0,
+        "start_y_units": -56.0,
+        "end_x_units": 14.0,
+        "end_y_units": 72.0,
+    }
+    alternate_blocker_line = {
+        "line_id": 324,
+        "special": 1,
+        "tag": 0,
+        "distance": 32.0,
+        "distance_fp": 32 * 65536,
+        "nearest_distance_fp": 32 * 65536,
+        "angle_delta": 3.0,
+        "side": 1,
+        "front_distance": 128.0,
+        "front_angle_delta": 3.0,
+        "x_units": 14.0,
+        "y_units": -8.0,
+        "nearest_x_units": 14.0,
+        "nearest_y_units": -8.0,
+        "start_x_units": 14.0,
+        "start_y_units": -72.0,
+        "end_x_units": 14.0,
+        "end_y_units": 56.0,
+    }
+    features.navigation["use_lines"] = [
+        exhausted_blocker_line,
+        alternate_blocker_line,
+        exit_line,
+    ]
+    policy._exit_push_attempts[policy._line_key(features.cell, exit_line)] = {
+        "first_tick": 40,
+        "best_distance": 176.0,
+        "signature": {
+            "cell": features.cell,
+            "episode": features.episode,
+            "map": features.map,
+            "kills": features.kills,
+            "items": features.items,
+        },
+    }
+    blocker_key = policy._exit_route_front_blocker_key(
+        features,
+        exhausted_blocker_line,
+        exit_line,
+    )
+    policy._exit_route_front_blocker_uses[blocker_key] = {
+        "first_tick": 80,
+        "last_tick": 99,
+        "count": EXIT_ROUTE_FRONT_BLOCKER_MAX_USES,
+        "best_exit_distance": 176.0,
+    }
+
+    action, decision = policy._advance_progression_line(features, exit_line, stuck=True)
+
+    assert decision["skill"] == "use_exit_route_blocker_ahead"
+    assert decision["use_line"]["line_id"] == 324
+    assert decision["exit_line"]["line_id"] == 330
+    assert action.raw.buttons & 2
 
 
 def test_stalled_exit_push_approaches_from_front_side_until_real_range(tmp_path):

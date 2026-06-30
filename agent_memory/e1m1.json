@@ -27938,6 +27938,135 @@
         "visible_enemy_steps": 229
       },
       "update_index": 0
+    },
+    {
+      "buffer_path": "trajectories/ppo/ppo-fd006bd-blockeredge-seed8911-auxbc-20260630-a-buffer-0000.jsonl",
+      "checkpoint_eval": {},
+      "checkpoint_path": "agent_models/ppo/ppo-fd006bd-blockeredge-seed8911-auxbc-20260630-a-ppo-0000.pt",
+      "curriculum": {
+        "mode": "single",
+        "name": "none",
+        "schema": "restfuldoom.ppo_curriculum.v1",
+        "seed": 7,
+        "stages": [
+          {
+            "evidence": {},
+            "index": 0,
+            "name": "fresh_spawn",
+            "note": "Single reset start resolved from CLI arguments.",
+            "requires_progressed_state": false,
+            "reset_start": {},
+            "validated": true
+          }
+        ],
+        "start_index": 0
+      },
+      "curriculum_stage": {
+        "evidence": {},
+        "index": 0,
+        "name": "fresh_spawn",
+        "note": "Single reset start resolved from CLI arguments.",
+        "requires_progressed_state": false,
+        "reset_start": {},
+        "selected_index": 0,
+        "validated": true
+      },
+      "rollout_summary": {
+        "action_mask_fallback_steps": 0,
+        "action_reward": 424.4255,
+        "allowed_skill_filter_fallback_skills": {},
+        "allowed_skill_filter_fallback_steps": 0,
+        "allowed_skill_filter_steps": 4096,
+        "checkpoint_selection_score": 3216.0798,
+        "contact_context_active_steps": 3739,
+        "contact_reward": 0.0,
+        "contact_use_line_active_steps": 2397,
+        "contact_use_line_close_steps": 454,
+        "contact_use_line_followthrough_steps": 138,
+        "curriculum_stage_counts": {
+          "fresh_spawn": 4096
+        },
+        "damage_delta": 565,
+        "done_count": 4,
+        "enemy_distance_delta": 5354.3472,
+        "exit_ready_action_reward": 0.0,
+        "exit_ready_press_available_steps": 0,
+        "exit_ready_press_selected_steps": 0,
+        "exit_ready_route_selected_steps": 0,
+        "exit_ready_switch_attempt_steps": 0,
+        "exit_route_attempt_steps": 28,
+        "exit_route_failed_steps": 10,
+        "exit_route_progress_units": 341.3206,
+        "exit_route_reached_steps": 0,
+        "fire_on_shootable_steps": 757,
+        "first_shootable_contacts": 5,
+        "first_visible_contacts": 5,
+        "invalid_action_steps": 0,
+        "kill_delta": 21,
+        "max_kill_gain": 5,
+        "max_kills": 5,
+        "max_snapshot_restore_seconds": 0.0,
+        "mean_action_mask_size": 1.48,
+        "mean_contact_use_line_age_norm": 0.1527,
+        "mean_contact_use_line_distance_norm": 0.4561,
+        "mean_snapshot_restore_seconds": 0.0,
+        "mean_topology_current_cell_visits_norm": 0.9916,
+        "mean_topology_exhausted_open_ratio": 0.7867,
+        "mean_topology_open_cell_min_visit_norm": 0.6575,
+        "mean_visible_contact_distance_norm": 0.1748,
+        "min_health": -16,
+        "missed_shootable_fire_steps": 281,
+        "negative_reward_steps": 1472,
+        "positive_reward_steps": 2585,
+        "pre_required_kill_route_penalty": 0.0,
+        "pre_shootable_route_penalty": 0.0,
+        "records": 4096,
+        "reset_context_sources": {
+          "episode": 5
+        },
+        "reset_warmup_steps": 0,
+        "reset_warmup_stop_reasons": {},
+        "reset_warmup_tics": 0,
+        "route_action_reward": 59.9755,
+        "route_attempt_steps": 573,
+        "route_failed_steps": 202,
+        "route_progress_units": 5612.2244,
+        "route_reached_steps": 28,
+        "selected_disallowed_steps": 0,
+        "shootable_target_steps": 1038,
+        "skill_counts": {
+          "close_visible_contact": 1619,
+          "fire": 757,
+          "open_use_line": 159,
+          "press_exit": 91,
+          "recover_stuck": 75,
+          "retreat": 824,
+          "route_progression": 571
+        },
+        "snapshot_damage_delta": 0,
+        "snapshot_kill_delta": 0,
+        "snapshot_max_kill_gain": 0,
+        "snapshot_restore_count": 0,
+        "snapshot_restore_failures": 0,
+        "snapshot_stage_counts": {},
+        "snapshot_verification_count": 0,
+        "snapshot_verification_failures": 0,
+        "snapshot_verification_skipped": 0,
+        "strict_allowed_skill_fallback_steps": 0,
+        "strict_allowed_skill_filter_steps": 4096,
+        "topology_frontier_active_steps": 840,
+        "total_reward": 308.7798,
+        "visible_contact_active_steps": 2281,
+        "visible_contact_aligned_steps": 1158,
+        "visible_contact_close_steps": 1854,
+        "visible_contact_distance_delta": 4930.64,
+        "visible_contact_loss_penalty": 0.0,
+        "visible_contact_needs_closure_steps": 1339,
+        "visible_contact_progress_reward": 0.0,
+        "visible_contact_shootable_steps": 942,
+        "visible_enemy_steps": 2322
+      },
+      "update_index": 0
     }
   ],
   "ppo_eval_history": [
@@ -29680,5 +29809,5 @@
       "visited_cells": 62
     }
   ],
-  "updated_at": "2026-06-30T07:25:25Z"
+  "updated_at": "2026-06-30T13:20:06Z"
 }

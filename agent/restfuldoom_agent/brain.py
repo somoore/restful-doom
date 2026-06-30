@@ -2236,16 +2236,16 @@ class BrainPolicy:
             and features.tick - self._last_use_tick >= cooldown_tics
         )
 
-    def _select_exit_route_front_blocker_line(
+    def _exit_route_front_blocker_candidates(
         self,
         features: TacticalFeatures,
         exit_line: dict[str, Any],
-    ) -> dict[str, Any] | None:
+    ) -> list[dict[str, Any]]:
         if (
             int(features.navigation.get("front_blocking_line_special", 0))
             not in MANUAL_USE_LINE_SPECIALS
         ):
-            return None
+            return []
         front_block_distance = (
             float(features.navigation.get("front_block_distance_fp", 0)) / FP
         )
@@ -2270,8 +2270,8 @@ class BrainPolicy:
                 continue
             candidates.append(line)
         if not candidates:
-            return None
-        return min(
+            return []
+        return sorted(
             candidates,
             key=lambda line: (
                 min(
@@ -2282,6 +2282,14 @@ class BrainPolicy:
                 self._line_center_distance(line, exit_line),
             ),
         )
+
+    def _select_exit_route_front_blocker_line(
+        self,
+        features: TacticalFeatures,
+        exit_line: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        candidates = self._exit_route_front_blocker_candidates(features, exit_line)
+        return candidates[0] if candidates else None
 
     def _exit_route_front_blocker_key(
         self,
@@ -2389,23 +2397,33 @@ class BrainPolicy:
         exit_line_record: dict[str, Any],
         stuck: bool,
     ) -> tuple[Any, dict[str, Any]] | None:
-        blocker_line = self._select_exit_route_front_blocker_line(
+        blocker_lines = self._exit_route_front_blocker_candidates(
             features,
             exit_line,
         )
-        if blocker_line is None:
+        if not blocker_lines:
             return None
-        if self._exit_route_front_blocker_exhausted(features, blocker_line, exit_line):
-            return self._recover_after_exit_route_front_blocker_exhausted(
+        exhausted_blocker_line = None
+        for blocker_line in blocker_lines:
+            if self._exit_route_front_blocker_exhausted(
                 features,
                 blocker_line,
                 exit_line,
+            ):
+                if exhausted_blocker_line is None:
+                    exhausted_blocker_line = blocker_line
+                continue
+            return self._use_exit_route_front_blocker_line(
+                features,
+                blocker_line,
                 exit_line_record,
                 stuck,
             )
-        return self._use_exit_route_front_blocker_line(
+        assert exhausted_blocker_line is not None
+        return self._recover_after_exit_route_front_blocker_exhausted(
             features,
-            blocker_line,
+            exhausted_blocker_line,
+            exit_line,
             exit_line_record,
             stuck,
         )
@@ -2429,7 +2447,7 @@ class BrainPolicy:
                 buttons=BT_USE,
                 forward_move=max(4, self.params.move_amount // 2),
                 angle_turn=raw_turn_for_delta(angle_delta),
-                duration_tics=2,
+                duration_tics=1,
                 tick=features.tick,
             ),
             self._decision(
