@@ -1179,6 +1179,113 @@ def test_visible_post_combat_exit_route_bypasses_forward_open_assist_door(tmp_pa
     assert action.raw.forward_move > 0
 
 
+def test_visible_post_combat_exit_route_keeps_exit_when_forward_open_false(tmp_path):
+    # seed10 regression: under visible-but-not-shootable contact a flickering
+    # forward_open=false must not let a generic assist door preempt the
+    # committed post-combat exit line (line330).
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    params = BrainPolicyParams()
+    policy = BrainPolicy(
+        memory=memory,
+        params=params,
+        policy_id="test-policy",
+    )
+    policy._start_kills = 5
+    policy._last_post_combat_exit_line_id = 330
+    policy._last_post_combat_exit_tick = 32
+
+    game_state = state(
+        tick=40,
+        enemy={"x": 512, "y": 128, "distance": 528},
+    )
+    game_state.player.kills = 5
+    game_state.navigation.forward_open = False
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=324,
+            midpoint=SimpleNamespace(x_fp=200 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=200 * 65536, y_fp=0, z_fp=0),
+            special=1,
+            tag=0,
+            distance_fp=200 * 65536,
+            nearest_distance_fp=200 * 65536,
+        ),
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=402 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=402 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=402 * 65536,
+            nearest_distance_fp=402 * 65536,
+        ),
+    ]
+
+    features = extract_features(game_state, memory, params)
+    line = policy._select_progression_line(features)
+    assert line is not None
+    assert line["line_id"] == 330
+
+    # Assist preemption must be denied for the committed exit line under contact.
+    assert not policy._exit_assist_preemption_allowed(features, line)
+    action, decision = policy._advance_progression_line(features, line, stuck=False)
+    assert decision["use_line"]["line_id"] == 330
+    assert decision["skill"] == "route_to_progression_line"
+    assert action.raw.forward_move > 0
+    assert action.raw.side_move != 0
+
+
+def test_visible_exit_route_allows_assist_before_required_kills(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    params = BrainPolicyParams()
+    policy = BrainPolicy(
+        memory=memory,
+        params=params,
+        policy_id="test-policy",
+    )
+    policy._start_kills = 0
+    policy._last_post_combat_exit_line_id = 330
+    policy._last_post_combat_exit_tick = 32
+
+    game_state = state(
+        tick=40,
+        enemy={"x": 512, "y": 128, "distance": 528},
+    )
+    game_state.player.kills = 4
+    game_state.navigation.forward_open = False
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=324,
+            midpoint=SimpleNamespace(x_fp=200 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=200 * 65536, y_fp=0, z_fp=0),
+            special=1,
+            tag=0,
+            distance_fp=200 * 65536,
+            nearest_distance_fp=200 * 65536,
+        ),
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=402 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=402 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=402 * 65536,
+            nearest_distance_fp=402 * 65536,
+        ),
+    ]
+
+    features = extract_features(game_state, memory, params)
+    line = policy._select_progression_line(features)
+    assert line is not None
+    assert line["line_id"] == 330
+
+    assert policy._exit_assist_preemption_allowed(features, line)
+    action, decision = policy._advance_progression_line(features, line, stuck=False)
+    assert decision["use_line"]["line_id"] == 324
+    assert decision["skill"] == "approach_nearby_use_line"
+    assert action.raw.forward_move > 0
+
+
 def test_post_combat_snapshot_finishes_nearby_walk_route_waypoint_before_far_exit(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     policy = BrainPolicy(

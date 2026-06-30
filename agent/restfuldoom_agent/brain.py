@@ -2893,7 +2893,10 @@ class BrainPolicy:
         exit_line: dict[str, Any],
     ) -> bool:
         """Return whether an assist door may preempt an active exit approach."""
-        if not features.navigation.get("forward_open", True):
+        # Under visible contact, never let an assist door preempt the committed
+        # post-combat exit line regardless of forward_open: a flickering
+        # forward_open=false must not knock us off the final exit approach.
+        if int(features.kills) < POST_COMBAT_EXIT_KILLS:
             return True
         if not features.visible_enemies:
             return True
