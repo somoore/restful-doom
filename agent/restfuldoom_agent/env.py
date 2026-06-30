@@ -199,6 +199,7 @@ class SkillController:
         self._recent_route_failure_flags: list[bool] = []
         self._recent_contact_use_line: dict[str, int] | None = None
         self._recent_visible_contact: dict[str, int] | None = None
+        self._late_stale_contact_close_suppressed_until_tick = 0
 
     def observation(self, state: Any) -> list[float]:
         """Encodes a protobuf state as the stable PPO feature vector."""
@@ -240,6 +241,7 @@ class SkillController:
         self._recent_route_failure_flags.clear()
         self._recent_contact_use_line = None
         self._recent_visible_contact = None
+        self._late_stale_contact_close_suppressed_until_tick = 0
         if hasattr(self.policy, "reset_episode_context"):
             self.policy.reset_episode_context()
 
@@ -582,6 +584,9 @@ class SkillController:
         can_fire = shootable is not None and self.policy._can_shoot(features, shootable)
         recent_contact_active = self._recent_contact_active(features)
         late_contact_route_recovery = self._late_contact_route_recovery_needed(features)
+        late_stale_contact_close_suppressed = (
+            self._late_stale_contact_close_suppressed(features)
+        )
         postcombat_visible_route_recovery = (
             self._postcombat_visible_route_recovery_needed(features)
         )
@@ -691,6 +696,7 @@ class SkillController:
                 not postcombat_exit_commitment
                 and not postcombat_route_available
                 and not late_contact_route_recovery
+                and not late_stale_contact_close_suppressed
             ):
                 mask["close_visible_contact"] = True
             if (
@@ -717,6 +723,7 @@ class SkillController:
             and not postcombat_exit_commitment
             and not postcombat_route_available
             and not late_contact_route_recovery
+            and not late_stale_contact_close_suppressed
         ):
             mask["close_visible_contact"] = True
 
@@ -1787,6 +1794,32 @@ class SkillController:
         )
         required_streak = 24 if enemy_distance <= 1200.0 else 12
         return self._same_skill_streak >= required_streak
+
+    def _late_stale_contact_close_suppressed(self, features: Any) -> bool:
+        """Returns whether a stale late-combat no-LOS contact loop should yield."""
+        if (
+            int(features.kills) < POST_COMBAT_EXIT_KILLS - 2
+            or int(features.kills) >= POST_COMBAT_EXIT_KILLS
+            or features.visible_enemies
+            or self.policy._shootable_enemy(features) is not None
+        ):
+            self._late_stale_contact_close_suppressed_until_tick = 0
+            return False
+        route = features.navigation.get("route_waypoint", {})
+        if not isinstance(route, dict) or not isinstance(route.get("line"), dict):
+            self._late_stale_contact_close_suppressed_until_tick = 0
+            return False
+        previous_skill = (
+            SKILL_ACTIONS[self._previous_action_index]
+            if self._previous_action_index is not None
+            else None
+        )
+        if previous_skill == "close_visible_contact" and self._same_skill_streak >= 64:
+            self._late_stale_contact_close_suppressed_until_tick = int(features.tick) + 220
+            return True
+        if int(features.tick) <= int(self._late_stale_contact_close_suppressed_until_tick):
+            return True
+        return False
 
     def _late_contact_recover_only_needed(self, features: Any) -> bool:
         """Breaks sticky late-combat route sidesteps that stop moving."""

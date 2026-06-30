@@ -748,6 +748,78 @@ def test_skill_controller_late_route_recovery_defers_to_contact_use_line(tmp_pat
     assert not mask["recover_stuck"]
 
 
+def test_skill_controller_stale_late_contact_use_line_yields_to_route_recovery(tmp_path):
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    memory.data["enemies"] = {
+        "7": {
+            "last_seen_tick": 40,
+            "last_position": [1190.0, 0.0],
+            "last_distance": 1190.0,
+            "last_health": 20,
+            "line_of_sight": True,
+        }
+    }
+    controller = SkillController(memory=memory)
+    visible_contact = _state(
+        tick=40,
+        kills=3,
+        enemy=True,
+        combat=False,
+        contact_use=True,
+        contact_use_distance_units=900,
+    )
+    contact_line = visible_contact.navigation.use_lines[0]
+    controller._remember_contact_use_line(
+        extract_features(visible_contact, controller.memory, controller.params),
+        {
+            "line_id": contact_line.line_id,
+            "special": contact_line.special,
+            "distance": 900.0,
+            "angle_delta": 0.0,
+        },
+    )
+    lost_contact = _state(
+        tick=120,
+        kills=3,
+        enemy=True,
+        enemy_line_of_sight=False,
+        enemy_distance=1190,
+        combat=False,
+        route=True,
+        contact_use=True,
+        contact_use_distance_units=900,
+    )
+    route_line = lost_contact.navigation.route_waypoint.line
+    route_line.line_id = 195
+    route_line.special = 88
+    route_line.distance_fp = 520 * 65536
+    route_line.nearest_distance_fp = 520 * 65536
+
+    controller._previous_action_index = SKILL_ACTIONS.index("close_visible_contact")
+    controller._same_skill_streak = 63
+    contact_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(lost_contact)))
+
+    assert contact_mask["close_visible_contact"]
+    assert not contact_mask["route_progression"]
+    assert not contact_mask["recover_stuck"]
+
+    controller._previous_action_index = SKILL_ACTIONS.index("close_visible_contact")
+    controller._same_skill_streak = 64
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(lost_contact)))
+
+    assert mask["route_progression"]
+    assert not mask["close_visible_contact"]
+    assert not mask["open_use_line"]
+    assert not mask["seek_enemy"]
+
+    controller._previous_action_index = SKILL_ACTIONS.index("recover_stuck")
+    controller._same_skill_streak = 16
+    latched_mask = dict(zip(SKILL_ACTIONS, controller.action_mask(lost_contact)))
+
+    assert latched_mask["route_progression"]
+    assert not latched_mask["close_visible_contact"]
+
+
 def test_skill_controller_breaks_expired_late_contact_loop_after_long_close(tmp_path):
     memory = AgentMemory.load(tmp_path / "memory.json")
     memory.data["enemies"] = {
