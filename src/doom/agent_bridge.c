@@ -778,6 +778,16 @@ static void FillThinkerStates(agent_game_state_snapshot_t *snapshot)
     thinker_t *thinker;
     mobj_t *player;
 
+    /* thinkercap is only a valid, initialized ring once a level is loaded
+     * (P_InitThinkers runs during level setup). AgentBridge_AfterTic fires on
+     * EVERY tic, including the title/demo tics before the first level, when
+     * thinkercap.next is uninitialized -> walking it segfaults on tic 1. Guard
+     * on GS_LEVEL, matching FillPlayerState and the other AfterTic helpers. */
+    if (gamestate != GS_LEVEL)
+    {
+        return;
+    }
+
     if (consoleplayer < 0 || consoleplayer >= MAXPLAYERS)
     {
         player = NULL;
