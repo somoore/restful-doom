@@ -8,6 +8,7 @@
 #include "doomstat.h"
 #include "g_game.h"
 #include "info.h"
+#include "m_bbox.h"
 #include "m_random.h"
 #include "p_local.h"
 #include "r_main.h"
@@ -24,11 +25,16 @@ static boolean agent_pending_start_active = false;
 static agent_control_request_t agent_pending_start;
 static boolean agent_pending_seed_active = false;
 static agent_control_request_t agent_pending_seed;
+static int agent_last_map_publish_episode = -1;
+static int agent_last_map_publish_map = -1;
+static int agent_last_map_publish_level_time = -99999;
 
 #define AGENT_NAV_PROBE_DISTANCE (96 * FRACUNIT)
 
 static boolean IsLivingEnemy(const mobj_t *obj);
+static boolean IsUsefulAgentObject(const mobj_t *obj, const mobj_t *player);
 static int ProgressionLinePriority(int special);
+static void PublishMapSnapshotIfNeeded(void);
 static void SnapshotDescription(char *out, size_t out_size,
                                 const agent_control_request_t *request);
 static const int agent_nav_direction_offsets[AGENT_MAX_NAV_DIRECTIONS] = {
@@ -172,6 +178,57 @@ static boolean IsWalkTriggerLineSpecial(int special)
 static boolean IsExitLineSpecial(int special)
 {
     return special == 11 || special == 51;
+}
+
+static boolean IsUseTriggerLineSpecial(int special)
+{
+    switch (special)
+    {
+        case 1:
+        case 26:
+        case 27:
+        case 28:
+        case 31:
+        case 32:
+        case 33:
+        case 34:
+        case 117:
+        case 118:
+            return true;
+        default:
+            return false;
+    }
+}
+
+static boolean IsDoorLineSpecial(int special)
+{
+    switch (special)
+    {
+        case 1:
+        case 26:
+        case 27:
+        case 28:
+        case 31:
+        case 32:
+        case 33:
+        case 34:
+        case 46:
+        case 63:
+        case 76:
+        case 86:
+        case 90:
+        case 103:
+        case 106:
+        case 108:
+        case 109:
+        case 111:
+        case 112:
+        case 117:
+        case 118:
+            return true;
+        default:
+            return false;
+    }
 }
 
 static int ProgressionLinePriority(int special)
@@ -326,6 +383,259 @@ static void FillUseLine(
     target->tag = line->tag;
     target->distance_fp = distance;
     target->nearest_distance_fp = nearest_distance;
+}
+
+static uint64_t DigestMix(uint64_t hash, uint64_t value)
+{
+    hash ^= value + 0x9e3779b97f4a7c15ULL + (hash << 6) + (hash >> 2);
+    return hash;
+}
+
+static int SectorIndex(const sector_t *sector)
+{
+    if (sector == NULL)
+    {
+        return -1;
+    }
+    return (int) (sector - sectors);
+}
+
+static void FillMapLine(agent_map_line_t *target, int line_id, const line_t *line)
+{
+    fixed_t open_top = 0;
+    fixed_t open_bottom = 0;
+    fixed_t open_range = 0;
+    boolean two_sided;
+    boolean blocking;
+
+    memset(target, 0, sizeof(*target));
+    if (line == NULL)
+    {
+        return;
+    }
+
+    two_sided = (line->flags & ML_TWOSIDED) != 0 && line->backsector != NULL;
+    blocking = (line->flags & ML_BLOCKING) != 0 || !two_sided;
+
+    if (two_sided)
+    {
+        open_top = line->frontsector->ceilingheight < line->backsector->ceilingheight
+            ? line->frontsector->ceilingheight
+            : line->backsector->ceilingheight;
+        open_bottom = line->frontsector->floorheight > line->backsector->floorheight
+            ? line->frontsector->floorheight
+            : line->backsector->floorheight;
+        open_range = open_top - open_bottom;
+    }
+
+    target->id = line_id;
+    target->v1 = (int32_t) (line->v1 - vertexes);
+    target->v2 = (int32_t) (line->v2 - vertexes);
+    target->flags = line->flags;
+    target->special = line->special;
+    target->tag = line->tag;
+    target->front_sector = SectorIndex(line->frontsector);
+    target->back_sector = SectorIndex(line->backsector);
+    target->two_sided = two_sided ? 1u : 0u;
+    target->blocking = blocking ? 1u : 0u;
+    target->passable = (!blocking && open_range >= (56 * FRACUNIT)) ? 1u : 0u;
+    target->sight_blocking = (!two_sided || open_range <= 0 || (line->flags & ML_BLOCKING)) ? 1u : 0u;
+    target->door = IsDoorLineSpecial(line->special) ? 1u : 0u;
+    target->use_trigger = IsUseTriggerLineSpecial(line->special) ? 1u : 0u;
+    target->walk_trigger = IsWalkTriggerLineSpecial(line->special) ? 1u : 0u;
+    target->exit = IsExitLineSpecial(line->special) ? 1u : 0u;
+    target->open_top_fp = open_top;
+    target->open_bottom_fp = open_bottom;
+    target->open_range_fp = open_range;
+    target->bbox_top_fp = line->bbox[BOXTOP];
+    target->bbox_bottom_fp = line->bbox[BOXBOTTOM];
+    target->bbox_left_fp = line->bbox[BOXLEFT];
+    target->bbox_right_fp = line->bbox[BOXRIGHT];
+}
+
+static void AddMapThing(
+    agent_map_snapshot_t *snapshot,
+    int id,
+    int type_id,
+    fixed_t x,
+    fixed_t y,
+    fixed_t z,
+    angle_t angle,
+    uint32_t options,
+    boolean player_start,
+    boolean enemy)
+{
+    agent_map_thing_t *target;
+
+    if (snapshot->thing_count >= AGENT_MAX_MAP_THINGS)
+    {
+        snapshot->truncated = 1u;
+        return;
+    }
+
+    target = &snapshot->things[snapshot->thing_count++];
+    memset(target, 0, sizeof(*target));
+    target->id = id;
+    target->type_id = type_id;
+    target->x_fp = x;
+    target->y_fp = y;
+    target->z_fp = z;
+    target->angle_degrees = AngleToDegrees(angle);
+    target->options = options;
+    target->player_start = player_start ? 1u : 0u;
+    target->enemy = enemy ? 1u : 0u;
+}
+
+static void FillMapSnapshot(agent_map_snapshot_t *snapshot)
+{
+    uint64_t digest = 1469598103934665603ULL;
+    fixed_t left = 0;
+    fixed_t right = 0;
+    fixed_t top = 0;
+    fixed_t bottom = 0;
+    thinker_t *thinker;
+
+    memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->episode = gameepisode;
+    snapshot->map = gamemap;
+
+    if (numvertexes > AGENT_MAX_MAP_VERTICES
+        || numlines > AGENT_MAX_MAP_LINES
+        || numsectors > AGENT_MAX_MAP_SECTORS)
+    {
+        snapshot->truncated = 1u;
+    }
+
+    snapshot->vertex_count = (uint32_t) (numvertexes < AGENT_MAX_MAP_VERTICES
+        ? numvertexes
+        : AGENT_MAX_MAP_VERTICES);
+    for (uint32_t i = 0; i < snapshot->vertex_count; ++i)
+    {
+        snapshot->vertices[i].id = (int32_t) i;
+        snapshot->vertices[i].x_fp = vertexes[i].x;
+        snapshot->vertices[i].y_fp = vertexes[i].y;
+        if (i == 0 || vertexes[i].x < left)
+        {
+            left = vertexes[i].x;
+        }
+        if (i == 0 || vertexes[i].x > right)
+        {
+            right = vertexes[i].x;
+        }
+        if (i == 0 || vertexes[i].y > top)
+        {
+            top = vertexes[i].y;
+        }
+        if (i == 0 || vertexes[i].y < bottom)
+        {
+            bottom = vertexes[i].y;
+        }
+        digest = DigestMix(digest, (uint32_t) vertexes[i].x);
+        digest = DigestMix(digest, (uint32_t) vertexes[i].y);
+    }
+
+    snapshot->sector_count = (uint32_t) (numsectors < AGENT_MAX_MAP_SECTORS
+        ? numsectors
+        : AGENT_MAX_MAP_SECTORS);
+    for (uint32_t i = 0; i < snapshot->sector_count; ++i)
+    {
+        const sector_t *sector = &sectors[i];
+        snapshot->sectors[i].id = (int32_t) i;
+        snapshot->sectors[i].floor_height_fp = sector->floorheight;
+        snapshot->sectors[i].ceiling_height_fp = sector->ceilingheight;
+        snapshot->sectors[i].light_level = sector->lightlevel;
+        snapshot->sectors[i].special = sector->special;
+        snapshot->sectors[i].tag = sector->tag;
+        snapshot->sectors[i].damaging = IsDamagingSectorSpecial(sector->special) ? 1u : 0u;
+        snapshot->sectors[i].exit_damage = IsExitDamageSectorSpecial(sector->special) ? 1u : 0u;
+        snapshot->sectors[i].active_special = sector->specialdata != NULL ? 1u : 0u;
+        digest = DigestMix(digest, (uint32_t) sector->floorheight);
+        digest = DigestMix(digest, (uint32_t) sector->ceilingheight);
+        digest = DigestMix(digest, (uint32_t) sector->special);
+        digest = DigestMix(digest, (uint32_t) sector->tag);
+    }
+
+    snapshot->line_count = (uint32_t) (numlines < AGENT_MAX_MAP_LINES
+        ? numlines
+        : AGENT_MAX_MAP_LINES);
+    for (uint32_t i = 0; i < snapshot->line_count; ++i)
+    {
+        FillMapLine(&snapshot->lines[i], (int) i, &lines[i]);
+        digest = DigestMix(digest, (uint32_t) snapshot->lines[i].flags);
+        digest = DigestMix(digest, (uint32_t) snapshot->lines[i].special);
+        digest = DigestMix(digest, (uint32_t) snapshot->lines[i].tag);
+        digest = DigestMix(digest, (uint32_t) snapshot->lines[i].open_range_fp);
+    }
+
+    for (int i = 0; i < MAXPLAYERS; ++i)
+    {
+        if (playerstarts[i].type > 0)
+        {
+            AddMapThing(
+                snapshot,
+                -1 - i,
+                playerstarts[i].type,
+                playerstarts[i].x * FRACUNIT,
+                playerstarts[i].y * FRACUNIT,
+                0,
+                DegreesToAngle(playerstarts[i].angle),
+                (uint32_t) playerstarts[i].options,
+                true,
+                false);
+        }
+    }
+
+    for (thinker = thinkercap.next; thinker != &thinkercap; thinker = thinker->next)
+    {
+        mobj_t *obj;
+
+        if (thinker->function.acp1 != (actionf_p1) P_MobjThinker)
+        {
+            continue;
+        }
+
+        obj = (mobj_t *) thinker;
+        if (!IsUsefulAgentObject(obj, NULL))
+        {
+            continue;
+        }
+
+        AddMapThing(
+            snapshot,
+            obj->id,
+            mobjinfo[obj->type].doomednum,
+            obj->spawnpoint.x * FRACUNIT,
+            obj->spawnpoint.y * FRACUNIT,
+            obj->z,
+            DegreesToAngle(obj->spawnpoint.angle),
+            (uint32_t) obj->spawnpoint.options,
+            false,
+            IsLivingEnemy(obj));
+    }
+
+    snapshot->bbox_left_fp = left;
+    snapshot->bbox_right_fp = right;
+    snapshot->bbox_top_fp = top;
+    snapshot->bbox_bottom_fp = bottom;
+    snapshot->digest = digest;
+}
+
+static void PublishMapSnapshotIfNeeded(void)
+{
+    static agent_map_snapshot_t snapshot;
+
+    if (gameepisode == agent_last_map_publish_episode
+        && gamemap == agent_last_map_publish_map
+        && leveltime - agent_last_map_publish_level_time < 4)
+    {
+        return;
+    }
+
+    FillMapSnapshot(&snapshot);
+    restfuldoom_agent_publish_map_snapshot(&snapshot);
+    agent_last_map_publish_episode = gameepisode;
+    agent_last_map_publish_map = gamemap;
+    agent_last_map_publish_level_time = leveltime;
 }
 
 static void FillNavigationProbe(agent_game_state_snapshot_t *snapshot, const mobj_t *obj)
@@ -867,6 +1177,7 @@ void AgentBridge_AfterTic(int completed_tic)
 
     FillPlayerState(&snapshot);
     FillThinkerStates(&snapshot);
+    PublishMapSnapshotIfNeeded();
     restfuldoom_agent_publish_state(&snapshot);
 }
 

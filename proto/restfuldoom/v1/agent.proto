@@ -18,6 +18,12 @@ service DoomAgent {
 
   // Loads a local savegame slot as a progressed-state snapshot.
   rpc LoadSnapshot(LoadSnapshotRequest) returns (SnapshotCommandResponse);
+
+  // Returns the latest static map geometry plus dynamic line/sector overlay.
+  rpc GetMapSnapshot(MapSnapshotRequest) returns (MapSnapshot);
+
+  // Checks map-line visibility for planner candidate points.
+  rpc QueryVisibility(VisibilityRequest) returns (VisibilityResponse);
 }
 
 // Configures an observation-only stream.
@@ -127,6 +133,101 @@ message SnapshotCommandResponse {
 
   // True when the request queued a load command.
   bool load_queued = 5;
+}
+
+// Requests the latest cached map snapshot for the active level.
+message MapSnapshotRequest {
+  // When false, the server may omit dynamic thing starts/objects.
+  bool include_things = 1;
+}
+
+// Static geometry plus dynamic passability state for one loaded map.
+message MapSnapshot {
+  string schema = 1;
+  int32 episode = 2;
+  int32 map = 3;
+  uint64 digest = 4;
+  repeated MapVertex vertices = 5;
+  repeated MapLine lines = 6;
+  repeated MapSector sectors = 7;
+  repeated MapThing things = 8;
+  bool truncated = 9;
+  int32 bbox_left_fp = 10;
+  int32 bbox_right_fp = 11;
+  int32 bbox_top_fp = 12;
+  int32 bbox_bottom_fp = 13;
+}
+
+message MapVertex {
+  int32 id = 1;
+  sfixed32 x_fp = 2;
+  sfixed32 y_fp = 3;
+}
+
+message MapLine {
+  int32 id = 1;
+  int32 v1 = 2;
+  int32 v2 = 3;
+  int32 flags = 4;
+  int32 special = 5;
+  int32 tag = 6;
+  int32 front_sector = 7;
+  int32 back_sector = 8;
+  bool two_sided = 9;
+  bool blocking = 10;
+  bool passable = 11;
+  bool sight_blocking = 12;
+  bool door = 13;
+  bool use_trigger = 14;
+  bool walk_trigger = 15;
+  bool exit = 16;
+  sfixed32 open_top_fp = 17;
+  sfixed32 open_bottom_fp = 18;
+  sfixed32 open_range_fp = 19;
+  sfixed32 bbox_left_fp = 20;
+  sfixed32 bbox_right_fp = 21;
+  sfixed32 bbox_top_fp = 22;
+  sfixed32 bbox_bottom_fp = 23;
+}
+
+message MapSector {
+  int32 id = 1;
+  sfixed32 floor_height_fp = 2;
+  sfixed32 ceiling_height_fp = 3;
+  int32 light_level = 4;
+  int32 special = 5;
+  int32 tag = 6;
+  bool damaging = 7;
+  bool exit_damage = 8;
+  bool active_special = 9;
+}
+
+message MapThing {
+  int32 id = 1;
+  int32 type_id = 2;
+  Vec3Fixed position = 3;
+  uint32 angle_degrees = 4;
+  uint32 options = 5;
+  bool player_start = 6;
+  bool enemy = 7;
+}
+
+message VisibilityRequest {
+  repeated VisibilityQuery queries = 1;
+}
+
+message VisibilityQuery {
+  Vec3Fixed from_pos = 1;
+  Vec3Fixed to_pos = 2;
+}
+
+message VisibilityResult {
+  bool clear = 1;
+  int32 blocking_line_id = 2;
+}
+
+message VisibilityResponse {
+  repeated VisibilityResult results = 1;
 }
 
 // A full game-state observation optimized for AI agents.

@@ -151,6 +151,23 @@ def semantic_action(
     )
 
 
+def _vec3_proto(value: Any) -> Any:
+    if isinstance(value, agent_pb2.Vec3Fixed):
+        return value
+    if isinstance(value, dict):
+        return agent_pb2.Vec3Fixed(
+            x_fp=int(value.get("x_fp", value.get("x", 0)) or 0),
+            y_fp=int(value.get("y_fp", value.get("y", 0)) or 0),
+            z_fp=int(value.get("z_fp", value.get("z", 0)) or 0),
+        )
+    x_fp, y_fp, *rest = value
+    return agent_pb2.Vec3Fixed(
+        x_fp=int(x_fp),
+        y_fp=int(y_fp),
+        z_fp=int(rest[0] if rest else 0),
+    )
+
+
 def _episode_start_proto(start: EpisodeStart | None) -> Any | None:
     if start is None:
         return None
@@ -306,6 +323,22 @@ class DoomAgentClient:
             save_queued=bool(response.save_queued),
             load_queued=bool(response.load_queued),
         )
+
+    async def get_map_snapshot(self, *, include_things: bool = True) -> Any:
+        """Returns the latest cached static map geometry plus dynamic overlay."""
+        return await self.stub.GetMapSnapshot(
+            agent_pb2.MapSnapshotRequest(include_things=bool(include_things)),
+            metadata=self.metadata,
+        )
+
+    async def query_visibility(self, queries: Iterable[tuple[Any, Any]]) -> Any:
+        """Checks candidate visibility segments against the latest map overlay."""
+        request = agent_pb2.VisibilityRequest()
+        for from_pos, to_pos in queries:
+            query = request.queries.add()
+            query.from_pos.CopyFrom(_vec3_proto(from_pos))
+            query.to_pos.CopyFrom(_vec3_proto(to_pos))
+        return await self.stub.QueryVisibility(request, metadata=self.metadata)
 
     async def observe_reconnecting(
         self,

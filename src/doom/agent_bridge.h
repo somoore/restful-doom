@@ -9,6 +9,10 @@
 #define AGENT_MAX_OBJECTS 256
 #define AGENT_MAX_NAV_DIRECTIONS 9
 #define AGENT_MAX_USE_LINES 32
+#define AGENT_MAX_MAP_VERTICES 4096
+#define AGENT_MAX_MAP_LINES 8192
+#define AGENT_MAX_MAP_SECTORS 2048
+#define AGENT_MAX_MAP_THINGS 512
 
 typedef struct
 {
@@ -179,8 +183,89 @@ typedef struct
     agent_mobj_state_t objects[AGENT_MAX_OBJECTS];
 } agent_game_state_snapshot_t;
 
+typedef struct
+{
+    int32_t id;
+    int32_t x_fp;
+    int32_t y_fp;
+} agent_map_vertex_t;
+
+typedef struct
+{
+    int32_t id;
+    int32_t v1;
+    int32_t v2;
+    int32_t flags;
+    int32_t special;
+    int32_t tag;
+    int32_t front_sector;
+    int32_t back_sector;
+    uint32_t two_sided;
+    uint32_t blocking;
+    uint32_t passable;
+    uint32_t sight_blocking;
+    uint32_t door;
+    uint32_t use_trigger;
+    uint32_t walk_trigger;
+    uint32_t exit;
+    int32_t open_top_fp;
+    int32_t open_bottom_fp;
+    int32_t open_range_fp;
+    int32_t bbox_left_fp;
+    int32_t bbox_right_fp;
+    int32_t bbox_top_fp;
+    int32_t bbox_bottom_fp;
+} agent_map_line_t;
+
+typedef struct
+{
+    int32_t id;
+    int32_t floor_height_fp;
+    int32_t ceiling_height_fp;
+    int32_t light_level;
+    int32_t special;
+    int32_t tag;
+    uint32_t damaging;
+    uint32_t exit_damage;
+    uint32_t active_special;
+} agent_map_sector_t;
+
+typedef struct
+{
+    int32_t id;
+    int32_t type_id;
+    int32_t x_fp;
+    int32_t y_fp;
+    int32_t z_fp;
+    uint32_t angle_degrees;
+    uint32_t options;
+    uint32_t player_start;
+    uint32_t enemy;
+} agent_map_thing_t;
+
+typedef struct
+{
+    int32_t episode;
+    int32_t map;
+    uint64_t digest;
+    uint32_t vertex_count;
+    uint32_t line_count;
+    uint32_t sector_count;
+    uint32_t thing_count;
+    uint32_t truncated;
+    int32_t bbox_left_fp;
+    int32_t bbox_right_fp;
+    int32_t bbox_top_fp;
+    int32_t bbox_bottom_fp;
+    agent_map_vertex_t vertices[AGENT_MAX_MAP_VERTICES];
+    agent_map_line_t lines[AGENT_MAX_MAP_LINES];
+    agent_map_sector_t sectors[AGENT_MAX_MAP_SECTORS];
+    agent_map_thing_t things[AGENT_MAX_MAP_THINGS];
+} agent_map_snapshot_t;
+
 int restfuldoom_agent_init(uint16_t port);
 void restfuldoom_agent_publish_state(const agent_game_state_snapshot_t *snapshot);
+void restfuldoom_agent_publish_map_snapshot(const agent_map_snapshot_t *snapshot);
 int restfuldoom_agent_take_action(agent_player_action_t *out_action);
 int restfuldoom_agent_take_control_request(agent_control_request_t *out_request);
 
