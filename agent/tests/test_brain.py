@@ -7,6 +7,8 @@ from restfuldoom_agent.brain import (
     BrainPolicy,
     BrainPolicyParams,
     EpisodeStats,
+    EXIT_DEADEND_STALL_TICS,
+    EXIT_FUTILE_DOOR_USE_RUN,
     EXIT_ROUTE_FRONT_BLOCKER_MAX_USES,
     LINE_ATTEMPT_STALL_TICS,
     cell_key,
@@ -3946,3 +3948,137 @@ def test_policy_blacklists_repeated_line_attempt_in_same_cell(tmp_path):
 
     assert policy._record_line_attempt(later_features, later_line) is False
     assert policy._is_line_blocked(later_features, later_line) is True
+
+
+def test_deep_stalled_exit_push_explores_to_route_around_deadend(tmp_path):
+    # Reproduces the seed 9/10/17 dead-end: the exit switch (line 330) never
+    # opens because the player is wedged on the wrong side of a door. After a
+    # long no-progress window the brain must STOP mashing the exit and explore
+    # to route around, blacklisting this exit approach for the current cell.
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    game_state = state(tick=1000)
+    game_state.player.kills = 6
+    game_state.navigation.forward_open = False
+    game_state.navigation.back_open = True
+    game_state.navigation.front_blocking_line_special = 1
+    game_state.navigation.front_block_distance_fp = 16 * 65536
+    game_state.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=200 * 65536, y_fp=0, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=160 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=160 * 65536,
+            nearest_distance_fp=160 * 65536,
+        )
+    ]
+    features = extract_features(game_state, memory, BrainPolicyParams())
+    exit_line = features.navigation["use_lines"][0]
+    exit_key = policy._line_key(features.cell, exit_line)
+    # No real progress since tick 700 -> stall age 300 >= EXIT_DEADEND_STALL_TICS.
+    policy._exit_push_attempts[exit_key] = {
+        "first_tick": 1000 - (EXIT_DEADEND_STALL_TICS + 100),
+        "best_distance": 160.0,
+        "signature": {
+            "cell": features.cell,
+            "episode": features.episode,
+            "map": features.map,
+            "kills": features.kills,
+            "items": features.items,
+        },
+    }
+
+    _action, decision = policy._advance_progression_line(features, exit_line, stuck=False)
+
+    # Escaped the exit mash: no longer running an exit-switch USE skill, and
+    # the dead-end exit approach is blacklisted for this cell so it routes away.
+    exit_mash_skills = {
+        "press_exit_switch",
+        "push_exit_switch",
+        "use_exit_route_blocker_ahead",
+        "approach_exit_switch_front",
+        "turn_to_exit_switch",
+        "recover_exit_switch_approach",
+    }
+    assert decision["skill"] not in exit_mash_skills
+    assert policy._is_line_blocked(features, exit_line)
+
+
+def test_futile_door_use_run_triggers_route_around(tmp_path):
+    # seed 9 signature: USE'd a close front door that never opens for many
+    # steps (front_block_distance frozen). The futile-door run must trip the
+    # dead-end escape even though no single line-keyed stall ages out.
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+
+    def exit_state(tick):
+        gs = state(tick=tick)
+        gs.player.kills = 6
+        gs.navigation.forward_open = False
+        gs.navigation.front_blocking_line_special = 1
+        gs.navigation.front_block_distance_fp = 16 * 65536  # frozen, never opens
+        gs.navigation.use_lines = [
+            SimpleNamespace(
+                line_id=330,
+                midpoint=SimpleNamespace(x_fp=200 * 65536, y_fp=0, z_fp=0),
+                nearest_point=SimpleNamespace(x_fp=160 * 65536, y_fp=0, z_fp=0),
+                special=11,
+                tag=0,
+                distance_fp=160 * 65536,
+                nearest_distance_fp=160 * 65536,
+            )
+        ]
+        return extract_features(gs, memory, BrainPolicyParams())
+
+    exit_mash_skills = {
+        "press_exit_switch",
+        "push_exit_switch",
+        "use_exit_route_blocker_ahead",
+        "approach_exit_switch_front",
+        "turn_to_exit_switch",
+        "recover_exit_switch_approach",
+    }
+    # Drive the exit-advance path with a frozen door for > EXIT_FUTILE_DOOR_USE_RUN
+    # steps; before the threshold it keeps trying the exit, after it routes away.
+    escaped = False
+    for step in range(EXIT_FUTILE_DOOR_USE_RUN + 5):
+        features = exit_state(1000 + step)
+        line = features.navigation["use_lines"][0]
+        _action, decision = policy._advance_progression_line(features, line, stuck=False)
+        if decision["skill"] not in exit_mash_skills:
+            escaped = True
+            break
+    assert escaped, "futile-door run never triggered route-around escape"
+
+
+def test_futile_door_run_resets_when_door_opens(tmp_path):
+    # The counter must reset when front_block_distance improves (door opening),
+    # so a recoverable approach (passing seed 10) is never falsely aborted.
+    memory = AgentMemory.load(tmp_path / "memory.json")
+    policy = BrainPolicy(
+        memory=memory,
+        params=BrainPolicyParams(),
+        policy_id="test-policy",
+    )
+    gs = state(tick=1)
+    gs.navigation.front_blocking_line_special = 1
+    gs.navigation.front_block_distance_fp = 16 * 65536
+    f1 = extract_features(gs, memory, BrainPolicyParams())
+    for _ in range(50):
+        policy._update_futile_door_run(f1)
+    assert policy._futile_door_use_run >= 40
+    # door starts opening (distance grows) -> run resets
+    gs.navigation.front_block_distance_fp = 40 * 65536
+    f2 = extract_features(gs, memory, BrainPolicyParams())
+    policy._update_futile_door_run(f2)
+    assert policy._futile_door_use_run == 0

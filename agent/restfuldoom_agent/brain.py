@@ -44,6 +44,19 @@ EXIT_ROUTE_LOCAL_DOOR_ANGLE_DEGREES = 60.0
 EXIT_ROUTE_LOCAL_DOOR_USE_COOLDOWN_TICS = 8
 EXIT_ROUTE_FRONT_BLOCKER_MAX_USES = 18
 EXIT_ROUTE_FRONT_BLOCKER_EXIT_TURN_DEGREES = 30.0
+# ponytail: a true exit dead-end (player wedged at a door that will not open
+# from this side, e.g. seed 9/10/17 frozen 160u from the switch pressing USE
+# for hundreds of tics) needs a much longer no-progress window than the normal
+# 45-tic push stall before we give up the local approach and route around.
+EXIT_DEADEND_STALL_TICS = 200
+# ponytail: a sharper dead-end signal than the line/cell stall — count steps
+# spent USE-ing a close front door whose front_block_distance never improves
+# (the door is not opening from this side). The threshold sits between the
+# passing seed-10 recover run (~127 steps) and the failing seed-9 freeze
+# (200+), so it catches the true wrong-side dead-end without aborting a
+# recoverable approach. Reset whenever the door distance improves.
+EXIT_FUTILE_DOOR_USE_RUN = 160
+EXIT_FUTILE_DOOR_USE_DISTANCE_UNITS = 64.0
 EXIT_USE_RELEASE_TICS = 1
 EXIT_DIRECT_APPROACH_OWN_DISTANCE_UNITS = 256.0
 EXIT_DIRECT_APPROACH_OWN_ANGLE_DEGREES = 45.0
@@ -620,6 +633,8 @@ class BrainPolicy:
         self._last_post_combat_exit_line_id: int | None = None
         self._last_post_combat_exit_line: dict[str, Any] | None = None
         self._completed_walk_route_line_ids: set[int] = set()
+        self._futile_door_use_run = 0
+        self._futile_door_best_distance = 999999.0
 
     def reset_episode_context(self) -> None:
         """Clear episode-local tactical state while preserving persistent memory."""
@@ -646,6 +661,8 @@ class BrainPolicy:
         self._last_post_combat_exit_line_id = None
         self._last_post_combat_exit_line = None
         self._completed_walk_route_line_ids.clear()
+        self._futile_door_use_run = 0
+        self._futile_door_best_distance = 999999.0
 
     @staticmethod
     def _phase_tick(features: TacticalFeatures) -> int:
@@ -673,6 +690,11 @@ class BrainPolicy:
         self._episode_cell_visits[features.cell] = (
             self._episode_cell_visits.get(features.cell, 0) + 1
         )
+        # ponytail: update the futile-door run every decision step (not only on
+        # the exit-stall path) so seed 9's thrash between exit/progression
+        # approaches still accumulates a continuous count of fronting a frozen
+        # door.
+        self._update_futile_door_run(features)
         if features.visible_enemies:
             self._last_visible_enemy_tick = features.tick
             self._last_visible_enemy_id = int(features.visible_enemies[0]["id"])
@@ -2551,6 +2573,22 @@ class BrainPolicy:
             exit_push_stalled = self._exit_push_stalled(features, line, distance)
         if (
             special in EXIT_LINE_SPECIALS
+            and exit_push_stalled
+            and self._exit_push_deadend(features, line)
+        ):
+            # ponytail: the exit switch will not open from here (wedged at a
+            # one-sided/unopenable door). Stop mashing USE, blacklist this
+            # approach for this cell, and explore to route around toward an
+            # approach that works. Cleared when the player leaves the cell.
+            self._blocked_use_lines[self._line_key(features.cell, line)] = (
+                features.tick + LINE_ATTEMPT_BLOCK_TICS
+            )
+            self._exit_push_attempts.pop(self._line_key(features.cell, line), None)
+            self._futile_door_use_run = 0
+            self._futile_door_best_distance = 999999.0
+            return self._explore(features, stuck)
+        if (
+            special in EXIT_LINE_SPECIALS
             and distance > max(activate_distance, EXIT_ASSIST_DISTANCE_UNITS)
             and abs(angle_delta) <= 90.0
             and bool(features.navigation.get("forward_open", True))
@@ -3069,6 +3107,10 @@ class BrainPolicy:
                 and abs(front_angle_delta) >= 120.0
                 and features.navigation.get("back_open", False)
                 and self._exit_push_stalled(features, line, distance)
+                and not (
+                    raw_distance <= EXIT_LINE_CONFIRMED_USE_DISTANCE_UNITS
+                    and 18.0 < abs(angle_delta) <= 45.0
+                )
             ):
                 return (
                     raw_ticcmd_action(
@@ -4056,6 +4098,51 @@ class BrainPolicy:
             return False
 
         return features.tick - int(previous["first_tick"]) >= LINE_ATTEMPT_STALL_TICS
+
+    def _update_futile_door_run(self, features: TacticalFeatures) -> None:
+        # ponytail: count consecutive steps fronting a close door that is not
+        # opening (front_block_distance not improving). Reset on real progress.
+        special = int(features.navigation.get("front_blocking_line_special", 0))
+        front_block_distance = (
+            float(features.navigation.get("front_block_distance_fp", 0)) / FP
+        )
+        fronting_door = (
+            special in MANUAL_USE_LINE_SPECIALS
+            and 0.0 < front_block_distance <= EXIT_FUTILE_DOOR_USE_DISTANCE_UNITS
+        )
+        if not fronting_door:
+            self._futile_door_use_run = 0
+            self._futile_door_best_distance = 999999.0
+            return
+        # Any meaningful change in the block distance (either direction) means
+        # the door state moved = not futile; only a static distance is futile.
+        if abs(front_block_distance - self._futile_door_best_distance) > 2.0:
+            self._futile_door_best_distance = front_block_distance
+            self._futile_door_use_run = 0
+        else:
+            self._futile_door_use_run += 1
+
+    def _exit_push_deadend(
+        self,
+        features: TacticalFeatures,
+        line: dict[str, Any],
+    ) -> bool:
+        # ponytail: dead-end via either signal:
+        #   1. line-level: one exit line stalled past the deep window (converts
+        #      seed 10's frozen-on-one-line case).
+        #   2. futile-door run: USE'd a close front door that never opened for
+        #      EXIT_FUTILE_DOOR_USE_RUN steps (catches seed 9's multi-approach
+        #      thrash; threshold above seed-10's ~127 recover run so it does not
+        #      abort a still-working approach). A cell-level timer was tried but
+        #      fired too early and regressed seed 10. The run counter itself is
+        #      updated every step in _decide so the thrash still accumulates.
+        if self._futile_door_use_run >= EXIT_FUTILE_DOOR_USE_RUN:
+            return True
+        previous = self._exit_push_attempts.get(self._line_key(features.cell, line))
+        return previous is not None and (
+            features.tick - int(previous.get("first_tick", features.tick))
+            >= EXIT_DEADEND_STALL_TICS
+        )
 
     def _is_line_blocked(
         self,

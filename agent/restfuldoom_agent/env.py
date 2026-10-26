@@ -54,6 +54,28 @@ from .schemas import (
 from .skill_policy import features_from_tactical
 
 SKILL_ACTIONS = PPO_SKILL_ACTIONS
+
+# Proof-of-life primitive (per-tic) action space. Each entry maps directly to a
+# RawTiccmd; magnitudes mirror the semantic mapping in
+# doom-grpc-server/src/lib.rs apply_key (forward 25, turn 640, strafe 24).
+PRIMITIVE_ACTIONS = [
+    "noop",
+    "forward",
+    "backward",
+    "turn_left",
+    "turn_right",
+    "strafe_left",
+    "strafe_right",
+    "fire",
+    "use",
+    "forward_fire",
+    "forward_turn_left",
+    "forward_turn_right",
+]
+PRIMITIVE_FORWARD_MOVE = 25
+PRIMITIVE_TURN = 640
+PRIMITIVE_STRAFE = 24
+
 LOW_HEALTH_RETREAT_STREAK_LIMIT = 96
 VISIBLE_CONTACT_RETREAT_STREAK_LIMIT = 32
 RECOVER_STUCK_ROUTE_STREAK_LIMIT = 32
@@ -118,6 +140,7 @@ class DoomEnvConfig:
     shootable_fire_reward: float = 0.5
     missed_fire_penalty: float = 0.05
     blind_fire_penalty: float = 0.02
+    step_time_penalty: float = 0.0
     route_progress_reward: float = 0.01
     route_reached_reward: float = 0.25
     route_failure_penalty: float = 0.03
@@ -141,6 +164,7 @@ class DoomEnvConfig:
     curriculum_stage: dict[str, Any] | None = None
     reset_mode: str = "episode"
     snapshot: dict[str, Any] | None = None
+    primitive_actions: bool = False
     snapshot_verify_restored_state: bool = True
     snapshot_verify_tick_tolerance: int = 35
     snapshot_verify_stream_tick: bool = False
@@ -169,6 +193,8 @@ class EnvStep:
 
 class SkillController:
     """Executes PPO-selected high-level skills with the deterministic brain."""
+
+    actions: tuple[str, ...] | list[str] = SKILL_ACTIONS
 
     def __init__(
         self,
@@ -671,7 +697,7 @@ class SkillController:
         critical_shootable_fire = can_fire and int(features.health) <= 15
         critical_exit_escape_line = (
             self._critical_postcombat_exit_escape_line(features)
-            if critical_shootable_fire
+            if shootable is not None and int(features.health) <= 15
             else None
         )
         critical_hazard_exit_escape = (
@@ -699,7 +725,7 @@ class SkillController:
                 or self.policy._line_control_distance(contact_threat_line) > 224.0
             )
         )
-        if low_health_retreat_allowed and not late_visible_contact_closure and exit_commitment_line is None and not postcombat_route_available and threatened_exit_line is None and visible_contact_exit_line is None and not self._low_health_damaging_sector_combat(features) and not critical_shootable_fire:
+        if low_health_retreat_allowed and not late_visible_contact_closure and exit_commitment_line is None and not postcombat_route_available and not postcombat_exit_available and critical_exit_escape_line is None and threatened_exit_line is None and visible_contact_exit_line is None and not self._low_health_damaging_sector_combat(features) and not critical_shootable_fire:
             mask["retreat"] = True
             if stuck:
                 mask["recover_stuck"] = True
@@ -1017,6 +1043,10 @@ class SkillController:
             line = self._postcombat_exit_under_threat_line(features)
         if line is None:
             line = self.policy._select_local_exit_line(features)
+        if line is None:
+            line = self._postcombat_far_exit_line(features)
+        if line is None:
+            line = self._blocked_postcombat_exit_line(features)
         if line is None:
             return None
         return line
@@ -1988,7 +2018,21 @@ class SkillController:
             return False
         if not self.policy._has_episode_kill(features):
             return False
-        if self.policy._line_control_distance(line) > EXIT_ASSIST_DISTANCE_UNITS:
+        distance_limit = EXIT_ASSIST_DISTANCE_UNITS
+        sector = features.navigation.get("current_sector", {}) or {}
+        damaging_sector = bool(sector.get("damaging")) or int(
+            sector.get("damage_per_32_tics", 0)
+        ) > 0
+        if (
+            not features.visible_enemies
+            and self.policy._shootable_enemy(features) is None
+            and (
+                damaging_sector
+                or int(features.health) <= self.params.retreat_health + 5
+            )
+        ):
+            distance_limit = POST_COMBAT_EXIT_ROUTE_DISTANCE_UNITS
+        if self.policy._line_control_distance(line) > distance_limit:
             return False
         return abs(self.policy._line_control_angle_delta(line)) <= 150.0
 
@@ -2166,6 +2210,85 @@ class SkillController:
         return float(enemy.get("distance", 999999.0)) > CONTACT_ROUTE_SUPPRESS_MAX_DISTANCE_UNITS
 
 
+class PrimitiveController:
+    """Maps PPO indices directly to per-tic RawTiccmd actions (proof-of-life).
+
+    Observation encoding is delegated to a composed ``SkillController`` so the
+    PPO obs_dim stays identical to skill mode. There is no skill execution: each
+    action index maps deterministically to a single-tic RawTiccmd PlayerAction.
+    """
+
+    actions: tuple[str, ...] | list[str] = PRIMITIVE_ACTIONS
+
+    def __init__(
+        self,
+        *,
+        memory: AgentMemory | None = None,
+        params: BrainPolicyParams | None = None,
+    ) -> None:
+        self._skill = SkillController(memory=memory, params=params)
+        self.memory = self._skill.memory
+        self.params = self._skill.params
+        self.policy = self._skill.policy
+        self.last_decision: dict[str, Any] = {}
+
+    def observation(self, state: Any) -> list[float]:
+        """Reuses the skill controller's stable PPO feature vector unchanged."""
+        return self._skill.observation(state)
+
+    def reset_episode_context(self) -> None:
+        """Resets the composed observation context at episode boundaries."""
+        self.last_decision = {}
+        self._skill.reset_episode_context()
+
+    def record_action_history(self, **_kwargs: Any) -> None:
+        """No-op: primitive mode keeps the skill-sized action-history one-hot empty."""
+
+    def action_mask(self, _state: Any) -> list[bool]:
+        """Returns an all-feasible mask for the proof-of-life primitive space."""
+        return [True] * len(PRIMITIVE_ACTIONS)
+
+    def action_for(self, action_index: int, state: Any) -> tuple[Any, dict[str, Any]]:
+        """Maps a PPO index directly to a single-tic RawTiccmd PlayerAction."""
+        if action_index < 0 or action_index >= len(PRIMITIVE_ACTIONS):
+            raise ValueError(f"action_index must be in [0, {len(PRIMITIVE_ACTIONS) - 1}]")
+        primitive = PRIMITIVE_ACTIONS[action_index]
+        forward_move = 0
+        side_move = 0
+        angle_turn = 0
+        buttons = 0
+        if primitive in ("forward", "forward_fire", "forward_turn_left", "forward_turn_right"):
+            forward_move = PRIMITIVE_FORWARD_MOVE
+        elif primitive == "backward":
+            forward_move = -PRIMITIVE_FORWARD_MOVE
+        if primitive in ("turn_left", "forward_turn_left"):
+            angle_turn = PRIMITIVE_TURN
+        elif primitive in ("turn_right", "forward_turn_right"):
+            angle_turn = -PRIMITIVE_TURN
+        if primitive == "strafe_left":
+            side_move = -PRIMITIVE_STRAFE
+        elif primitive == "strafe_right":
+            side_move = PRIMITIVE_STRAFE
+        if primitive in ("fire", "forward_fire"):
+            buttons |= BT_ATTACK
+        if primitive == "use":
+            buttons |= BT_USE
+        action = raw_ticcmd_action(
+            forward_move=forward_move,
+            side_move=side_move,
+            angle_turn=angle_turn,
+            buttons=buttons,
+            duration_tics=1,
+            tick=int(getattr(state, "tick", 0)),
+        )
+        decision = {
+            "primitive": primitive,
+            "ppo_action_index": action_index,
+        }
+        self.last_decision = decision
+        return action, decision
+
+
 class DoomAgentEnv:
     """Async Gym-style environment backed by the Doom gRPC stream."""
 
@@ -2185,7 +2308,12 @@ class DoomAgentEnv:
             if self.config.memory_path is not None
             else None
         )
-        self.controller = controller or SkillController(memory=memory)
+        if controller is not None:
+            self.controller = controller
+        elif self.config.primitive_actions:
+            self.controller = PrimitiveController(memory=memory)
+        else:
+            self.controller = SkillController(memory=memory)
         self.client = client
         self._owns_client = client is None
         self._action_queue: asyncio.Queue[Any | None] | None = None
@@ -2514,10 +2642,11 @@ class DoomAgentEnv:
                 done = True
                 reason = str(contact["reason"])
                 break
-        skill = SKILL_ACTIONS[action_index]
+        actions = getattr(self.controller, "actions", SKILL_ACTIONS)
+        skill = actions[action_index]
         requested_skill = (
-            SKILL_ACTIONS[requested_action_index]
-            if 0 <= requested_action_index < len(SKILL_ACTIONS)
+            actions[requested_action_index]
+            if 0 <= requested_action_index < len(actions)
             else None
         )
         route_outcome = _route_outcome(skill, previous, current, decision=decision)
@@ -2544,6 +2673,8 @@ class DoomAgentEnv:
         )
         action_reward = combat_action_reward + route_action_reward + exit_ready_action_reward
         total_reward += action_reward
+        # ponytail: per-macro-step time cost (subtracted once per step(), not per tic).
+        total_reward -= self.config.step_time_penalty
         self._current_state = current
         if hasattr(self.controller, "record_action_history"):
             self.controller.record_action_history(
@@ -2614,8 +2745,9 @@ class DoomAgentEnv:
 
     def _resolve_step_action_index(self, action_index: int) -> tuple[int, dict[str, Any]]:
         """Returns the executable action index after enforcing the current mask."""
-        if action_index < 0 or action_index >= len(SKILL_ACTIONS):
-            raise ValueError(f"action_index must be in [0, {len(SKILL_ACTIONS) - 1}]")
+        actions = getattr(self.controller, "actions", SKILL_ACTIONS)
+        if action_index < 0 or action_index >= len(actions):
+            raise ValueError(f"action_index must be in [0, {len(actions) - 1}]")
         mask = self.action_mask()
         requested_allowed = bool(mask[action_index]) if action_index < len(mask) else False
         info: dict[str, Any] = {
@@ -2634,7 +2766,7 @@ class DoomAgentEnv:
             raise RuntimeError("action mask has no executable actions")
         info["fallback_applied"] = True
         info["fallback_reason"] = "requested_action_masked"
-        info["fallback_skill"] = SKILL_ACTIONS[fallback_index]
+        info["fallback_skill"] = actions[fallback_index]
         info["fallback_action_index"] = fallback_index
         return fallback_index, info
 
@@ -2654,13 +2786,14 @@ class DoomAgentEnv:
 
     def action_mask(self) -> list[bool]:
         """Returns feasible PPO actions for the current state."""
+        actions = getattr(self.controller, "actions", SKILL_ACTIONS)
         if self._current_state is None:
-            return self._filter_allowed_skills([True for _ in SKILL_ACTIONS])
+            return self._filter_allowed_skills([True for _ in actions])
         if hasattr(self.controller, "action_mask"):
             return self._filter_allowed_skills(
                 list(self.controller.action_mask(self._current_state))
             )
-        return self._filter_allowed_skills([True for _ in SKILL_ACTIONS])
+        return self._filter_allowed_skills([True for _ in actions])
 
     def _filter_allowed_skills(self, mask: list[bool]) -> list[bool]:
         allowed_skills = tuple(self.config.allowed_skills or ())
@@ -2961,7 +3094,12 @@ class DoomAgentEnv:
                 warmup_info["stop_reason"] = "visible"
                 self._last_reset_warmup = warmup_info
                 break
-            action_index = self.controller.heuristic_action_index(current)
+            if hasattr(self.controller, "heuristic_action_index"):
+                action_index = self.controller.heuristic_action_index(current)
+            else:
+                # ponytail: primitive controller has no heuristic; warmup just
+                # idles (action 0 = noop) until the visible/shootable stop hits.
+                action_index = 0
             action, _decision = self.controller.action_for(action_index, current)
             await self._action_queue.put(action)
             warmup_info["steps"] = int(warmup_info["steps"]) + 1

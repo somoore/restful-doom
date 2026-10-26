@@ -1676,6 +1676,55 @@ def test_skill_controller_postcombat_blocked_exit_line_exposes_press_exit():
     assert mask["press_exit"]
 
 
+def test_skill_controller_postcombat_damaging_stale_contact_exposes_far_exit():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    visible_contact = _state(
+        tick=40,
+        kills=4,
+        enemy=True,
+        combat=False,
+        contact_use=True,
+        contact_use_distance_units=300,
+    )
+    controller.action_mask(visible_contact)
+    state = _state(
+        tick=80,
+        kills=5,
+        health=36,
+        enemy=True,
+        enemy_line_of_sight=False,
+        combat=False,
+        hazard=True,
+        contact_use=True,
+        contact_use_distance_units=624,
+    )
+    state.navigation.use_lines.append(
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=1400 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=1400 * 65536, y_fp=-64 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=1400 * 65536, y_fp=64 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=1400 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=1400 * 65536,
+            nearest_distance_fp=1400 * 65536,
+        )
+    )
+    features = extract_features(state, controller.memory, controller.params)
+    exit_line = next(
+        line for line in features.navigation["use_lines"] if line["line_id"] == 330
+    )
+    for key in controller.policy._line_block_keys(features, exit_line):
+        controller.policy._blocked_use_lines[key] = features.tick + 1000
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
+
+    assert mask["press_exit"]
+    assert mask["close_visible_contact"]
+
+
 def test_skill_controller_press_exit_uses_blocked_postcombat_exit_line():
     controller = SkillController()
     controller.policy._start_kills = 0
@@ -2396,41 +2445,6 @@ def test_skill_controller_critical_far_walk_route_keeps_far_press_exit():
     assert mask["press_exit"]
 
 
-def test_skill_controller_postcombat_visible_far_exit_focus_blocks_retreat_only():
-    controller = SkillController()
-    controller.policy._start_kills = 0
-    state = _state(
-        tick=140,
-        kills=5,
-        health=35,
-        enemy=True,
-        combat=False,
-        enemy_distance=765,
-    )
-    state.navigation.use_lines.append(
-        SimpleNamespace(
-            line_id=330,
-            midpoint=SimpleNamespace(x_fp=1900 * 65536, y_fp=0, z_fp=0),
-            start=SimpleNamespace(x_fp=1900 * 65536, y_fp=-64 * 65536, z_fp=0),
-            end=SimpleNamespace(x_fp=1900 * 65536, y_fp=64 * 65536, z_fp=0),
-            nearest_point=SimpleNamespace(x_fp=1900 * 65536, y_fp=0, z_fp=0),
-            special=11,
-            tag=0,
-            distance_fp=1900 * 65536,
-            nearest_distance_fp=1900 * 65536,
-        )
-    )
-
-    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(state)))
-    action, decision = controller.action_for(SKILL_ACTIONS.index("press_exit"), state)
-
-    assert mask["press_exit"]
-    assert mask["close_visible_contact"]
-    assert not mask["retreat"]
-    assert decision["skill"] == "approach_far_exit_line"
-    assert action.raw.forward_move > 0
-
-
 def test_skill_controller_critical_combat_probe_forces_fire_before_far_post_combat_press_exit():
     controller = SkillController()
     controller.policy._start_kills = 0
@@ -2636,6 +2650,59 @@ def test_skill_controller_critical_visible_exit_focus_overrides_retreat():
     assert mask["press_exit"]
     assert not mask["retreat"]
     assert not mask["close_visible_contact"]
+    assert decision["use_line"]["line_id"] == 330
+    assert action.raw.forward_move > 0
+
+
+def test_skill_controller_low_health_stale_contact_keeps_committed_far_exit():
+    controller = SkillController()
+    controller.policy._start_kills = 0
+    visible_contact = _state(
+        tick=80,
+        kills=5,
+        health=12,
+        enemy=True,
+        enemy_line_of_sight=True,
+        combat=False,
+    )
+    controller.action_mask(visible_contact)
+    committed = _state(tick=100, kills=5, health=12, enemy=False)
+    committed.navigation.use_lines = [
+        SimpleNamespace(
+            line_id=330,
+            midpoint=SimpleNamespace(x_fp=1900 * 65536, y_fp=0, z_fp=0),
+            start=SimpleNamespace(x_fp=1900 * 65536, y_fp=-64 * 65536, z_fp=0),
+            end=SimpleNamespace(x_fp=1900 * 65536, y_fp=64 * 65536, z_fp=0),
+            nearest_point=SimpleNamespace(x_fp=1900 * 65536, y_fp=0, z_fp=0),
+            special=11,
+            tag=0,
+            distance_fp=1900 * 65536,
+            nearest_distance_fp=1900 * 65536,
+        )
+    ]
+    controller.action_for(SKILL_ACTIONS.index("press_exit"), committed)
+    controller.record_action_history(
+        action_index=SKILL_ACTIONS.index("press_exit"),
+        had_shootable_target=False,
+    )
+    stale_contact = _state(
+        tick=140,
+        kills=5,
+        health=12,
+        enemy=True,
+        enemy_line_of_sight=False,
+        combat=False,
+    )
+    stale_contact.navigation.use_lines = committed.navigation.use_lines
+
+    mask = dict(zip(SKILL_ACTIONS, controller.action_mask(stale_contact)))
+    action, decision = controller.action_for(
+        SKILL_ACTIONS.index("press_exit"),
+        stale_contact,
+    )
+
+    assert mask["press_exit"]
+    assert not mask["retreat"]
     assert decision["use_line"]["line_id"] == 330
     assert action.raw.forward_move > 0
 
@@ -4434,3 +4501,34 @@ def _state(
         navigation=navigation,
         combat=combat_probe,
     )
+
+
+def test_doom_agent_env_step_time_penalty_reduces_reward_per_macro_step():
+    # ponytail: same fire macro-step run twice; only step_time_penalty differs.
+    def run(step_time_penalty):
+        first = _state(tick=1, kills=0, enemy=True, combat=True)
+        second = _state(tick=2, kills=1)
+        client = _FakeClient([first, second])
+        env = DoomAgentEnv(
+            DoomEnvConfig(
+                max_steps=2,
+                goal_preset="combat",
+                step_time_penalty=step_time_penalty,
+            ),
+            client=client,
+            controller=SkillController(),
+        )
+
+        async def _run():
+            await env.reset(seed=99)
+            step = await env.step(SKILL_ACTIONS.index("fire"))
+            await env.close()
+            return step
+
+        return asyncio.run(_run())
+
+    baseline = run(0.0)
+    penalized = run(0.25)
+
+    # Default (0.0) leaves reward unchanged.
+    assert penalized.reward == pytest.approx(baseline.reward - 0.25)

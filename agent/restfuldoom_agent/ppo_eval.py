@@ -8,7 +8,20 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from .env import ACTION_SCHEMA, OBSERVATION_SCHEMA, DoomAgentEnv, DoomEnvConfig
+from .env import (
+    ACTION_SCHEMA,
+    OBSERVATION_SCHEMA,
+    PRIMITIVE_ACTIONS,
+    DoomAgentEnv,
+    DoomEnvConfig,
+)
+
+
+def _eval_action_count(env_config: DoomEnvConfig) -> int:
+    """Returns the action-space size for the configured action mode."""
+    if getattr(env_config, "primitive_actions", False):
+        return len(PRIMITIVE_ACTIONS)
+    return len(ACTION_SCHEMA["actions"])
 from .ppo import EvaluationResult, PPOTrainer, PromotionDecision, PromotionGate
 
 
@@ -105,7 +118,7 @@ async def evaluate_checkpoint(
         checkpoint_path,
         device=device,
         target_obs_dim=len(OBSERVATION_SCHEMA["feature_names"]),
-        target_action_dim=len(ACTION_SCHEMA["actions"]),
+        target_action_dim=_eval_action_count(env_config),
     )
 
     def choose(obs: list[float], _env: DoomAgentEnv) -> int:
@@ -138,7 +151,7 @@ async def evaluate_random_policy(
 ) -> PolicyEval:
     """Evaluates a uniform random high-level skill policy."""
     rng = random.Random(seed)
-    action_count = len(ACTION_SCHEMA["actions"])
+    action_count = _eval_action_count(env_config)
 
     def choose(_obs: list[float], _env: DoomAgentEnv) -> int:
         mask = _env.action_mask()

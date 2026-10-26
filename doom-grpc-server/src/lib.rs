@@ -9,7 +9,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 
 use mimalloc::MiMalloc;
@@ -30,11 +30,12 @@ pub mod proto {
 
 use proto::doom_agent_server::{DoomAgent, DoomAgentServer};
 use proto::{
-    Ammo, CombatProbe, DirectionProbe, DoomKey, EnemyInfo, GameState, LevelInfo,
-    LoadSnapshotRequest, MapObjectState, MouseInput, NavigationProbe, ObserveRequest, PlayerAction,
-    PlayerActionType, PlayerState, RawTiccmd, ResetEpisodeRequest, ResetEpisodeResponse,
-    RouteWaypoint, SaveSnapshotRequest, SectorProbe, SnapshotCommandResponse, StateDelta,
-    UseLineInfo, Vec3Fixed,
+    Ammo, CombatProbe, DirectionProbe, DoomKey, EnemyInfo, GameState, LevelInfo, LoadSnapshotRequest,
+    MapLine, MapObjectState, MapSector, MapSnapshot, MapSnapshotRequest, MapThing, MapVertex,
+    MouseInput, NavigationProbe, ObserveRequest, PlayerAction, PlayerActionType, PlayerState,
+    RawTiccmd, ResetEpisodeRequest, ResetEpisodeResponse, RouteWaypoint, SaveSnapshotRequest,
+    SectorProbe, SnapshotCommandResponse, StateDelta, UseLineInfo, Vec3Fixed, VisibilityRequest,
+    VisibilityResponse, VisibilityResult,
 };
 
 const DEFAULT_GRPC_PORT: u16 = 50_051;
@@ -61,6 +62,7 @@ struct Bridge {
     state_tx: broadcast::Sender<GameState>,
     action_rx: Mutex<mpsc::Receiver<AgentPlayerAction>>,
     control_rx: Mutex<mpsc::Receiver<AgentControlRequest>>,
+    map_snapshot: Arc<Mutex<Option<MapSnapshot>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -68,6 +70,7 @@ struct AgentRuntime {
     state_tx: broadcast::Sender<GameState>,
     action_tx: mpsc::Sender<AgentPlayerAction>,
     control_tx: mpsc::Sender<AgentControlRequest>,
+    map_snapshot: Arc<Mutex<Option<MapSnapshot>>>,
 }
 
 #[tonic::async_trait]
@@ -165,6 +168,45 @@ impl DoomAgent for AgentRuntime {
             save_queued: false,
             load_queued: true,
         }))
+    }
+
+    /// Returns the latest map snapshot published by the Doom simulation thread.
+    async fn get_map_snapshot(
+        &self,
+        request: Request<MapSnapshotRequest>,
+    ) -> Result<Response<MapSnapshot>, Status> {
+        let include_things = request.into_inner().include_things;
+        let snapshot = self
+            .map_snapshot
+            .lock()
+            .map_err(|_| Status::internal("map snapshot lock is poisoned"))?
+            .clone()
+            .ok_or_else(|| Status::not_found("map snapshot has not been published yet"))?;
+        let mut snapshot = snapshot;
+        if !include_things {
+            snapshot.things.clear();
+        }
+        Ok(Response::new(snapshot))
+    }
+
+    /// Checks candidate line-of-sight paths against the latest map overlay.
+    async fn query_visibility(
+        &self,
+        request: Request<VisibilityRequest>,
+    ) -> Result<Response<VisibilityResponse>, Status> {
+        let map = self
+            .map_snapshot
+            .lock()
+            .map_err(|_| Status::internal("map snapshot lock is poisoned"))?
+            .clone()
+            .ok_or_else(|| Status::not_found("map snapshot has not been published yet"))?;
+        let results = request
+            .into_inner()
+            .queries
+            .iter()
+            .map(|query| visibility_result(&map, query.from_pos.as_ref(), query.to_pos.as_ref()))
+            .collect();
+        Ok(Response::new(VisibilityResponse { results }))
     }
 }
 
@@ -665,6 +707,186 @@ fn combat_from_snapshot(snapshot: &AgentCombatProbe) -> CombatProbe {
     }
 }
 
+fn map_from_snapshot(snapshot: &AgentMapSnapshot) -> MapSnapshot {
+    let vertex_count = (snapshot.vertex_count as usize).min(AGENT_MAX_MAP_VERTICES);
+    let line_count = (snapshot.line_count as usize).min(AGENT_MAX_MAP_LINES);
+    let sector_count = (snapshot.sector_count as usize).min(AGENT_MAX_MAP_SECTORS);
+    let thing_count = (snapshot.thing_count as usize).min(AGENT_MAX_MAP_THINGS);
+
+    MapSnapshot {
+        schema: "restfuldoom.map_snapshot.v1".to_string(),
+        episode: snapshot.episode,
+        map: snapshot.map,
+        digest: snapshot.digest,
+        vertices: snapshot.vertices[..vertex_count]
+            .iter()
+            .map(map_vertex_from_snapshot)
+            .collect(),
+        lines: snapshot.lines[..line_count]
+            .iter()
+            .map(map_line_from_snapshot)
+            .collect(),
+        sectors: snapshot.sectors[..sector_count]
+            .iter()
+            .map(map_sector_from_snapshot)
+            .collect(),
+        things: snapshot.things[..thing_count]
+            .iter()
+            .map(map_thing_from_snapshot)
+            .collect(),
+        truncated: snapshot.truncated != 0,
+        bbox_left_fp: snapshot.bbox_left_fp,
+        bbox_right_fp: snapshot.bbox_right_fp,
+        bbox_top_fp: snapshot.bbox_top_fp,
+        bbox_bottom_fp: snapshot.bbox_bottom_fp,
+    }
+}
+
+fn map_vertex_from_snapshot(snapshot: &AgentMapVertex) -> MapVertex {
+    MapVertex {
+        id: snapshot.id,
+        x_fp: snapshot.x_fp,
+        y_fp: snapshot.y_fp,
+    }
+}
+
+fn map_line_from_snapshot(snapshot: &AgentMapLine) -> MapLine {
+    MapLine {
+        id: snapshot.id,
+        v1: snapshot.v1,
+        v2: snapshot.v2,
+        flags: snapshot.flags,
+        special: snapshot.special,
+        tag: snapshot.tag,
+        front_sector: snapshot.front_sector,
+        back_sector: snapshot.back_sector,
+        two_sided: snapshot.two_sided != 0,
+        blocking: snapshot.blocking != 0,
+        passable: snapshot.passable != 0,
+        sight_blocking: snapshot.sight_blocking != 0,
+        door: snapshot.door != 0,
+        use_trigger: snapshot.use_trigger != 0,
+        walk_trigger: snapshot.walk_trigger != 0,
+        exit: snapshot.exit != 0,
+        open_top_fp: snapshot.open_top_fp,
+        open_bottom_fp: snapshot.open_bottom_fp,
+        open_range_fp: snapshot.open_range_fp,
+        bbox_left_fp: snapshot.bbox_left_fp,
+        bbox_right_fp: snapshot.bbox_right_fp,
+        bbox_top_fp: snapshot.bbox_top_fp,
+        bbox_bottom_fp: snapshot.bbox_bottom_fp,
+    }
+}
+
+fn map_sector_from_snapshot(snapshot: &AgentMapSector) -> MapSector {
+    MapSector {
+        id: snapshot.id,
+        floor_height_fp: snapshot.floor_height_fp,
+        ceiling_height_fp: snapshot.ceiling_height_fp,
+        light_level: snapshot.light_level,
+        special: snapshot.special,
+        tag: snapshot.tag,
+        damaging: snapshot.damaging != 0,
+        exit_damage: snapshot.exit_damage != 0,
+        active_special: snapshot.active_special != 0,
+    }
+}
+
+fn map_thing_from_snapshot(snapshot: &AgentMapThing) -> MapThing {
+    MapThing {
+        id: snapshot.id,
+        type_id: snapshot.type_id,
+        position: Some(Vec3Fixed {
+            x_fp: snapshot.x_fp,
+            y_fp: snapshot.y_fp,
+            z_fp: snapshot.z_fp,
+        }),
+        angle_degrees: snapshot.angle_degrees,
+        options: snapshot.options,
+        player_start: snapshot.player_start != 0,
+        enemy: snapshot.enemy != 0,
+    }
+}
+
+fn visibility_result(map: &MapSnapshot, from: Option<&Vec3Fixed>, to: Option<&Vec3Fixed>) -> VisibilityResult {
+    let Some(from) = from else {
+        return VisibilityResult {
+            clear: false,
+            blocking_line_id: -1,
+        };
+    };
+    let Some(to) = to else {
+        return VisibilityResult {
+            clear: false,
+            blocking_line_id: -1,
+        };
+    };
+
+    for line in &map.lines {
+        if !line.sight_blocking {
+            continue;
+        }
+        if line.v1 < 0 || line.v2 < 0 {
+            continue;
+        }
+        let Some(v1) = map.vertices.get(line.v1 as usize) else {
+            continue;
+        };
+        let Some(v2) = map.vertices.get(line.v2 as usize) else {
+            continue;
+        };
+        if segments_intersect(
+            (from.x_fp as f64, from.y_fp as f64),
+            (to.x_fp as f64, to.y_fp as f64),
+            (v1.x_fp as f64, v1.y_fp as f64),
+            (v2.x_fp as f64, v2.y_fp as f64),
+        ) {
+            return VisibilityResult {
+                clear: false,
+                blocking_line_id: line.id,
+            };
+        }
+    }
+
+    VisibilityResult {
+        clear: true,
+        blocking_line_id: -1,
+    }
+}
+
+fn segments_intersect(a: (f64, f64), b: (f64, f64), c: (f64, f64), d: (f64, f64)) -> bool {
+    fn orient(p: (f64, f64), q: (f64, f64), r: (f64, f64)) -> f64 {
+        (q.0 - p.0) * (r.1 - p.1) - (q.1 - p.1) * (r.0 - p.0)
+    }
+    fn on_segment(p: (f64, f64), q: (f64, f64), r: (f64, f64)) -> bool {
+        q.0 >= p.0.min(r.0)
+            && q.0 <= p.0.max(r.0)
+            && q.1 >= p.1.min(r.1)
+            && q.1 <= p.1.max(r.1)
+    }
+
+    let o1 = orient(a, b, c);
+    let o2 = orient(a, b, d);
+    let o3 = orient(c, d, a);
+    let o4 = orient(c, d, b);
+    const EPS: f64 = 0.0001;
+
+    if o1.abs() < EPS && on_segment(a, c, b) {
+        return true;
+    }
+    if o2.abs() < EPS && on_segment(a, d, b) {
+        return true;
+    }
+    if o3.abs() < EPS && on_segment(c, a, d) {
+        return true;
+    }
+    if o4.abs() < EPS && on_segment(c, b, d) {
+        return true;
+    }
+
+    (o1 > 0.0) != (o2 > 0.0) && (o3 > 0.0) != (o4 > 0.0)
+}
+
 /// Initializes the gRPC bridge.
 ///
 /// # Safety
@@ -680,10 +902,12 @@ pub extern "C" fn restfuldoom_agent_init(port: u16) -> i32 {
     let (state_tx, _state_rx) = broadcast::channel(STATE_BROADCAST_CAPACITY);
     let (action_tx, action_rx) = mpsc::channel(ACTION_QUEUE_CAPACITY);
     let (control_tx, control_rx) = mpsc::channel(CONTROL_QUEUE_CAPACITY);
+    let map_snapshot = Arc::new(Mutex::new(None));
     let bridge = Bridge {
         state_tx: state_tx.clone(),
         action_rx: Mutex::new(action_rx),
         control_rx: Mutex::new(control_rx),
+        map_snapshot: Arc::clone(&map_snapshot),
     };
 
     if BRIDGE.set(bridge).is_err() {
@@ -695,6 +919,7 @@ pub extern "C" fn restfuldoom_agent_init(port: u16) -> i32 {
         state_tx,
         action_tx,
         control_tx,
+        map_snapshot,
     };
 
     thread::Builder::new()
@@ -765,6 +990,30 @@ pub unsafe extern "C" fn restfuldoom_agent_publish_state(snapshot: *const AgentG
     let snapshot = unsafe { &*snapshot };
     let state = state_from_snapshot(snapshot);
     _ = bridge.state_tx.send(state);
+}
+
+/// Publishes a copied map snapshot from Doom.
+///
+/// # Safety
+///
+/// `snapshot` must point to an initialized `AgentMapSnapshot` for the duration
+/// of this call. The function copies every value before returning.
+#[no_mangle]
+pub unsafe extern "C" fn restfuldoom_agent_publish_map_snapshot(snapshot: *const AgentMapSnapshot) {
+    let Some(bridge) = BRIDGE.get() else {
+        return;
+    };
+    if snapshot.is_null() {
+        return;
+    }
+
+    // SAFETY: The C caller promises `snapshot` points to an initialized value
+    // for this call. We convert it into an owned protobuf value immediately.
+    let snapshot = unsafe { &*snapshot };
+    let map = map_from_snapshot(snapshot);
+    if let Ok(mut slot) = bridge.map_snapshot.lock() {
+        *slot = Some(map);
+    }
 }
 
 /// Takes one queued action for the Doom game thread.
@@ -1035,6 +1284,18 @@ pub const AGENT_MAX_NAV_DIRECTIONS: usize = 9;
 /// Maximum nearby special/use lines copied per tic.
 pub const AGENT_MAX_USE_LINES: usize = 32;
 
+/// Maximum map vertices copied per map snapshot.
+pub const AGENT_MAX_MAP_VERTICES: usize = 4096;
+
+/// Maximum map lines copied per map snapshot.
+pub const AGENT_MAX_MAP_LINES: usize = 8192;
+
+/// Maximum map sectors copied per map snapshot.
+pub const AGENT_MAX_MAP_SECTORS: usize = 2048;
+
+/// Maximum map things copied per map snapshot.
+pub const AGENT_MAX_MAP_THINGS: usize = 512;
+
 /// Fixed-size game-state snapshot copied from Doom.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1082,13 +1343,148 @@ impl Default for AgentGameStateSnapshot {
     }
 }
 
+/// One map vertex copied from Doom's loaded level.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AgentMapVertex {
+    pub id: i32,
+    pub x_fp: i32,
+    pub y_fp: i32,
+}
+
+/// One map line copied from Doom's loaded level plus dynamic open state.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AgentMapLine {
+    pub id: i32,
+    pub v1: i32,
+    pub v2: i32,
+    pub flags: i32,
+    pub special: i32,
+    pub tag: i32,
+    pub front_sector: i32,
+    pub back_sector: i32,
+    pub two_sided: u32,
+    pub blocking: u32,
+    pub passable: u32,
+    pub sight_blocking: u32,
+    pub door: u32,
+    pub use_trigger: u32,
+    pub walk_trigger: u32,
+    pub exit: u32,
+    pub open_top_fp: i32,
+    pub open_bottom_fp: i32,
+    pub open_range_fp: i32,
+    pub bbox_left_fp: i32,
+    pub bbox_right_fp: i32,
+    pub bbox_top_fp: i32,
+    pub bbox_bottom_fp: i32,
+}
+
+/// One map sector copied from Doom's loaded level plus dynamic state.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AgentMapSector {
+    pub id: i32,
+    pub floor_height_fp: i32,
+    pub ceiling_height_fp: i32,
+    pub light_level: i32,
+    pub special: i32,
+    pub tag: i32,
+    pub damaging: u32,
+    pub exit_damage: u32,
+    pub active_special: u32,
+}
+
+/// One map thing or live object start copied from Doom.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AgentMapThing {
+    pub id: i32,
+    pub type_id: i32,
+    pub x_fp: i32,
+    pub y_fp: i32,
+    pub z_fp: i32,
+    pub angle_degrees: u32,
+    pub options: u32,
+    pub player_start: u32,
+    pub enemy: u32,
+}
+
+/// Fixed-size map snapshot copied from Doom.
+#[repr(C)]
+pub struct AgentMapSnapshot {
+    pub episode: i32,
+    pub map: i32,
+    pub digest: u64,
+    pub vertex_count: u32,
+    pub line_count: u32,
+    pub sector_count: u32,
+    pub thing_count: u32,
+    pub truncated: u32,
+    pub bbox_left_fp: i32,
+    pub bbox_right_fp: i32,
+    pub bbox_top_fp: i32,
+    pub bbox_bottom_fp: i32,
+    pub vertices: [AgentMapVertex; AGENT_MAX_MAP_VERTICES],
+    pub lines: [AgentMapLine; AGENT_MAX_MAP_LINES],
+    pub sectors: [AgentMapSector; AGENT_MAX_MAP_SECTORS],
+    pub things: [AgentMapThing; AGENT_MAX_MAP_THINGS],
+}
+
+impl std::fmt::Debug for AgentMapSnapshot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentMapSnapshot")
+            .field("episode", &self.episode)
+            .field("map", &self.map)
+            .field("digest", &self.digest)
+            .field("vertex_count", &self.vertex_count)
+            .field("line_count", &self.line_count)
+            .field("sector_count", &self.sector_count)
+            .field("thing_count", &self.thing_count)
+            .field("truncated", &self.truncated)
+            .finish()
+    }
+}
+
+impl Default for AgentMapSnapshot {
+    fn default() -> Self {
+        Self {
+            episode: 0,
+            map: 0,
+            digest: 0,
+            vertex_count: 0,
+            line_count: 0,
+            sector_count: 0,
+            thing_count: 0,
+            truncated: 0,
+            bbox_left_fp: 0,
+            bbox_right_fp: 0,
+            bbox_top_fp: 0,
+            bbox_bottom_fp: 0,
+            vertices: [AgentMapVertex::default(); AGENT_MAX_MAP_VERTICES],
+            lines: [AgentMapLine::default(); AGENT_MAX_MAP_LINES],
+            sectors: [AgentMapSector::default(); AGENT_MAX_MAP_SECTORS],
+            things: [AgentMapThing::default(); AGENT_MAX_MAP_THINGS],
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use proto::doom_agent_client::DoomAgentClient;
     use proto::EpisodeStart;
+    use std::alloc::{alloc_zeroed, Layout};
     use tokio::time::{sleep, timeout, Duration};
     use tokio_stream::StreamExt;
+
+    fn boxed_map_snapshot() -> Box<AgentMapSnapshot> {
+        let layout = Layout::new::<AgentMapSnapshot>();
+        let ptr = unsafe { alloc_zeroed(layout) as *mut AgentMapSnapshot };
+        assert!(!ptr.is_null());
+        unsafe { Box::from_raw(ptr) }
+    }
 
     #[test]
     fn semantic_forward_uses_duration() {
@@ -1328,6 +1724,102 @@ mod tests {
     }
 
     #[test]
+    fn map_snapshot_conversion_and_visibility() {
+        let mut snapshot = boxed_map_snapshot();
+        snapshot.episode = 1;
+        snapshot.map = 1;
+        snapshot.digest = 99;
+        snapshot.vertex_count = 4;
+        snapshot.line_count = 1;
+        snapshot.sector_count = 1;
+        snapshot.thing_count = 1;
+        snapshot.bbox_left_fp = 0;
+        snapshot.bbox_right_fp = 100 * 65_536;
+        snapshot.bbox_top_fp = 50 * 65_536;
+        snapshot.bbox_bottom_fp = -50 * 65_536;
+        snapshot.vertices[0] = AgentMapVertex {
+            id: 0,
+            x_fp: 0,
+            y_fp: 0,
+        };
+        snapshot.vertices[1] = AgentMapVertex {
+            id: 1,
+            x_fp: 100 * 65_536,
+            y_fp: 0,
+        };
+        snapshot.vertices[2] = AgentMapVertex {
+            id: 2,
+            x_fp: 50 * 65_536,
+            y_fp: -50 * 65_536,
+        };
+        snapshot.vertices[3] = AgentMapVertex {
+            id: 3,
+            x_fp: 50 * 65_536,
+            y_fp: 50 * 65_536,
+        };
+        snapshot.lines[0] = AgentMapLine {
+            id: 7,
+            v1: 2,
+            v2: 3,
+            sight_blocking: 1,
+            blocking: 1,
+            ..AgentMapLine::default()
+        };
+        snapshot.sectors[0] = AgentMapSector {
+            id: 0,
+            floor_height_fp: 0,
+            ceiling_height_fp: 128 * 65_536,
+            light_level: 160,
+            ..AgentMapSector::default()
+        };
+        snapshot.things[0] = AgentMapThing {
+            id: -1,
+            type_id: 1,
+            player_start: 1,
+            ..AgentMapThing::default()
+        };
+
+        let map = map_from_snapshot(&snapshot);
+
+        assert_eq!((map.episode, map.map, map.digest), (1, 1, 99));
+        assert_eq!(map.vertices.len(), 4);
+        assert_eq!(map.lines.len(), 1);
+        assert_eq!(map.sectors.len(), 1);
+        assert_eq!(map.things.len(), 1);
+
+        let blocked = visibility_result(
+            &map,
+            Some(&Vec3Fixed {
+                x_fp: 0,
+                y_fp: 0,
+                z_fp: 0,
+            }),
+            Some(&Vec3Fixed {
+                x_fp: 100 * 65_536,
+                y_fp: 0,
+                z_fp: 0,
+            }),
+        );
+        assert!(!blocked.clear);
+        assert_eq!(blocked.blocking_line_id, 7);
+
+        let clear = visibility_result(
+            &map,
+            Some(&Vec3Fixed {
+                x_fp: 0,
+                y_fp: 40 * 65_536,
+                z_fp: 0,
+            }),
+            Some(&Vec3Fixed {
+                x_fp: 40 * 65_536,
+                y_fp: 40 * 65_536,
+                z_fp: 0,
+            }),
+        );
+        assert!(clear.clear);
+    }
+
+    #[test]
     fn delta_reports_removed_enemy() {
         let mut previous = GameState {
             tick: 1,
@@ -1407,10 +1899,39 @@ mod tests {
         };
         snapshot.player.health = 100;
 
-        // SAFETY: The pointer references an initialized stack snapshot for the
+        // SAFETY: The pointer references an initialized boxed snapshot for the
         // duration of the call.
         unsafe {
             restfuldoom_agent_publish_state(&snapshot);
+        }
+
+        let mut map_snapshot = boxed_map_snapshot();
+        map_snapshot.episode = 1;
+        map_snapshot.map = 1;
+        map_snapshot.digest = 44;
+        map_snapshot.vertex_count = 2;
+        map_snapshot.line_count = 1;
+        map_snapshot.vertices[0] = AgentMapVertex {
+            id: 0,
+            x_fp: 0,
+            y_fp: 0,
+        };
+        map_snapshot.vertices[1] = AgentMapVertex {
+            id: 1,
+            x_fp: 64 * 65_536,
+            y_fp: 0,
+        };
+        map_snapshot.lines[0] = AgentMapLine {
+            id: 3,
+            v1: 0,
+            v2: 1,
+            sight_blocking: 1,
+            ..AgentMapLine::default()
+        };
+        // SAFETY: The pointer references an initialized stack snapshot for the
+        // duration of the call.
+        unsafe {
+            restfuldoom_agent_publish_map_snapshot(&*map_snapshot);
         }
 
         let observed = timeout(Duration::from_secs(2), stream.message())
@@ -1419,6 +1940,17 @@ mod tests {
             .expect("stream is healthy")
             .expect("state exists");
         assert_eq!(observed.tick, 99);
+
+        let map = client
+            .get_map_snapshot(MapSnapshotRequest {
+                include_things: false,
+            })
+            .await
+            .expect("map snapshot returns")
+            .into_inner();
+        assert_eq!((map.episode, map.map, map.digest), (1, 1, 44));
+        assert_eq!(map.vertices.len(), 2);
+        assert_eq!(map.lines.len(), 1);
 
         let reset = client
             .reset_episode(ResetEpisodeRequest {
