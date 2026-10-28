@@ -2660,7 +2660,11 @@ class DoomAgentEnv:
             else None
         )
         route_outcome = _route_outcome(skill, previous, current, decision=decision)
-        combat_action_reward = self._combat_action_reward(skill, had_shootable_target)
+        combat_action_reward = self._combat_action_reward(
+            skill,
+            had_shootable_target,
+            fired=self._action_fires(skill, action),
+        )
         pre_shootable_route_penalty = self._pre_shootable_route_penalty(
             skill,
             route_outcome,
@@ -2865,12 +2869,34 @@ class DoomAgentEnv:
         self._last_action_mask_filter = info
         return filtered
 
-    def _combat_action_reward(self, skill: str, had_shootable_target: bool) -> float:
-        if had_shootable_target and skill == "fire":
+    def _action_fires(self, skill: str, action: Any) -> bool:
+        """Returns whether the executed action counts as firing for rewards.
+
+        Primitive actions are judged by the command actually sent, so every
+        primitive that sets BT_ATTACK (fire, forward_fire, ...) is treated as
+        firing. Skill mode keeps the selected-skill rule: other skills such as
+        engage may also emit BT_ATTACK, but only an explicit fire choice earns
+        the fire reward there.
+        """
+        if isinstance(self.controller, PrimitiveController):
+            raw = getattr(action, "raw", None)
+            return bool(int(getattr(raw, "buttons", 0) or 0) & BT_ATTACK)
+        return skill == "fire"
+
+    def _combat_action_reward(
+        self,
+        skill: str,
+        had_shootable_target: bool,
+        *,
+        fired: bool | None = None,
+    ) -> float:
+        if fired is None:
+            fired = skill == "fire"
+        if had_shootable_target and fired:
             return self.config.shootable_fire_reward
-        if had_shootable_target and skill != "fire":
+        if had_shootable_target:
             return -self.config.missed_fire_penalty
-        if skill == "fire":
+        if fired:
             return -self.config.blind_fire_penalty
         return 0.0
 

@@ -239,3 +239,35 @@ def test_legacy_checkpoints_infer_action_space(tmp_path):
     assert loaded.action_space == "primitive"
     with pytest.raises(ValueError, match="'primitive' action space"):
         PPOTrainer.load_checkpoint(legacy_primitive, target_action_space="skill")
+
+
+def _primitive_step_info(primitive, *, shootable):
+    first = _state(tick=1, enemy=shootable, combat=shootable)
+    second = _state(tick=2, enemy=shootable, combat=shootable)
+    env = DoomAgentEnv(
+        DoomEnvConfig(primitive_actions=True, max_steps=4, goal_preset="combat"),
+        client=_FakeClient([first, second]),
+    )
+
+    async def run():
+        await env.reset(seed=1)
+        step = await env.step(PRIMITIVE_ACTIONS.index(primitive))
+        await env.close()
+        return step
+
+    return asyncio.run(run()).info, env.config
+
+
+def test_primitive_firing_combinations_earn_fire_rewards():
+    for primitive in ("fire", "forward_fire"):
+        info, config = _primitive_step_info(primitive, shootable=True)
+        assert info["combat_action_reward"] == config.shootable_fire_reward, primitive
+
+        info, config = _primitive_step_info(primitive, shootable=False)
+        assert info["combat_action_reward"] == -config.blind_fire_penalty, primitive
+
+    info, config = _primitive_step_info("forward", shootable=True)
+    assert info["combat_action_reward"] == -config.missed_fire_penalty
+
+    info, _config = _primitive_step_info("forward", shootable=False)
+    assert info["combat_action_reward"] == 0.0
