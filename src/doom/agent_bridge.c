@@ -620,12 +620,23 @@ static void FillMapSnapshot(agent_map_snapshot_t *snapshot)
     snapshot->digest = digest;
 }
 
+static void InvalidateMapSnapshotCache(void)
+{
+    agent_last_map_publish_episode = -1;
+    agent_last_map_publish_map = -1;
+    agent_last_map_publish_level_time = -99999;
+}
+
 static void PublishMapSnapshotIfNeeded(void)
 {
     static agent_map_snapshot_t snapshot;
 
+    // Throttle only while level time moves forward on the same map. A reset,
+    // reborn, or snapshot load rewinds leveltime; republish immediately so
+    // map queries never serve the previous run's doors, heights, and things.
     if (gameepisode == agent_last_map_publish_episode
         && gamemap == agent_last_map_publish_map
+        && leveltime >= agent_last_map_publish_level_time
         && leveltime - agent_last_map_publish_level_time < 4)
     {
         return;
@@ -1217,6 +1228,7 @@ int AgentBridge_BeforeTic(void)
                     ++actions_discarded;
                 }
                 agent_pending_start_active = false;
+                InvalidateMapSnapshotCache();
                 agent_pending_seed = request;
                 agent_pending_seed_active = true;
                 G_DeferedInitNew((skill_t) ClampInt(request.skill, sk_baby, sk_nightmare),
@@ -1251,6 +1263,9 @@ int AgentBridge_BeforeTic(void)
                 agent_pending_start_active = false;
                 agent_pending_seed_active = false;
                 G_AgentLoadGame(ClampInt(request.snapshot_slot, 0, 9));
+                // A loaded save can land at or just past the cached publish
+                // time, which the backward-time check would not catch.
+                InvalidateMapSnapshotCache();
                 suppress_current_ticcmd = 1;
                 break;
             default:
