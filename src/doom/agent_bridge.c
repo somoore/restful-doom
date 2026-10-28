@@ -439,7 +439,10 @@ static void FillMapLine(agent_map_line_t *target, int line_id, const line_t *lin
     target->two_sided = two_sided ? 1u : 0u;
     target->blocking = blocking ? 1u : 0u;
     target->passable = (!blocking && open_range >= (56 * FRACUNIT)) ? 1u : 0u;
-    target->sight_blocking = (!two_sided || open_range <= 0 || (line->flags & ML_BLOCKING)) ? 1u : 0u;
+    // ML_BLOCKING stops movement only; P_CrossSubsector (p_sight.c) lets sight
+    // through any two-sided line with a vertical opening, so it must not
+    // feed the sight predicate.
+    target->sight_blocking = (!two_sided || open_range <= 0) ? 1u : 0u;
     target->door = IsDoorLineSpecial(line->special) ? 1u : 0u;
     target->use_trigger = IsUseTriggerLineSpecial(line->special) ? 1u : 0u;
     target->walk_trigger = IsWalkTriggerLineSpecial(line->special) ? 1u : 0u;
