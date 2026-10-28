@@ -30,7 +30,7 @@ from .env import (
     _route_outcome,
     _verify_snapshot_restored_state,
 )
-from .ppo import PPOTrainer
+from .ppo import ACTION_SPACE_SKILL, PPOTrainer
 from .reward import RewardEngine, goal_preset
 from .rollout_config import safe_endpoint_host
 from .skill_policy import SkillPolicyModel
@@ -526,6 +526,7 @@ async def capture_snapshot_curriculum(config: SnapshotCaptureConfig) -> dict[str
                     device=config.ppo_device,
                     target_obs_dim=len(OBSERVATION_SCHEMA["feature_names"]),
                     target_action_dim=len(ACTION_SCHEMA["actions"]),
+                    target_action_space=ACTION_SPACE_SKILL,
                 )
                 policy = PPOSnapshotCapturePolicy(
                     trainer=trainer,
@@ -639,6 +640,7 @@ async def capture_ppo_env_snapshot_curriculum(
         device=config.ppo_device,
         target_obs_dim=len(OBSERVATION_SCHEMA["feature_names"]),
         target_action_dim=len(ACTION_SCHEMA["actions"]),
+        target_action_space=ACTION_SPACE_SKILL,
     )
     tracker = SnapshotMilestoneTracker(
         config.auto_selectors,

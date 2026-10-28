@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from .env import DoomAgentEnv, EnvStep
+from .env import PRIMITIVE_ACTIONS, DoomAgentEnv, EnvStep
 from .learning_trace import LEARNING_TRACE_SCHEMA, build_learning_trace
 from .schemas import ACTION_SCHEMA, DECISION_CYCLE_SCHEMA, MEMORY_CONTRACT, OBSERVATION_SCHEMA
 
@@ -19,6 +19,25 @@ ROLLOUT_BUFFER_SCHEMA = "restfuldoom.ppo_rollout.v1"
 BehaviorCloneSample = (
     tuple[list[float], int] | tuple[list[float], int, list[bool]]
 )
+
+# Action spaces a policy head can be trained against. Checkpoints record which
+# one they use so a resume or eval never reinterprets logits from the other.
+ACTION_SPACE_SKILL = "skill"
+ACTION_SPACE_PRIMITIVE = "primitive"
+PRIMITIVE_ACTION_SCHEMA = {
+    "schema": "restfuldoom.primitive_action.v1",
+    "actions": list(PRIMITIVE_ACTIONS),
+}
+
+
+def action_schema_for_space(action_space: str) -> dict[str, Any]:
+    """Returns the action schema (stable index -> name) for an action space."""
+    if action_space == ACTION_SPACE_SKILL:
+        return ACTION_SCHEMA
+    if action_space == ACTION_SPACE_PRIMITIVE:
+        return PRIMITIVE_ACTION_SCHEMA
+    raise ValueError(f"unknown action space {action_space!r}")
+
 
 try:  # pragma: no cover - exercised when torch is installed.
     import torch
@@ -237,8 +256,11 @@ class PPOTrainer:
         config: PPOConfig | None = None,
         device: str = "cpu",
         model: Any | None = None,
+        action_space: str = ACTION_SPACE_SKILL,
     ) -> None:
         require_torch()
+        action_schema_for_space(action_space)
+        self.action_space = action_space
         self.config = config or PPOConfig()
         self.device = device
         random.seed(self.config.seed)
@@ -517,11 +539,12 @@ class PPOTrainer:
                 "config": asdict(self.config),
                 "obs_dim": self.obs_dim,
                 "action_dim": self.action_dim,
+                "action_space": self.action_space,
                 "model_state_dict": self.model.state_dict(),
                 "optimizer_state_dict": self.optimizer.state_dict(),
                 "update_index": self.update_index,
                 "observation_schema": OBSERVATION_SCHEMA,
-                "action_schema": ACTION_SCHEMA,
+                "action_schema": action_schema_for_space(self.action_space),
                 "decision_cycle_schema": DECISION_CYCLE_SCHEMA,
                 "learning_trace_schema": LEARNING_TRACE_SCHEMA,
                 "memory_contract": MEMORY_CONTRACT,
@@ -541,9 +564,15 @@ class PPOTrainer:
         device: str = "cpu",
         target_obs_dim: int | None = None,
         target_action_dim: int | None = None,
+        target_action_space: str | None = None,
         allow_observation_expand: bool = True,
     ) -> "PPOTrainer":
-        """Loads a trainer from a PPO checkpoint."""
+        """Loads a trainer from a PPO checkpoint.
+
+        ``target_action_space`` names the action space the caller will run the
+        policy in; a checkpoint trained in a different space is rejected rather
+        than having its logits reinterpreted (or expanded) under new meanings.
+        """
         require_torch()
         checkpoint = torch.load(Path(path), map_location=device)
         if checkpoint.get("schema") != PPO_CHECKPOINT_SCHEMA:
@@ -558,10 +587,24 @@ class PPOTrainer:
         checkpoint_action_dim = int(
             checkpoint.get("action_dim") or len(checkpoint["action_schema"]["actions"])
         )
-        _validate_checkpoint_action_schema(
-            checkpoint.get("action_schema"),
+        checkpoint_action_space, legacy_primitive = _checkpoint_action_space(
+            checkpoint,
             checkpoint_action_dim=checkpoint_action_dim,
         )
+        if target_action_space is not None:
+            action_schema_for_space(target_action_space)
+            if target_action_space != checkpoint_action_space:
+                raise ValueError(
+                    f"checkpoint was trained in the {checkpoint_action_space!r} action "
+                    f"space and cannot be loaded into the {target_action_space!r} action "
+                    "space; the policy head's action indexes mean different things"
+                )
+        if not legacy_primitive:
+            _validate_checkpoint_action_schema(
+                checkpoint.get("action_schema"),
+                checkpoint_action_dim=checkpoint_action_dim,
+                action_space=checkpoint_action_space,
+            )
         obs_dim = target_obs_dim or checkpoint_obs_dim
         action_dim = target_action_dim or checkpoint_action_dim
         action_migrated = False
@@ -595,7 +638,13 @@ class PPOTrainer:
                 device=device,
             )
             migrated = True
-        trainer = cls(obs_dim=obs_dim, action_dim=action_dim, config=config, device=device)
+        trainer = cls(
+            obs_dim=obs_dim,
+            action_dim=action_dim,
+            config=config,
+            device=device,
+            action_space=checkpoint_action_space,
+        )
         trainer.model.load_state_dict(state_dict)
         if migrated:
             trainer.resume_migration = {
@@ -648,10 +697,39 @@ def _expand_observation_state_dict(
     return migrated
 
 
+def _checkpoint_action_space(
+    checkpoint: dict[str, Any],
+    *,
+    checkpoint_action_dim: int,
+) -> tuple[str, bool]:
+    """Returns ``(action_space, legacy_primitive)`` for a loaded checkpoint.
+
+    Checkpoints written before ``action_space`` was recorded are skill-space,
+    except primitive-mode runs from that period: they saved the skill action
+    schema next to a wider primitive head. A head wider than its saved schema
+    is impossible for a skill checkpoint, so that shape identifies them; their
+    saved action names are wrong and must not be validated.
+    """
+    recorded = checkpoint.get("action_space")
+    if recorded is not None:
+        action_schema_for_space(str(recorded))
+        return str(recorded), False
+    schema = checkpoint.get("action_schema")
+    saved_actions = schema.get("actions") if isinstance(schema, dict) else None
+    if (
+        isinstance(saved_actions, list)
+        and checkpoint_action_dim > len(saved_actions)
+        and checkpoint_action_dim == len(PRIMITIVE_ACTIONS)
+    ):
+        return ACTION_SPACE_PRIMITIVE, True
+    return ACTION_SPACE_SKILL, False
+
+
 def _validate_checkpoint_action_schema(
     action_schema: dict[str, Any] | None,
     *,
     checkpoint_action_dim: int,
+    action_space: str = ACTION_SPACE_SKILL,
 ) -> None:
     """Ensure checkpoint logits still map to the same stable action prefix."""
     actions = action_schema.get("actions") if isinstance(action_schema, dict) else None
@@ -659,7 +737,8 @@ def _validate_checkpoint_action_schema(
         raise ValueError("checkpoint action schema is missing actions")
     checkpoint_actions = [str(action) for action in actions[:checkpoint_action_dim]]
     current_actions = [
-        str(action) for action in ACTION_SCHEMA["actions"][:checkpoint_action_dim]
+        str(action)
+        for action in action_schema_for_space(action_space)["actions"][:checkpoint_action_dim]
     ]
     if checkpoint_actions != current_actions:
         raise ValueError(

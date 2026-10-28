@@ -551,6 +551,9 @@ class SkillController:
         self.policy._episode_cell_visits[features.cell] = (
             self.policy._episode_cell_visits.get(features.cell, 0) + 1
         )
+        # Mirror BrainPolicy._decide: PPO skills bypass it, so advance the
+        # futile-door run once per executed skill decision here.
+        self.policy._update_futile_door_run(features)
         stuck = self.policy._is_stuck(features)
         skill = SKILL_ACTIONS[action_index]
         action, decision = self._execute_skill(skill, features, stuck)
@@ -2314,6 +2317,16 @@ class DoomAgentEnv:
             self.controller = PrimitiveController(memory=memory)
         else:
             self.controller = SkillController(memory=memory)
+        unknown_allowed = sorted(
+            set(self.config.allowed_skills or ())
+            - set(getattr(self.controller, "actions", SKILL_ACTIONS))
+        )
+        if unknown_allowed:
+            mode = "primitive" if self.config.primitive_actions else "skill"
+            raise ValueError(
+                f"allowed_skills {unknown_allowed!r} are not in the active {mode} "
+                f"action space {list(getattr(self.controller, 'actions', SKILL_ACTIONS))!r}"
+            )
         self.client = client
         self._owns_client = client is None
         self._action_queue: asyncio.Queue[Any | None] | None = None
@@ -2650,7 +2663,11 @@ class DoomAgentEnv:
             else None
         )
         route_outcome = _route_outcome(skill, previous, current, decision=decision)
-        combat_action_reward = self._combat_action_reward(skill, had_shootable_target)
+        combat_action_reward = self._combat_action_reward(
+            skill,
+            had_shootable_target,
+            fired=self._action_fires(skill, action),
+        )
         pre_shootable_route_penalty = self._pre_shootable_route_penalty(
             skill,
             route_outcome,
@@ -2801,9 +2818,12 @@ class DoomAgentEnv:
         if not allowed_skills:
             return mask
         allowed = set(allowed_skills)
+        # Filter by the active controller's action names: primitive mode has a
+        # different index layout than the skill space.
+        actions = list(getattr(self.controller, "actions", SKILL_ACTIONS))
         filtered = [
             bool(value) and skill in allowed
-            for skill, value in zip(SKILL_ACTIONS, mask, strict=False)
+            for skill, value in zip(actions, mask, strict=False)
         ]
         info: dict[str, Any] = {
             "schema": "restfuldoom.allowed_skill_filter.v1",
@@ -2828,10 +2848,10 @@ class DoomAgentEnv:
                 heuristic_index = int(self.controller.heuristic_action_index(self._current_state))
             except Exception:
                 heuristic_index = -1
-            if 0 <= heuristic_index < len(SKILL_ACTIONS):
-                heuristic_skill = SKILL_ACTIONS[heuristic_index]
+            if 0 <= heuristic_index < len(actions):
+                heuristic_skill = actions[heuristic_index]
                 if heuristic_skill in allowed:
-                    fallback = [False for _ in SKILL_ACTIONS]
+                    fallback = [False for _ in actions]
                     fallback[heuristic_index] = True
                     info["fallback_applied"] = True
                     info["fallback_skill"] = heuristic_skill
@@ -2840,9 +2860,9 @@ class DoomAgentEnv:
                     self._last_action_mask_filter = info
                     return fallback
         for skill in allowed_skills:
-            if skill in SKILL_ACTIONS:
-                fallback = [False for _ in SKILL_ACTIONS]
-                fallback[SKILL_ACTIONS.index(skill)] = True
+            if skill in actions:
+                fallback = [False for _ in actions]
+                fallback[actions.index(skill)] = True
                 info["fallback_applied"] = True
                 info["fallback_skill"] = skill
                 info["fallback_reason"] = "first_allowed_skill"
@@ -2852,12 +2872,34 @@ class DoomAgentEnv:
         self._last_action_mask_filter = info
         return filtered
 
-    def _combat_action_reward(self, skill: str, had_shootable_target: bool) -> float:
-        if had_shootable_target and skill == "fire":
+    def _action_fires(self, skill: str, action: Any) -> bool:
+        """Returns whether the executed action counts as firing for rewards.
+
+        Primitive actions are judged by the command actually sent, so every
+        primitive that sets BT_ATTACK (fire, forward_fire, ...) is treated as
+        firing. Skill mode keeps the selected-skill rule: other skills such as
+        engage may also emit BT_ATTACK, but only an explicit fire choice earns
+        the fire reward there.
+        """
+        if isinstance(self.controller, PrimitiveController):
+            raw = getattr(action, "raw", None)
+            return bool(int(getattr(raw, "buttons", 0) or 0) & BT_ATTACK)
+        return skill == "fire"
+
+    def _combat_action_reward(
+        self,
+        skill: str,
+        had_shootable_target: bool,
+        *,
+        fired: bool | None = None,
+    ) -> float:
+        if fired is None:
+            fired = skill == "fire"
+        if had_shootable_target and fired:
             return self.config.shootable_fire_reward
-        if had_shootable_target and skill != "fire":
+        if had_shootable_target:
             return -self.config.missed_fire_penalty
-        if skill == "fire":
+        if fired:
             return -self.config.blind_fire_penalty
         return 0.0
 

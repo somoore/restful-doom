@@ -180,10 +180,14 @@ static boolean IsExitLineSpecial(int special)
     return special == 11 || special == 51;
 }
 
+// Every special that P_UseSpecialLine (p_switch.c) acts on when the player
+// presses USE on the line's front side: manual doors, one-shot switches, and
+// repeatable buttons. Keep in sync with that switch statement.
 static boolean IsUseTriggerLineSpecial(int special)
 {
     switch (special)
     {
+        // Manual doors
         case 1:
         case 26:
         case 27:
@@ -194,6 +198,61 @@ static boolean IsUseTriggerLineSpecial(int special)
         case 34:
         case 117:
         case 118:
+        // Switches (S1)
+        case 7:
+        case 9:
+        case 11:
+        case 14:
+        case 15:
+        case 18:
+        case 20:
+        case 21:
+        case 23:
+        case 29:
+        case 41:
+        case 49:
+        case 50:
+        case 51:
+        case 55:
+        case 71:
+        case 101:
+        case 102:
+        case 103:
+        case 111:
+        case 112:
+        case 113:
+        case 122:
+        case 127:
+        case 131:
+        case 133:
+        case 135:
+        case 137:
+        case 140:
+        // Buttons (SR)
+        case 42:
+        case 43:
+        case 45:
+        case 60:
+        case 61:
+        case 62:
+        case 63:
+        case 64:
+        case 65:
+        case 66:
+        case 67:
+        case 68:
+        case 69:
+        case 70:
+        case 99:
+        case 114:
+        case 115:
+        case 116:
+        case 123:
+        case 132:
+        case 134:
+        case 136:
+        case 138:
+        case 139:
             return true;
         default:
             return false;
@@ -439,7 +498,10 @@ static void FillMapLine(agent_map_line_t *target, int line_id, const line_t *lin
     target->two_sided = two_sided ? 1u : 0u;
     target->blocking = blocking ? 1u : 0u;
     target->passable = (!blocking && open_range >= (56 * FRACUNIT)) ? 1u : 0u;
-    target->sight_blocking = (!two_sided || open_range <= 0 || (line->flags & ML_BLOCKING)) ? 1u : 0u;
+    // ML_BLOCKING stops movement only; P_CrossSubsector (p_sight.c) lets sight
+    // through any two-sided line with a vertical opening, so it must not
+    // feed the sight predicate.
+    target->sight_blocking = (!two_sided || open_range <= 0) ? 1u : 0u;
     target->door = IsDoorLineSpecial(line->special) ? 1u : 0u;
     target->use_trigger = IsUseTriggerLineSpecial(line->special) ? 1u : 0u;
     target->walk_trigger = IsWalkTriggerLineSpecial(line->special) ? 1u : 0u;
@@ -620,12 +682,23 @@ static void FillMapSnapshot(agent_map_snapshot_t *snapshot)
     snapshot->digest = digest;
 }
 
+static void InvalidateMapSnapshotCache(void)
+{
+    agent_last_map_publish_episode = -1;
+    agent_last_map_publish_map = -1;
+    agent_last_map_publish_level_time = -99999;
+}
+
 static void PublishMapSnapshotIfNeeded(void)
 {
     static agent_map_snapshot_t snapshot;
 
+    // Throttle only while level time moves forward on the same map. A reset,
+    // reborn, or snapshot load rewinds leveltime; republish immediately so
+    // map queries never serve the previous run's doors, heights, and things.
     if (gameepisode == agent_last_map_publish_episode
         && gamemap == agent_last_map_publish_map
+        && leveltime >= agent_last_map_publish_level_time
         && leveltime - agent_last_map_publish_level_time < 4)
     {
         return;
@@ -1217,6 +1290,7 @@ int AgentBridge_BeforeTic(void)
                     ++actions_discarded;
                 }
                 agent_pending_start_active = false;
+                InvalidateMapSnapshotCache();
                 agent_pending_seed = request;
                 agent_pending_seed_active = true;
                 G_DeferedInitNew((skill_t) ClampInt(request.skill, sk_baby, sk_nightmare),
@@ -1251,6 +1325,9 @@ int AgentBridge_BeforeTic(void)
                 agent_pending_start_active = false;
                 agent_pending_seed_active = false;
                 G_AgentLoadGame(ClampInt(request.snapshot_slot, 0, 9));
+                // A loaded save can land at or just past the cached publish
+                // time, which the backward-time check would not catch.
+                InvalidateMapSnapshotCache();
                 suppress_current_ticcmd = 1;
                 break;
             default:

@@ -822,10 +822,9 @@ fn visibility_result(map: &MapSnapshot, from: Option<&Vec3Fixed>, to: Option<&Ve
         };
     };
 
+    let from_xy = (from.x_fp as f64, from.y_fp as f64);
+    let to_xy = (to.x_fp as f64, to.y_fp as f64);
     for line in &map.lines {
-        if !line.sight_blocking {
-            continue;
-        }
         if line.v1 < 0 || line.v2 < 0 {
             continue;
         }
@@ -835,12 +834,15 @@ fn visibility_result(map: &MapSnapshot, from: Option<&Vec3Fixed>, to: Option<&Ve
         let Some(v2) = map.vertices.get(line.v2 as usize) else {
             continue;
         };
-        if segments_intersect(
-            (from.x_fp as f64, from.y_fp as f64),
-            (to.x_fp as f64, to.y_fp as f64),
+        let Some((t_min, t_max)) = segment_crossing_range(
+            from_xy,
+            to_xy,
             (v1.x_fp as f64, v1.y_fp as f64),
             (v2.x_fp as f64, v2.y_fp as f64),
-        ) {
+        ) else {
+            continue;
+        };
+        if line.sight_blocking || !segment_fits_opening(from, to, t_min, t_max, line) {
             return VisibilityResult {
                 clear: false,
                 blocking_line_id: line.id,
@@ -852,6 +854,66 @@ fn visibility_result(map: &MapSnapshot, from: Option<&Vec3Fixed>, to: Option<&Ve
         clear: true,
         blocking_line_id: -1,
     }
+}
+
+/// Returns whether the from->to segment passes through a two-sided line's
+/// vertical opening at every point where it crosses the line.
+///
+/// Mirrors the floor/ceiling narrowing in `P_CrossSubsector` (src/doom/p_sight.c):
+/// a crossing below the higher floor or above the lower ceiling hits solid
+/// geometry (a raised step, a partially closed door) even though the line
+/// itself has an opening. The query's `z_fp` values are treated as the sight
+/// heights of the two endpoints.
+fn segment_fits_opening(
+    from: &Vec3Fixed,
+    to: &Vec3Fixed,
+    t_min: f64,
+    t_max: f64,
+    line: &MapLine,
+) -> bool {
+    let bottom = line.open_bottom_fp as f64;
+    let top = line.open_top_fp as f64;
+    let z_from = from.z_fp as f64;
+    let dz = to.z_fp as f64 - z_from;
+    // Height varies linearly along the segment, so the crossing range's ends
+    // bound every height inside it.
+    [t_min, t_max].iter().all(|t| {
+        let z = z_from + dz * t;
+        z >= bottom && z <= top
+    })
+}
+
+/// Returns the parameter range `[t_min, t_max]` along `a -> b` where the
+/// segment touches `c -> d`, or `None` when the segments do not intersect.
+/// A proper crossing yields a single parameter; collinear overlap yields the
+/// overlapping span.
+fn segment_crossing_range(
+    a: (f64, f64),
+    b: (f64, f64),
+    c: (f64, f64),
+    d: (f64, f64),
+) -> Option<(f64, f64)> {
+    if !segments_intersect(a, b, c, d) {
+        return None;
+    }
+    let r = (b.0 - a.0, b.1 - a.1);
+    let s = (d.0 - c.0, d.1 - c.1);
+    let denom = r.0 * s.1 - r.1 * s.0;
+    let len_sq = r.0 * r.0 + r.1 * r.1;
+    if len_sq == 0.0 {
+        return Some((0.0, 0.0));
+    }
+    if denom.abs() > f64::EPSILON * len_sq.max(s.0 * s.0 + s.1 * s.1) {
+        let t = ((c.0 - a.0) * s.1 - (c.1 - a.1) * s.0) / denom;
+        let t = t.clamp(0.0, 1.0);
+        return Some((t, t));
+    }
+    // Parallel and touching: project the line's endpoints onto a -> b.
+    let project = |p: (f64, f64)| ((p.0 - a.0) * r.0 + (p.1 - a.1) * r.1) / len_sq;
+    let (tc, td) = (project(c), project(d));
+    let lo = tc.min(td).clamp(0.0, 1.0);
+    let hi = tc.max(td).clamp(0.0, 1.0);
+    Some((lo, hi))
 }
 
 fn segments_intersect(a: (f64, f64), b: (f64, f64), c: (f64, f64), d: (f64, f64)) -> bool {
@@ -1817,6 +1879,87 @@ mod tests {
             }),
         );
         assert!(clear.clear);
+    }
+
+    fn opening_map(open_bottom: i32, open_top: i32) -> MapSnapshot {
+        MapSnapshot {
+            vertices: vec![
+                MapVertex {
+                    id: 0,
+                    x_fp: 50 * 65_536,
+                    y_fp: -50 * 65_536,
+                },
+                MapVertex {
+                    id: 1,
+                    x_fp: 50 * 65_536,
+                    y_fp: 50 * 65_536,
+                },
+            ],
+            lines: vec![MapLine {
+                id: 11,
+                v1: 0,
+                v2: 1,
+                two_sided: true,
+                // Movement-blocking but transparent, like an ML_BLOCKING rail.
+                blocking: true,
+                sight_blocking: false,
+                open_bottom_fp: open_bottom * 65_536,
+                open_top_fp: open_top * 65_536,
+                open_range_fp: (open_top - open_bottom) * 65_536,
+                ..MapLine::default()
+            }],
+            ..MapSnapshot::default()
+        }
+    }
+
+    fn point(x: i32, y: i32, z: i32) -> Vec3Fixed {
+        Vec3Fixed {
+            x_fp: x * 65_536,
+            y_fp: y * 65_536,
+            z_fp: z * 65_536,
+        }
+    }
+
+    #[test]
+    fn visibility_checks_two_sided_opening_heights() {
+        // Raised floor at 24, ceiling at 128.
+        let step = opening_map(24, 128);
+        let above = visibility_result(&step, Some(&point(0, 0, 41)), Some(&point(100, 0, 41)));
+        assert!(above.clear, "eye-height sight over a step is clear");
+
+        let below = visibility_result(&step, Some(&point(0, 0, 8)), Some(&point(100, 0, 8)));
+        assert!(
+            !below.clear,
+            "a segment under the raised floor hits the step"
+        );
+        assert_eq!(below.blocking_line_id, 11);
+
+        // The crossing height is interpolated: 0 -> 64 crosses x=50 at z=32.
+        let rising = visibility_result(&step, Some(&point(0, 0, 0)), Some(&point(100, 0, 64)));
+        assert!(rising.clear);
+
+        // Partially closed door: opening only from 0 to 16.
+        let door = opening_map(0, 16);
+        let blocked = visibility_result(&door, Some(&point(0, 0, 41)), Some(&point(100, 0, 41)));
+        assert!(!blocked.clear, "eye-height sight hits a nearly closed door");
+        assert_eq!(blocked.blocking_line_id, 11);
+
+        // Segments that never reach the line ignore its heights.
+        let short = visibility_result(&door, Some(&point(0, 0, 41)), Some(&point(40, 0, 41)));
+        assert!(short.clear);
+    }
+
+    #[test]
+    fn crossing_range_handles_collinear_overlap() {
+        let range = segment_crossing_range((0.0, 0.0), (100.0, 0.0), (25.0, 0.0), (75.0, 0.0));
+        assert_eq!(range, Some((0.25, 0.75)));
+        let crossing =
+            segment_crossing_range((0.0, 0.0), (100.0, 0.0), (50.0, -10.0), (50.0, 10.0));
+        assert_eq!(crossing, Some((0.5, 0.5)));
+        assert_eq!(
+            segment_crossing_range((0.0, 0.0), (10.0, 0.0), (50.0, -10.0), (50.0, 10.0)),
+            None
+        );
     }
 
     #[test]

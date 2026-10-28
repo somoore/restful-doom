@@ -22,7 +22,23 @@ def _eval_action_count(env_config: DoomEnvConfig) -> int:
     if getattr(env_config, "primitive_actions", False):
         return len(PRIMITIVE_ACTIONS)
     return len(ACTION_SCHEMA["actions"])
-from .ppo import EvaluationResult, PPOTrainer, PromotionDecision, PromotionGate
+
+
+def _eval_action_space(env_config: DoomEnvConfig) -> str:
+    """Returns the checkpoint action-space identifier for the configured mode."""
+    if getattr(env_config, "primitive_actions", False):
+        return ACTION_SPACE_PRIMITIVE
+    return ACTION_SPACE_SKILL
+
+
+from .ppo import (
+    ACTION_SPACE_PRIMITIVE,
+    ACTION_SPACE_SKILL,
+    EvaluationResult,
+    PPOTrainer,
+    PromotionDecision,
+    PromotionGate,
+)
 
 
 @dataclass(frozen=True)
@@ -119,6 +135,7 @@ async def evaluate_checkpoint(
         device=device,
         target_obs_dim=len(OBSERVATION_SCHEMA["feature_names"]),
         target_action_dim=_eval_action_count(env_config),
+        target_action_space=_eval_action_space(env_config),
     )
 
     def choose(obs: list[float], _env: DoomAgentEnv) -> int:
@@ -180,6 +197,11 @@ async def evaluate_heuristic_policy(
     before_reset: Callable[[DoomAgentEnv, int], None] | None = None,
 ) -> PolicyEval:
     """Evaluates the deterministic skill heuristic baseline."""
+    if getattr(env_config, "primitive_actions", False):
+        raise ValueError(
+            "the heuristic baseline selects skill actions and cannot run with "
+            "primitive_actions=True"
+        )
 
     def choose(_obs: list[float], env: DoomAgentEnv) -> int:
         if env._current_state is None:

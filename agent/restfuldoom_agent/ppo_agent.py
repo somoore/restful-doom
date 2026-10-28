@@ -23,7 +23,14 @@ from .env import (
     DoomAgentEnv,
     DoomEnvConfig,
 )
-from .ppo import BehaviorCloneSample, PPOConfig, PPOTrainer, require_torch
+from .ppo import (
+    ACTION_SPACE_PRIMITIVE,
+    ACTION_SPACE_SKILL,
+    BehaviorCloneSample,
+    PPOConfig,
+    PPOTrainer,
+    require_torch,
+)
 from .ppo_eval import (
     decide_promotion,
     evaluate_checkpoint,
@@ -60,6 +67,13 @@ def _action_dim_for(args: argparse.Namespace) -> int:
     return len(ACTION_SCHEMA["actions"])
 
 
+def _action_space_for(args: argparse.Namespace) -> str:
+    """Returns the checkpoint action-space identifier for the configured mode."""
+    if bool(getattr(args, "primitive_actions", False)):
+        return ACTION_SPACE_PRIMITIVE
+    return ACTION_SPACE_SKILL
+
+
 async def train(args: argparse.Namespace) -> dict[str, object]:
     """Runs PPO collection and update batches."""
     require_torch()
@@ -94,6 +108,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
             device=args.device,
             target_obs_dim=len(OBSERVATION_SCHEMA["feature_names"]),
             target_action_dim=_action_dim_for(args),
+            target_action_space=_action_space_for(args),
         )
     else:
         trainer = PPOTrainer(
@@ -101,6 +116,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
             action_dim=_action_dim_for(args),
             config=ppo_config,
             device=args.device,
+            action_space=_action_space_for(args),
         )
     reference_kl_coef = ppo_config.reference_kl_coef
     aux_bc_coef = ppo_config.aux_bc_coef
@@ -345,6 +361,18 @@ def _apply_trainer_config_updates(
 
 async def evaluate(args: argparse.Namespace) -> dict[str, object]:
     """Evaluates a PPO checkpoint against a baseline."""
+    # Fail before spending a candidate run: the heuristic baseline is the
+    # scripted skill selector and has no primitive-action equivalent.
+    if (
+        bool(getattr(args, "primitive_actions", False))
+        and not getattr(args, "eval_candidate_only", False)
+        and args.eval_baseline == "heuristic"
+    ):
+        raise ValueError(
+            "--primitive-actions cannot be compared against --eval-baseline heuristic "
+            "(the heuristic baseline only selects skill actions); use "
+            "--eval-baseline random or --eval-candidate-only"
+        )
     reset_start = _resolve_reset_start(args)
     env_config = DoomEnvConfig(
         endpoint=args.endpoint,
@@ -2893,10 +2921,11 @@ def main() -> None:
         "--allowed-skill",
         action="append",
         default=[],
-        choices=ACTION_SCHEMA["actions"],
+        choices=list(dict.fromkeys([*ACTION_SCHEMA["actions"], *PRIMITIVE_ACTIONS])),
         help=(
-            "experiment-only skill allowlist applied after the normal action mask; "
-            "repeat to keep multiple skills"
+            "experiment-only action allowlist applied after the normal action mask; "
+            "repeat to keep multiple actions. Names must belong to the active action "
+            "space (skill names, or primitive names with --primitive-actions)"
         ),
     )
     parser.add_argument(
