@@ -216,6 +216,10 @@ message VisibilityRequest {
   repeated VisibilityQuery queries = 1;
 }
 
+// Segment visibility against the latest map overlay. z_fp on each endpoint is
+// the sight height (e.g. eye or target-centre height, not the floor): a
+// two-sided line blocks the segment when the height at the crossing falls
+// outside the line's open_bottom_fp..open_top_fp opening.
 message VisibilityQuery {
   Vec3Fixed from_pos = 1;
   Vec3Fixed to_pos = 2;
