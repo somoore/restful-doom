@@ -1,6 +1,9 @@
 """Proof-of-life tests for the primitive per-tic action mode."""
 
 import asyncio
+from types import SimpleNamespace
+
+import pytest
 
 from restfuldoom_agent.brain import BT_ATTACK, BT_USE
 from restfuldoom_agent.env import (
@@ -11,6 +14,8 @@ from restfuldoom_agent.env import (
     PrimitiveController,
     SkillController,
 )
+from restfuldoom_agent.ppo_agent import evaluate
+from restfuldoom_agent.ppo_eval import evaluate_heuristic_policy
 
 from tests.test_env import _FakeClient, _state
 
@@ -104,3 +109,16 @@ def test_env_primitive_mode_step_runs_reward_path():
     assert step.info["skill"] == "forward"
     assert step.info["action_index"] == PRIMITIVE_ACTIONS.index("forward")
     assert step.info["decision"]["primitive"] == "forward"
+
+
+def test_heuristic_baseline_rejects_primitive_action_space():
+    args = SimpleNamespace(
+        primitive_actions=True,
+        eval_candidate_only=False,
+        eval_baseline="heuristic",
+    )
+    with pytest.raises(ValueError, match="--eval-baseline random"):
+        asyncio.run(evaluate(args))
+
+    with pytest.raises(ValueError, match="primitive_actions"):
+        asyncio.run(evaluate_heuristic_policy(DoomEnvConfig(primitive_actions=True)))

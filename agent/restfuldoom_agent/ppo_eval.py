@@ -180,6 +180,11 @@ async def evaluate_heuristic_policy(
     before_reset: Callable[[DoomAgentEnv, int], None] | None = None,
 ) -> PolicyEval:
     """Evaluates the deterministic skill heuristic baseline."""
+    if getattr(env_config, "primitive_actions", False):
+        raise ValueError(
+            "the heuristic baseline selects skill actions and cannot run with "
+            "primitive_actions=True"
+        )
 
     def choose(_obs: list[float], env: DoomAgentEnv) -> int:
         if env._current_state is None:

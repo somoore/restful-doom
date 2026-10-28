@@ -345,6 +345,18 @@ def _apply_trainer_config_updates(
 
 async def evaluate(args: argparse.Namespace) -> dict[str, object]:
     """Evaluates a PPO checkpoint against a baseline."""
+    # Fail before spending a candidate run: the heuristic baseline is the
+    # scripted skill selector and has no primitive-action equivalent.
+    if (
+        bool(getattr(args, "primitive_actions", False))
+        and not getattr(args, "eval_candidate_only", False)
+        and args.eval_baseline == "heuristic"
+    ):
+        raise ValueError(
+            "--primitive-actions cannot be compared against --eval-baseline heuristic "
+            "(the heuristic baseline only selects skill actions); use "
+            "--eval-baseline random or --eval-candidate-only"
+        )
     reset_start = _resolve_reset_start(args)
     env_config = DoomEnvConfig(
         endpoint=args.endpoint,
