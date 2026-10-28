@@ -2314,6 +2314,16 @@ class DoomAgentEnv:
             self.controller = PrimitiveController(memory=memory)
         else:
             self.controller = SkillController(memory=memory)
+        unknown_allowed = sorted(
+            set(self.config.allowed_skills or ())
+            - set(getattr(self.controller, "actions", SKILL_ACTIONS))
+        )
+        if unknown_allowed:
+            mode = "primitive" if self.config.primitive_actions else "skill"
+            raise ValueError(
+                f"allowed_skills {unknown_allowed!r} are not in the active {mode} "
+                f"action space {list(getattr(self.controller, 'actions', SKILL_ACTIONS))!r}"
+            )
         self.client = client
         self._owns_client = client is None
         self._action_queue: asyncio.Queue[Any | None] | None = None
@@ -2801,9 +2811,12 @@ class DoomAgentEnv:
         if not allowed_skills:
             return mask
         allowed = set(allowed_skills)
+        # Filter by the active controller's action names: primitive mode has a
+        # different index layout than the skill space.
+        actions = list(getattr(self.controller, "actions", SKILL_ACTIONS))
         filtered = [
             bool(value) and skill in allowed
-            for skill, value in zip(SKILL_ACTIONS, mask, strict=False)
+            for skill, value in zip(actions, mask, strict=False)
         ]
         info: dict[str, Any] = {
             "schema": "restfuldoom.allowed_skill_filter.v1",
@@ -2828,10 +2841,10 @@ class DoomAgentEnv:
                 heuristic_index = int(self.controller.heuristic_action_index(self._current_state))
             except Exception:
                 heuristic_index = -1
-            if 0 <= heuristic_index < len(SKILL_ACTIONS):
-                heuristic_skill = SKILL_ACTIONS[heuristic_index]
+            if 0 <= heuristic_index < len(actions):
+                heuristic_skill = actions[heuristic_index]
                 if heuristic_skill in allowed:
-                    fallback = [False for _ in SKILL_ACTIONS]
+                    fallback = [False for _ in actions]
                     fallback[heuristic_index] = True
                     info["fallback_applied"] = True
                     info["fallback_skill"] = heuristic_skill
@@ -2840,9 +2853,9 @@ class DoomAgentEnv:
                     self._last_action_mask_filter = info
                     return fallback
         for skill in allowed_skills:
-            if skill in SKILL_ACTIONS:
-                fallback = [False for _ in SKILL_ACTIONS]
-                fallback[SKILL_ACTIONS.index(skill)] = True
+            if skill in actions:
+                fallback = [False for _ in actions]
+                fallback[actions.index(skill)] = True
                 info["fallback_applied"] = True
                 info["fallback_skill"] = skill
                 info["fallback_reason"] = "first_allowed_skill"

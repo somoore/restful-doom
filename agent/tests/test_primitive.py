@@ -122,3 +122,30 @@ def test_heuristic_baseline_rejects_primitive_action_space():
 
     with pytest.raises(ValueError, match="primitive_actions"):
         asyncio.run(evaluate_heuristic_policy(DoomEnvConfig(primitive_actions=True)))
+
+
+def test_allowed_actions_filter_uses_primitive_action_names():
+    env = DoomAgentEnv(DoomEnvConfig(primitive_actions=True, allowed_skills=("fire",)))
+    mask = env.action_mask()
+    assert len(mask) == len(PRIMITIVE_ACTIONS)
+    assert [PRIMITIVE_ACTIONS[i] for i, allowed in enumerate(mask) if allowed] == ["fire"]
+
+    combo = DoomAgentEnv(
+        DoomEnvConfig(
+            primitive_actions=True,
+            allowed_skills=("forward_fire", "use"),
+            strict_allowed_skills=True,
+        )
+    )
+    combo_mask = combo.action_mask()
+    assert [PRIMITIVE_ACTIONS[i] for i, allowed in enumerate(combo_mask) if allowed] == [
+        "use",
+        "forward_fire",
+    ]
+
+
+def test_allowed_actions_must_exist_in_active_action_space():
+    with pytest.raises(ValueError, match="primitive action space"):
+        DoomAgentEnv(DoomEnvConfig(primitive_actions=True, allowed_skills=("engage",)))
+    with pytest.raises(ValueError, match="skill action space"):
+        DoomAgentEnv(DoomEnvConfig(allowed_skills=("forward_fire",)))

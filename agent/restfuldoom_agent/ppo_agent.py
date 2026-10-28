@@ -2905,10 +2905,11 @@ def main() -> None:
         "--allowed-skill",
         action="append",
         default=[],
-        choices=ACTION_SCHEMA["actions"],
+        choices=list(dict.fromkeys([*ACTION_SCHEMA["actions"], *PRIMITIVE_ACTIONS])),
         help=(
-            "experiment-only skill allowlist applied after the normal action mask; "
-            "repeat to keep multiple skills"
+            "experiment-only action allowlist applied after the normal action mask; "
+            "repeat to keep multiple actions. Names must belong to the active action "
+            "space (skill names, or primitive names with --primitive-actions)"
         ),
     )
     parser.add_argument(
