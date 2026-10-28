@@ -180,10 +180,14 @@ static boolean IsExitLineSpecial(int special)
     return special == 11 || special == 51;
 }
 
+// Every special that P_UseSpecialLine (p_switch.c) acts on when the player
+// presses USE on the line's front side: manual doors, one-shot switches, and
+// repeatable buttons. Keep in sync with that switch statement.
 static boolean IsUseTriggerLineSpecial(int special)
 {
     switch (special)
     {
+        // Manual doors
         case 1:
         case 26:
         case 27:
@@ -194,6 +198,61 @@ static boolean IsUseTriggerLineSpecial(int special)
         case 34:
         case 117:
         case 118:
+        // Switches (S1)
+        case 7:
+        case 9:
+        case 11:
+        case 14:
+        case 15:
+        case 18:
+        case 20:
+        case 21:
+        case 23:
+        case 29:
+        case 41:
+        case 49:
+        case 50:
+        case 51:
+        case 55:
+        case 71:
+        case 101:
+        case 102:
+        case 103:
+        case 111:
+        case 112:
+        case 113:
+        case 122:
+        case 127:
+        case 131:
+        case 133:
+        case 135:
+        case 137:
+        case 140:
+        // Buttons (SR)
+        case 42:
+        case 43:
+        case 45:
+        case 60:
+        case 61:
+        case 62:
+        case 63:
+        case 64:
+        case 65:
+        case 66:
+        case 67:
+        case 68:
+        case 69:
+        case 70:
+        case 99:
+        case 114:
+        case 115:
+        case 116:
+        case 123:
+        case 132:
+        case 134:
+        case 136:
+        case 138:
+        case 139:
             return true;
         default:
             return false;
