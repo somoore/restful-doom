@@ -23,7 +23,14 @@ from .env import (
     DoomAgentEnv,
     DoomEnvConfig,
 )
-from .ppo import BehaviorCloneSample, PPOConfig, PPOTrainer, require_torch
+from .ppo import (
+    ACTION_SPACE_PRIMITIVE,
+    ACTION_SPACE_SKILL,
+    BehaviorCloneSample,
+    PPOConfig,
+    PPOTrainer,
+    require_torch,
+)
 from .ppo_eval import (
     decide_promotion,
     evaluate_checkpoint,
@@ -60,6 +67,13 @@ def _action_dim_for(args: argparse.Namespace) -> int:
     return len(ACTION_SCHEMA["actions"])
 
 
+def _action_space_for(args: argparse.Namespace) -> str:
+    """Returns the checkpoint action-space identifier for the configured mode."""
+    if bool(getattr(args, "primitive_actions", False)):
+        return ACTION_SPACE_PRIMITIVE
+    return ACTION_SPACE_SKILL
+
+
 async def train(args: argparse.Namespace) -> dict[str, object]:
     """Runs PPO collection and update batches."""
     require_torch()
@@ -94,6 +108,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
             device=args.device,
             target_obs_dim=len(OBSERVATION_SCHEMA["feature_names"]),
             target_action_dim=_action_dim_for(args),
+            target_action_space=_action_space_for(args),
         )
     else:
         trainer = PPOTrainer(
@@ -101,6 +116,7 @@ async def train(args: argparse.Namespace) -> dict[str, object]:
             action_dim=_action_dim_for(args),
             config=ppo_config,
             device=args.device,
+            action_space=_action_space_for(args),
         )
     reference_kl_coef = ppo_config.reference_kl_coef
     aux_bc_coef = ppo_config.aux_bc_coef

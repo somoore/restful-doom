@@ -7,6 +7,7 @@ import pytest
 
 from restfuldoom_agent.brain import BT_ATTACK, BT_USE
 from restfuldoom_agent.env import (
+    ACTION_SCHEMA,
     PRIMITIVE_ACTIONS,
     DoomAgentEnv,
     DoomEnvConfig,
@@ -149,3 +150,92 @@ def test_allowed_actions_must_exist_in_active_action_space():
         DoomAgentEnv(DoomEnvConfig(primitive_actions=True, allowed_skills=("engage",)))
     with pytest.raises(ValueError, match="skill action space"):
         DoomAgentEnv(DoomEnvConfig(allowed_skills=("forward_fire",)))
+
+
+def _save_checkpoint(tmp_path, name, *, action_dim, action_space=None, drop_space=False):
+    torch = pytest.importorskip("torch")
+    from restfuldoom_agent.ppo import PPOConfig, PPOTrainer
+
+    kwargs = {} if action_space is None else {"action_space": action_space}
+    trainer = PPOTrainer(
+        obs_dim=2,
+        action_dim=action_dim,
+        config=PPOConfig(update_epochs=1, minibatch_size=4, rollout_steps=8),
+        **kwargs,
+    )
+    path = trainer.save_checkpoint(tmp_path / name)
+    if drop_space:
+        # Checkpoints written before the action space was recorded.
+        payload = torch.load(path, map_location="cpu")
+        payload.pop("action_space")
+        payload["action_schema"] = ACTION_SCHEMA
+        torch.save(payload, path)
+    return path
+
+
+def test_checkpoint_records_and_enforces_action_space(tmp_path):
+    from restfuldoom_agent.ppo import PPOTrainer
+
+    skill_dim = len(ACTION_SCHEMA["actions"])
+    primitive_dim = len(PRIMITIVE_ACTIONS)
+
+    skill = _save_checkpoint(tmp_path, "skill.pt", action_dim=skill_dim)
+    with pytest.raises(ValueError, match="'skill' action space"):
+        PPOTrainer.load_checkpoint(
+            skill,
+            target_obs_dim=2,
+            target_action_dim=primitive_dim,
+            target_action_space="primitive",
+        )
+    assert PPOTrainer.load_checkpoint(skill, target_action_space="skill").action_space == "skill"
+
+    primitive = _save_checkpoint(
+        tmp_path, "primitive.pt", action_dim=primitive_dim, action_space="primitive"
+    )
+    loaded = PPOTrainer.load_checkpoint(
+        primitive,
+        target_obs_dim=2,
+        target_action_dim=primitive_dim,
+        target_action_space="primitive",
+    )
+    assert loaded.action_space == "primitive"
+    assert loaded.resume_migration is None
+    with pytest.raises(ValueError, match="'primitive' action space"):
+        PPOTrainer.load_checkpoint(primitive, target_action_space="skill")
+
+
+def test_legacy_checkpoints_infer_action_space(tmp_path):
+    from restfuldoom_agent.ppo import PPOTrainer
+
+    skill_dim = len(ACTION_SCHEMA["actions"])
+    primitive_dim = len(PRIMITIVE_ACTIONS)
+
+    legacy_skill = _save_checkpoint(
+        tmp_path, "legacy-skill.pt", action_dim=skill_dim, drop_space=True
+    )
+    with pytest.raises(ValueError, match="'skill' action space"):
+        PPOTrainer.load_checkpoint(
+            legacy_skill,
+            target_obs_dim=2,
+            target_action_dim=primitive_dim,
+            target_action_space="primitive",
+        )
+
+    # Primitive runs from before the field existed saved the skill schema next
+    # to a wider primitive head; that shape identifies them.
+    legacy_primitive = _save_checkpoint(
+        tmp_path,
+        "legacy-primitive.pt",
+        action_dim=primitive_dim,
+        action_space="primitive",
+        drop_space=True,
+    )
+    loaded = PPOTrainer.load_checkpoint(
+        legacy_primitive,
+        target_obs_dim=2,
+        target_action_dim=primitive_dim,
+        target_action_space="primitive",
+    )
+    assert loaded.action_space == "primitive"
+    with pytest.raises(ValueError, match="'primitive' action space"):
+        PPOTrainer.load_checkpoint(legacy_primitive, target_action_space="skill")
