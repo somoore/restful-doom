@@ -4532,3 +4532,23 @@ def test_doom_agent_env_step_time_penalty_reduces_reward_per_macro_step():
 
     # Default (0.0) leaves reward unchanged.
     assert penalized.reward == pytest.approx(baseline.reward - 0.25)
+
+
+def test_skill_controller_advances_futile_door_run_per_skill_decision(tmp_path):
+    controller = SkillController(memory=AgentMemory.load(tmp_path / "memory.json"))
+    route = SKILL_ACTIONS.index("route_progression")
+
+    def frozen_door(tick):
+        state = _state(tick=tick)
+        state.navigation.front_blocking_line_special = 1
+        state.navigation.front_block_distance_fp = 16 * 65536
+        return state
+
+    # The first decision records the frozen distance; each later one counts.
+    for step in range(6):
+        controller.action_for(route, frozen_door(100 + step))
+    assert controller.policy._futile_door_use_run == 5
+
+    # Leaving the door resets the run, exactly as on the standalone brain path.
+    controller.action_for(route, _state(tick=200))
+    assert controller.policy._futile_door_use_run == 0

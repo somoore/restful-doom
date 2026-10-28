@@ -551,6 +551,9 @@ class SkillController:
         self.policy._episode_cell_visits[features.cell] = (
             self.policy._episode_cell_visits.get(features.cell, 0) + 1
         )
+        # Mirror BrainPolicy._decide: PPO skills bypass it, so advance the
+        # futile-door run once per executed skill decision here.
+        self.policy._update_futile_door_run(features)
         stuck = self.policy._is_stuck(features)
         skill = SKILL_ACTIONS[action_index]
         action, decision = self._execute_skill(skill, features, stuck)
