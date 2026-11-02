@@ -52,6 +52,10 @@ jobs:
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -e ./agent pytest
 
+      - name: Generate protobuf stubs
+        working-directory: agent
+        run: python -m restfuldoom_agent.generate_stubs
+
       - name: Run tests
         working-directory: agent
         run: python -m pytest -q
