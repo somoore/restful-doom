@@ -18,6 +18,11 @@
 #include "api_door_controller.h"
 #include "api_object_controller.h"
 
+/* Shared control state declared in api.h. Defined once here so every
+   translation unit sees the same object. */
+int keys_down[NUMKEYS];
+int target_angle;
+
 
 #define API_TOKEN_MAX 256
 
