@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import os
 import random
+import secrets
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -39,8 +41,40 @@ def _repo_root() -> Path:
 ROOT = _repo_root()
 AGENT_ROOT = ROOT / "agent"
 MCP = FastMCP("restful-doom")
-VIEWER_PID_FILE = Path("/tmp/restfuldoom-mcp-viewer.pid")
-VIEWER_LOG_FILE = Path("/tmp/restfuldoom-mcp-viewer.log")
+
+
+def _state_dir() -> Path:
+    """Per-user, private directory for viewer state.
+
+    Never /tmp: a world-writable location lets another local user pre-create
+    the PID file or symlink the log.
+    """
+    override = os.environ.get("RESTFUL_DOOM_STATE_DIR")
+    if override:
+        path = Path(override).expanduser()
+    elif sys.platform == "darwin":
+        path = Path.home() / "Library" / "Application Support" / "restfuldoom"
+    else:
+        base = os.environ.get("XDG_STATE_HOME")
+        path = (
+            Path(base).expanduser() / "restfuldoom"
+            if base
+            else Path.home() / ".local" / "state" / "restfuldoom"
+        )
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        path.chmod(0o700)
+    except OSError:
+        pass
+    return path
+
+
+def _viewer_pid_file() -> Path:
+    return _state_dir() / "viewer.pid"
+
+
+def _viewer_log_file() -> Path:
+    return _state_dir() / "viewer.log"
 
 
 @MCP.tool()
@@ -68,6 +102,11 @@ def docker_start(
     if replace:
         _run(["docker", "rm", "-f", container], check=False, timeout_seconds=30)
 
+    # The API/gRPC listeners bind all interfaces *inside* the container so the
+    # port publish works, but the publish itself is loopback-only. Mutating
+    # REST requests then require this per-container token.
+    api_token = os.environ.get("DOOM_API_TOKEN") or secrets.token_urlsafe(32)
+
     docker_args = [
         "docker",
         "run",
@@ -75,15 +114,21 @@ def docker_start(
         "--name",
         container,
         "-p",
-        f"{agent_port}:50051",
+        f"127.0.0.1:{agent_port}:50051",
         "-p",
-        f"{api_port}:6666",
+        f"127.0.0.1:{api_port}:6666",
         "-p",
-        f"{ready_port}:9000",
+        f"127.0.0.1:{ready_port}:9000",
         "-e",
         "DOOM_AGENT_PORT=50051",
         "-e",
         "DOOM_API_PORT=6666",
+        "-e",
+        "DOOM_API_BIND=0.0.0.0",
+        "-e",
+        "DOOM_GRPC_BIND=0.0.0.0",
+        "-e",
+        f"DOOM_API_TOKEN={api_token}",
         "-e",
         f"DOOM_VIDEO_MODE={'mjpeg' if video else 'headless'}",
     ]
@@ -91,7 +136,7 @@ def docker_start(
         docker_args.extend(
             [
                 "-p",
-                f"{video_port}:6080",
+                f"127.0.0.1:{video_port}:6080",
                 "-e",
                 "DOOM_VIDEO_PORT=6080",
                 "-e",
@@ -112,6 +157,7 @@ def docker_start(
         "image": image,
         "agent_endpoint": f"127.0.0.1:{agent_port}",
         "api_endpoint": f"127.0.0.1:{api_port}",
+        "api_token": api_token,
         "video_url": f"http://127.0.0.1:{video_port}" if video else None,
         "ready": ready,
         "video_ready": video_ready,
@@ -188,14 +234,19 @@ def viewer_start(
             "started": False,
             "pid": running,
             "url": f"http://{host}:{port}",
-            "log": str(VIEWER_LOG_FILE),
+            "log": str(_viewer_log_file()),
             "message": "viewer is already running",
         }
 
     env = dict(os.environ)
     env["RESTFUL_DOOM_REPO"] = str(ROOT)
     env["PYTHONPATH"] = f"{ROOT / 'mcp'}:{ROOT / 'agent'}"
-    with VIEWER_LOG_FILE.open("ab") as log:
+    log_fd = os.open(
+        _viewer_log_file(),
+        os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    with os.fdopen(log_fd, "ab") as log:
         process = subprocess.Popen(
             [
                 sys.executable,
@@ -217,7 +268,7 @@ def viewer_start(
             close_fds=True,
         )
 
-    VIEWER_PID_FILE.write_text(str(process.pid), encoding="utf-8")
+    _write_viewer_pid(process.pid)
     ready = _wait_for_tcp(host, port, timeout_seconds=10)
     return {
         "started": True,
@@ -225,7 +276,7 @@ def viewer_start(
         "ready": ready,
         "url": f"http://{host}:{port}",
         "endpoint": endpoint,
-        "log": str(VIEWER_LOG_FILE),
+        "log": str(_viewer_log_file()),
     }
 
 
@@ -234,19 +285,19 @@ def viewer_stop() -> dict[str, Any]:
     """Stop the browser spectator process."""
     pid = _viewer_process()
     if pid is None:
-        VIEWER_PID_FILE.unlink(missing_ok=True)
+        _viewer_pid_file().unlink(missing_ok=True)
         return {"stopped": False, "message": "viewer is not running"}
 
     os.kill(pid, signal.SIGTERM)
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         if not _pid_running(pid):
-            VIEWER_PID_FILE.unlink(missing_ok=True)
+            _viewer_pid_file().unlink(missing_ok=True)
             return {"stopped": True, "pid": pid}
         time.sleep(0.1)
 
     os.kill(pid, signal.SIGKILL)
-    VIEWER_PID_FILE.unlink(missing_ok=True)
+    _viewer_pid_file().unlink(missing_ok=True)
     return {"stopped": True, "pid": pid, "forced": True}
 
 
@@ -262,7 +313,7 @@ def viewer_status(
         "pid": pid,
         "url": f"http://{host}:{port}",
         "http_ready": _tcp_connect(host, port, timeout_seconds=1.0),
-        "log": str(VIEWER_LOG_FILE),
+        "log": str(_viewer_log_file()),
     }
 
 
@@ -591,14 +642,64 @@ def _tcp_connect(host: str, port: int, *, timeout_seconds: float) -> bool:
         return False
 
 
-def _viewer_process() -> int | None:
+def _write_viewer_pid(pid: int) -> None:
+    """Atomically write the viewer PID with owner-only permissions."""
+    path = _viewer_pid_file()
+    fd, temporary = tempfile.mkstemp(dir=str(path.parent), prefix=".viewer-pid-")
     try:
-        pid = int(VIEWER_PID_FILE.read_text(encoding="utf-8").strip())
-    except (FileNotFoundError, ValueError):
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(str(pid))
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
+
+
+def _read_viewer_pid() -> int | None:
+    path = _viewer_pid_file()
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
         return None
-    if _pid_running(pid):
+    try:
+        with os.fdopen(fd, "r", encoding="utf-8") as handle:
+            text = handle.read(64).strip()
+    except OSError:
+        return None
+    try:
+        pid = int(text)
+    except ValueError:
+        return None
+    return pid if pid > 1 else None
+
+
+def _pid_looks_like_viewer(pid: int) -> bool:
+    """Do not trust a PID file alone before sending signals."""
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    command = result.stdout.strip()
+    return "restfuldoom_mcp.viewer" in command or "restfuldoom_mcp/viewer" in command
+
+
+def _viewer_process() -> int | None:
+    pid = _read_viewer_pid()
+    if pid is None:
+        return None
+    if _pid_running(pid) and _pid_looks_like_viewer(pid):
         return pid
-    VIEWER_PID_FILE.unlink(missing_ok=True)
+    _viewer_pid_file().unlink(missing_ok=True)
     return None
 
 

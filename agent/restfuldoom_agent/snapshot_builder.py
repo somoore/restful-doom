@@ -327,6 +327,14 @@ def _stage_from_record(
     return stage
 
 
+_SHELL_METACHARACTERS = frozenset("|&;<>()$`\\\n\r*?[]{}~!#")
+
+
+def _capture_uses_shell(command: str) -> bool:
+    """Only hand the template to a shell when it needs shell syntax."""
+    return any(character in _SHELL_METACHARACTERS for character in command)
+
+
 def _run_capture_command(
     template: str,
     stage: dict[str, Any],
@@ -336,10 +344,12 @@ def _run_capture_command(
     timeout_seconds: float,
 ) -> dict[str, Any]:
     command = _render_capture_command(template, stage, trajectory=trajectory)
+    use_shell = _capture_uses_shell(command)
+    argv: str | list[str] = command if use_shell else shlex.split(command)
     started = time.time()
     completed = subprocess.run(
-        command,
-        shell=True,
+        argv,
+        shell=use_shell,
         cwd=str(cwd) if cwd is not None else None,
         timeout=timeout_seconds,
         text=True,
@@ -356,6 +366,24 @@ def _run_capture_command(
     }
 
 
+def _capture_int(value: object, field: str) -> str:
+    """Coerce a trajectory-supplied value to an integer literal.
+
+    ``{tick}`` and ``{record_index}`` come from trajectory/state JSON and are
+    substituted into a shell command template. Anything that is not a plain
+    integer is rejected rather than passed through to the shell.
+    """
+    text = "" if value is None else str(value).strip()
+    if text == "":
+        return ""
+    try:
+        return str(int(text))
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"capture placeholder {{{field}}} must be an integer, got {text!r}"
+        ) from None
+
+
 def _render_capture_command(
     template: str,
     stage: dict[str, Any],
@@ -364,6 +392,10 @@ def _render_capture_command(
 ) -> str:
     snapshot = stage.get("snapshot", {})
     expected = stage.get("expected_state", {})
+    tick = _capture_int(expected.get("tick", ""), "tick")
+    record_index = _capture_int(
+        stage.get("evidence", {}).get("source_record_index", ""), "record_index"
+    )
     values = {
         "stage_name": stage.get("name", ""),
         "stage_name_sh": shlex.quote(str(stage.get("name", ""))),
@@ -378,8 +410,10 @@ def _render_capture_command(
         "microvm_id_sh": shlex.quote(str(snapshot.get("microvm_id", ""))),
         "capsule": snapshot.get("capsule", ""),
         "capsule_sh": shlex.quote(str(snapshot.get("capsule", ""))),
-        "record_index": stage.get("evidence", {}).get("source_record_index", ""),
-        "tick": expected.get("tick", ""),
+        "record_index": record_index,
+        "record_index_sh": shlex.quote(record_index),
+        "tick": tick,
+        "tick_sh": shlex.quote(tick),
         "trajectory": str(trajectory),
         "trajectory_sh": shlex.quote(str(trajectory)),
     }
@@ -853,7 +887,8 @@ def _main(argv: list[str] | None = None) -> int:
         "--capture-command",
         help=(
             "optional shell command template run per stage; placeholders include "
-            "{snapshot_id_sh}, {snapshot_path_sh}, {stage_name_sh}, {record_index}, and {tick}"
+            "{snapshot_id_sh}, {snapshot_path_sh}, {stage_name_sh}, "
+            "{record_index}, {record_index_sh}, {tick}, and {tick_sh}"
         ),
     )
     parser.add_argument("--capture-cwd", type=Path)

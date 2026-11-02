@@ -52,6 +52,15 @@ VIDEO_GEOMETRY="${DOOM_VIDEO_GEOMETRY:-640x480}"
 XVFB_DISPLAY="${DOOM_XVFB_DISPLAY:-:99}"
 DOOM_VIDEO_ARGS=()
 
+# Listen on all interfaces inside the container so the loopback-only port
+# publish works. Mutating REST requests require DOOM_API_TOKEN when bound
+# off-loopback; without it the API rejects writes.
+export DOOM_GRPC_BIND="${DOOM_GRPC_BIND:-0.0.0.0}"
+export DOOM_API_BIND="${DOOM_API_BIND:-0.0.0.0}"
+if [ -z "${DOOM_API_TOKEN:-}" ]; then
+    LOG "WARNING: DOOM_API_TOKEN is unset; mutating REST requests will be rejected"
+fi
+
 if [ "$VIDEO_MODE" = "mjpeg" ]; then
     export DISPLAY="$XVFB_DISPLAY"
     export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-x11}"

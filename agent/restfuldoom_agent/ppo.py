@@ -574,7 +574,7 @@ class PPOTrainer:
         than having its logits reinterpreted (or expanded) under new meanings.
         """
         require_torch()
-        checkpoint = torch.load(Path(path), map_location=device)
+        checkpoint = torch.load(Path(path), map_location=device, weights_only=True)
         if checkpoint.get("schema") != PPO_CHECKPOINT_SCHEMA:
             raise ValueError(
                 f"expected {PPO_CHECKPOINT_SCHEMA}, got {checkpoint.get('schema')!r}"

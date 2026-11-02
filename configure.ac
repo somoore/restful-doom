@@ -39,6 +39,13 @@ if test "$GCC" = "yes"
 then
         WARNINGS="-Wall -Wdeclaration-after-statement -Wredundant-decls"
         CFLAGS="-O$OPT_LEVEL -g $WARNINGS $orig_CFLAGS"
+        dnl Harden the network-facing C surface: stack canaries and, when
+        dnl optimising, glibc's _FORTIFY_SOURCE checked string/memory calls.
+        AS_IF([test "x$OPT_LEVEL" != "x0"], [
+                CFLAGS="$CFLAGS -fstack-protector-strong -D_FORTIFY_SOURCE=2"
+        ], [
+                CFLAGS="$CFLAGS -fstack-protector-strong"
+        ])
 fi
 
 dnl Search for SDL ...

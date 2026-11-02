@@ -997,6 +997,13 @@ and run a deterministic rollout that writes JSONL trajectories. The optional
 protobuf spectator remains available at `http://127.0.0.1:8765` for debugging.
 See `docs/codex-mcp.md`.
 
+The MCP `docker_start` tool publishes every port on `127.0.0.1` only and starts
+the container with a generated `DOOM_API_TOKEN`. Send that token as
+`Authorization: Bearer <token>` (or `X-Doom-Token: <token>`) with REST
+`POST`/`PATCH`/`DELETE` requests; reads remain unauthenticated on the loopback
+publish. When running the image by hand, set `-e DOOM_API_TOKEN=...` or
+mutating REST requests are rejected.
+
 ### Resilient Rollout Demo
 
 Run a long-lived rollout with a narratable goal and incremental trajectory log:

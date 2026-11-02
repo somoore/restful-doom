@@ -67,11 +67,19 @@ api_response_t API_PostObject(cJSON *req)
         return API_CreateErrorResponse(403, "Clients may not spawn objects");
 
     pobj = players[consoleplayer].mo;
+    if (pobj == NULL)
+    {
+        return API_CreateErrorResponse(409, "player has no active mobj");
+    }
     angle = pobj->angle >> ANGLETOFINESHIFT;
 
     val = cJSON_GetObjectItem(req, "distance");
     if (val)
     {
+        if (!cJSON_IsNumber(val))
+        {
+            return API_CreateErrorResponse(400, "distance must be a number");
+        }
         dist = API_FloatToFixed(val->valueint);
         x = pobj->x + FixedMul(dist, finecosine[angle]);
         y = pobj->y + FixedMul(dist, finesine[angle]);
@@ -80,17 +88,38 @@ api_response_t API_PostObject(cJSON *req)
     else
     {
         pos = cJSON_GetObjectItem(req, "position");
+        if (!cJSON_IsObject(pos))
+        {
+            return API_CreateErrorResponse(400, "position object is required");
+        }
         val = cJSON_GetObjectItem(pos, "x");
+        if (!cJSON_IsNumber(val))
+        {
+            return API_CreateErrorResponse(400, "position.x must be a number");
+        }
         x = API_FloatToFixed(val->valuedouble);
         val = cJSON_GetObjectItem(pos, "y");
+        if (!cJSON_IsNumber(val))
+        {
+            return API_CreateErrorResponse(400, "position.y must be a number");
+        }
         y = API_FloatToFixed(val->valuedouble);
         val = cJSON_GetObjectItem(pos, "z");
+        if (!cJSON_IsNumber(val))
+        {
+            return API_CreateErrorResponse(400, "position.z must be a number");
+        }
         z = API_FloatToFixed(val->valuedouble);
     }
 
-    type = cJSON_GetObjectItem(req, "type")->valuestring;
+    val = cJSON_GetObjectItem(req, "type");
+    if (!cJSON_IsString(val))
+    {
+        return API_CreateErrorResponse(400, "type not specified or not a string");
+    }
+    type = val->valuestring;
     typeNbr = GetInternalTypeIdFromObjectDescription(type);
-    if (typeNbr == -1)
+    if (typeNbr == -1 || typeNbr < 0 || typeNbr >= NUMMOBJTYPES)
     {
         return API_CreateErrorResponse(400, "type not found");
     }
@@ -98,10 +127,24 @@ api_response_t API_PostObject(cJSON *req)
     mobj = P_SpawnMobj(x, y, z, typeNbr);
 
     val = cJSON_GetObjectItem(req, "angle");
-    if (val) mobj->angle = degreesToAngle(val->valueint);
+    if (val)
+    {
+        if (!cJSON_IsNumber(val))
+        {
+            return API_CreateErrorResponse(400, "angle must be a number");
+        }
+        mobj->angle = degreesToAngle(val->valueint);
+    }
 
     val = cJSON_GetObjectItem(req, "id");
-    if (val) mobj->id = val->valueint;
+    if (val)
+    {
+        if (!cJSON_IsNumber(val))
+        {
+            return API_CreateErrorResponse(400, "id must be a number");
+        }
+        mobj->id = val->valueint;
+    }
 
     root = DescribeMObj(mobj);
     return (api_response_t) {201, root};
@@ -117,6 +160,11 @@ api_response_t API_GetObjects(int max_distance)
 
     root = cJSON_CreateArray();
     player = players[consoleplayer].mo;
+    if (player == NULL)
+    {
+        cJSON_Delete(root);
+        return API_CreateErrorResponse(409, "player has no active mobj");
+    }
     for (int i = 0; i < numsectors; i++) {
         t = sectors[i].thinglist;
         while (t)
@@ -156,29 +204,58 @@ api_response_t API_PatchObject(int id, cJSON *req)
     }
     pos = cJSON_GetObjectItem(req, "position");
     if (pos) {
+        cJSON *vx;
+        cJSON *vy;
+        cJSON *vz;
+        if (!cJSON_IsObject(pos))
+        {
+            return API_CreateErrorResponse(400, "position must be an object");
+        }
+        vx = cJSON_GetObjectItem(pos, "x");
+        vy = cJSON_GetObjectItem(pos, "y");
+        vz = cJSON_GetObjectItem(pos, "z");
+        if ((vx && !cJSON_IsNumber(vx)) ||
+            (vy && !cJSON_IsNumber(vy)) ||
+            (vz && !cJSON_IsNumber(vz)))
+        {
+            return API_CreateErrorResponse(400, "position values must be numbers");
+        }
+
         P_UnsetThingPosition(obj);
-        val = cJSON_GetObjectItem(pos, "x");
-        if (val) obj->x = API_FloatToFixed(val->valuedouble);
-        
-        val = cJSON_GetObjectItem(pos, "y");
-        if (val) obj->y = API_FloatToFixed(val->valuedouble);
-        
-        val = cJSON_GetObjectItem(pos, "z");
-        if (val) obj->z = API_FloatToFixed(val->valuedouble);
-        
+        if (vx) obj->x = API_FloatToFixed(vx->valuedouble);
+        if (vy) obj->y = API_FloatToFixed(vy->valuedouble);
+        if (vz) obj->z = API_FloatToFixed(vz->valuedouble);
         P_SetThingPosition(obj);
     }
     val = cJSON_GetObjectItem(req, "angle");
-    if (val) obj->angle = degreesToAngle(val->valueint);
+    if (val)
+    {
+        if (!cJSON_IsNumber(val))
+        {
+            return API_CreateErrorResponse(400, "angle must be a number");
+        }
+        obj->angle = degreesToAngle(val->valueint);
+    }
 
     val = cJSON_GetObjectItem(req, "health");
-    if (val) obj->health = val->valueint;
+    if (val)
+    {
+        if (!cJSON_IsNumber(val))
+        {
+            return API_CreateErrorResponse(400, "health must be a number");
+        }
+        obj->health = val->valueint;
+    }
 
     val = cJSON_GetObjectItem(req, "attacking");
     if (val)
     {
+        if (!cJSON_IsNumber(val))
+        {
+            return API_CreateErrorResponse(400, "attacking must be a number");
+        }
         obj_to_attack = FindObjectById(val->valueint);
-        if (!obj) {
+        if (!obj_to_attack) {
             return API_CreateErrorResponse(400, "attacking object not valid");
         }
         obj->target = obj_to_attack;

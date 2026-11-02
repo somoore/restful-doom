@@ -8,7 +8,7 @@
 // Rust guideline compliant 2026-02-21
 
 use std::collections::{HashMap, VecDeque};
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 
@@ -995,7 +995,13 @@ fn run_server(runtime: AgentRuntime, port: u16) {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .try_init();
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    // Loopback by default; the capsule container opts into 0.0.0.0 explicitly
+    // because its ports are published on the host loopback.
+    let bind_ip = std::env::var("DOOM_GRPC_BIND")
+        .ok()
+        .and_then(|value| value.parse::<IpAddr>().ok())
+        .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
+    let addr = SocketAddr::new(bind_ip, port);
     event!(
         name: "restfuldoom.grpc.start",
         Level::INFO,

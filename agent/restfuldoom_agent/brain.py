@@ -5119,7 +5119,10 @@ def import_training_job(
             if member.name == "manifest.json":
                 continue
             _safe_extract_member(archive, member, dest)
-    memory_path = dest / manifest["memory_path"]
+    dest_root = dest.resolve()
+    memory_path = (dest / manifest["memory_path"]).resolve()
+    if memory_path != dest_root and dest_root not in memory_path.parents:
+        raise ValueError("manifest memory_path escapes the destination directory")
     path_rewrite_count = 0
     if memory_path.exists():
         memory = AgentMemory.load(memory_path)
@@ -5574,7 +5577,13 @@ def _safe_extract_member(
     root = destination.resolve()
     if root not in target.parents and target != root:
         raise ValueError(f"refusing to extract unsafe path {member.name!r}")
-    archive.extract(member, destination)
+    if member.issym() or member.islnk():
+        raise ValueError(f"refusing to extract link member {member.name!r}")
+    try:
+        archive.extract(member, destination, filter="data")
+    except TypeError:
+        # Python < 3.12 has no extraction filter.
+        archive.extract(member, destination)
 
 
 def _threat(distance: float, health: int, line_of_sight: bool, angle_delta: float) -> float:

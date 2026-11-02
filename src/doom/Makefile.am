@@ -76,6 +76,7 @@ deh_weapon.c
 FEATURE_REST_API_SOURCE_FILES =            \
 agent_bridge.c agent_bridge.h \
 api.c      api.h         \
+api_request.c api_validate.h \
 api_cJSON.c    api_cJSON.h \
 api_yuarel.c    api_yuarel.h \
 api_player_controller.c api_player_controller.h \

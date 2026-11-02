@@ -300,7 +300,13 @@ api_response_t patchPlayer(cJSON *req, int playernum)
     if (val)
     {
 	    if (cJSON_IsNumber(val))
+        {
+            if (!API_WeaponNumberInRange(val->valueint, NUMWEAPONS))
+            {
+                return API_CreateErrorResponse(400, "weapon is out of range");
+            }
             player->weaponowned[val->valueint - 1] = true;
+        }
         else
             return API_CreateErrorResponse(400, "Weapon value must be integer");
     }
@@ -312,7 +318,17 @@ api_response_t patchPlayer(cJSON *req, int playernum)
         if (amount && cJSON_IsNumber(amount))
         {
 	        if (cJSON_IsNumber(val))
+            {
+                if (!API_IndexInRange(val->valueint, NUMAMMO))
+                {
+                    return API_CreateErrorResponse(400, "ammo is out of range");
+                }
+                if (amount->valueint < 0)
+                {
+                    return API_CreateErrorResponse(400, "ammo amount must be non-negative");
+                }
                 player->ammo[val->valueint] = amount->valueint;
+            }
             else
                 return API_CreateErrorResponse(400, "Ammo value must be integer");
         }
@@ -336,6 +352,10 @@ api_response_t patchPlayer(cJSON *req, int playernum)
     {
 	    if (cJSON_IsNumber(val))
         {
+            if (player->mo == NULL)
+            {
+                return API_CreateErrorResponse(409, "player has no active mobj");
+            }
             // we have to set both of these at the same time
             player->health = val->valueint;
             player->mo->health = val->valueint;
@@ -393,7 +413,11 @@ api_response_t deletePlayer(int playernum)
 
     if (M_CheckParm("-connect") > 0)
         return API_CreateErrorResponse(403, "Clients may not kill players");
-    player = &players[playernum];  
+    player = &players[playernum];
+    if (player->mo == NULL)
+    {
+        return API_CreateErrorResponse(409, "player has no active mobj");
+    }
     P_KillMobj(NULL, player->mo);
     player_obj = getPlayer(playernum);
     return (api_response_t) {200, player_obj};

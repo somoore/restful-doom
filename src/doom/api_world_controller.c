@@ -2,6 +2,9 @@
 #include "g_game.h"
 #include "p_local.h"
 #include "v_video.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 // externally-defined game variables
@@ -31,7 +34,14 @@ cJSON *DescribeWorldState()
     iwadname = myargv[iwadparm + 1];
     cJSON_AddStringToObject(root, "wad", iwadname);
 
-    cJSON_AddStringToObject(root, "skill", doom_skills[gameskill]);
+    if (API_IndexInRange((int)gameskill, (int)(sizeof(doom_skills) / sizeof(doom_skills[0]))))
+    {
+        cJSON_AddStringToObject(root, "skill", doom_skills[gameskill]);
+    }
+    else
+    {
+        cJSON_AddStringToObject(root, "skill", "unknown");
+    }
 
     if (players[consoleplayer].mo != NULL)
     {
@@ -57,6 +67,9 @@ api_response_t API_PatchWorld(cJSON *req)
 {
     cJSON *val;
     boolean changed = false;
+    int new_episode = gameepisode;
+    int new_map = gamemap;
+    int new_skill = (int)gameskill;
 
     if (M_CheckParm("-connect") > 0)
         return API_CreateErrorResponse(403, "clients may not patch the world");
@@ -66,7 +79,11 @@ api_response_t API_PatchWorld(cJSON *req)
     {
         if (cJSON_IsNumber(val))
         {
-            gameepisode = val->valueint;
+            if (val->valueint < 1 || val->valueint > 4)
+            {
+                return API_CreateErrorResponse(400, "episode must be between 1 and 4");
+            }
+            new_episode = val->valueint;
             changed = true;
         }
         else
@@ -80,7 +97,11 @@ api_response_t API_PatchWorld(cJSON *req)
     {
         if (cJSON_IsNumber(val))
         {
-            gamemap = val->valueint;
+            if (val->valueint < 1 || val->valueint > 9)
+            {
+                return API_CreateErrorResponse(400, "map must be between 1 and 9");
+            }
+            new_map = val->valueint;
             changed = true;
         }
         else
@@ -94,7 +115,11 @@ api_response_t API_PatchWorld(cJSON *req)
     {
         if (cJSON_IsNumber(val))
         {
-            gameskill = val->valueint;
+            if (val->valueint < sk_baby || val->valueint > sk_nightmare)
+            {
+                return API_CreateErrorResponse(400, "skill must be between 0 and 4");
+            }
+            new_skill = val->valueint;
             changed = true;
         }
         else
@@ -105,6 +130,9 @@ api_response_t API_PatchWorld(cJSON *req)
 
     if (changed) 
     {
+        gameskill = new_skill;
+        gameepisode = new_episode;
+        gamemap = new_map;
         G_DeferedInitNew (gameskill, gameepisode, gamemap);
     }
 
@@ -113,6 +141,10 @@ api_response_t API_PatchWorld(cJSON *req)
     {
         if (cJSON_IsString(val))
         {
+            if (players[consoleplayer].mo == NULL)
+            {
+                return API_CreateErrorResponse(409, "player has no active mobj");
+            }
             if (strcmp(val->valuestring, "on") == 0) 
             {
                 struct line_s *line = players[consoleplayer].mo->subsector->sector->lines[0];
@@ -133,13 +165,60 @@ api_response_t API_PatchWorld(cJSON *req)
     return (api_response_t) { 200, DescribeWorldState() };
 }
 
+static char screenshot_dir[512];
+
+static const char *API_ScreenshotDir(void)
+{
+    const char *base;
+
+    if (screenshot_dir[0] != '\0')
+    {
+        return screenshot_dir;
+    }
+
+    base = getenv("TMPDIR");
+    if (base == NULL || *base == '\0')
+    {
+        base = "/tmp";
+    }
+
+    if (snprintf(screenshot_dir, sizeof(screenshot_dir), "%s/restfuldoom-XXXXXX", base)
+            >= (int)sizeof(screenshot_dir))
+    {
+        screenshot_dir[0] = '\0';
+        return NULL;
+    }
+
+    if (mkdtemp(screenshot_dir) == NULL)
+    {
+        screenshot_dir[0] = '\0';
+        return NULL;
+    }
+
+    return screenshot_dir;
+}
+
 api_response_t API_GetWorldScreenshot()
 {
     cJSON *body;
+    const char *dir;
+    char pcx_path[600];
+    char pattern[600];
 
-    unlink("/tmp/DOOM00.pcx");
-    V_ScreenShot("/tmp/DOOM%02i.%s");
+    dir = API_ScreenshotDir();
+    if (dir == NULL)
+    {
+        return API_CreateErrorResponse(500, "screenshot directory unavailable");
+    }
+
+    snprintf(pcx_path, sizeof(pcx_path), "%s/DOOM00.pcx", dir);
+    snprintf(pattern, sizeof(pattern), "%s/DOOM%%02i.%%s", dir);
+
+    // Private, mkdtemp-created directory: no predictable /tmp path and no
+    // symlink target for a local attacker to redirect the write.
+    unlink(pcx_path);
+    V_ScreenShot(pattern);
     body = cJSON_CreateObject();
-    cJSON_AddStringToObject(body, "path", "/tmp/DOOM00.pcx");
+    cJSON_AddStringToObject(body, "path", pcx_path);
     return (api_response_t) {200, body};
 }

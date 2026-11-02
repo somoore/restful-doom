@@ -274,7 +274,9 @@ case "${1:-}" in
         ;;
     token)
         mkdir -p "$(dirname "$TOKEN_JSON")"
-        "$HELLBOX_CLI" token "$NAME" --port "$AGENT_PORT" --minutes "$TOKEN_MINUTES" --raw > "$TOKEN_JSON"
+        # The token JSON is a bearer credential: never leave it world-readable.
+        (umask 077 && "$HELLBOX_CLI" token "$NAME" --port "$AGENT_PORT" --minutes "$TOKEN_MINUTES" --raw > "$TOKEN_JSON")
+        chmod 600 "$TOKEN_JSON"
         note "token"
         print_redacted_token_json
         ;;

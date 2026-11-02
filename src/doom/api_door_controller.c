@@ -30,13 +30,29 @@ boolean IsLineADoor(line_t *line)
     }
 }
 
+static sector_t *DoorSector(line_t *line)
+{
+    if (line == NULL)
+    {
+        return NULL;
+    }
+    // sidenum[1] is -1 for a one-sided line; never index with it.
+    if (line->sidenum[1] < 0 || line->sidenum[1] >= numsides)
+    {
+        return NULL;
+    }
+    return sides[line->sidenum[1]].sector;
+}
+
 cJSON* DescribeDoor(int id, line_t *line)
 {
-    sector_t *sec = sides[line->sidenum[1]].sector;
+    sector_t *sec = DoorSector(line);
     cJSON *door = cJSON_CreateObject();
     cJSON_AddNumberToObject(door, "id", id);
     cJSON_AddNumberToObject(door, "specialType", line->special);
-    cJSON_AddStringToObject(door, "state", sec->floorheight == sec->ceilingheight ? "closed" : "open");
+    cJSON_AddStringToObject(door, "state",
+                            sec == NULL ? "unknown"
+                                        : (sec->floorheight == sec->ceilingheight ? "closed" : "open"));
     char *key_color = "none";
     switch (line->special) {
         case 26:
@@ -75,10 +91,28 @@ api_response_t API_GetDoors(int max_distance)
     int sectorCount = 0;
     cJSON *root = cJSON_CreateArray();
 
+    if (player == NULL)
+    {
+        cJSON_Delete(root);
+        return API_CreateErrorResponse(409, "player has no active mobj");
+    }
+
     for (int i = 0; i < numlines; i++)
     {
         line_t *line = &lines[i];
-        sector_t *sec = sides[line->sidenum[1]].sector;
+        sector_t *sec;
+
+        if (!IsLineADoor(line))
+        {
+            continue;
+        }
+
+        sec = DoorSector(line);
+        if (sec == NULL)
+        {
+            continue;
+        }
+
         int seenSector = 0;
         for (int j = 0; j < sectorCount; j++)
         {
@@ -88,7 +122,7 @@ api_response_t API_GetDoors(int max_distance)
                 break;
             }
         }
-        if (seenSector || !IsLineADoor(line))
+        if (seenSector)
         {
             continue;
         }
@@ -100,7 +134,10 @@ api_response_t API_GetDoors(int max_distance)
             cJSON_AddNumberToObject(door, "distance", dist);
             cJSON_AddItemToArray(root, door);
         }
-        sectorIds[sectorCount++] = sec->id;
+        if (sectorCount < (int)(sizeof(sectorIds) / sizeof(sectorIds[0])))
+        {
+            sectorIds[sectorCount++] = sec->id;
+        }
     }
     api_response_t resp = {200, root};
     return resp;
@@ -108,7 +145,7 @@ api_response_t API_GetDoors(int max_distance)
 
 api_response_t API_GetDoor(int id)
 {
-    if (!IsLineADoor(&lines[id]))
+    if (!API_IndexInRange(id, numlines) || !IsLineADoor(&lines[id]))
     {
         return API_CreateErrorResponse(404, "door does not exist");
     }
@@ -119,20 +156,33 @@ api_response_t API_GetDoor(int id)
 
 api_response_t API_PatchDoor(int id, cJSON *req)
 {
+    cJSON *state;
+    sector_t *sec;
+
     if (M_CheckParm("-connect") > 0)
         return API_CreateErrorResponse(403, "clients may not patch doors");
 
-    if (!IsLineADoor(&lines[id]))
+    if (!API_IndexInRange(id, numlines) || !IsLineADoor(&lines[id]))
     {
         return API_CreateErrorResponse(404, "door does not exist");
     }
-    cJSON *state = cJSON_GetObjectItem(req, "state");
+
+    state = cJSON_GetObjectItem(req, "state");
     if (state)
     {
-        sector_t *sec = sides[lines[id].sidenum[1]].sector;                
-        if ((strcmp(state->valuestring, "open") == 0 && sec->floorheight == sec->ceilingheight) ||
-            (strcmp(state->valuestring, "closed") == 0 && sec->floorheight != sec->ceilingheight))
+        if (!cJSON_IsString(state))
         {
+            return API_CreateErrorResponse(400, "state must be a string");
+        }
+        sec = DoorSector(&lines[id]);
+        if (sec != NULL &&
+            ((strcmp(state->valuestring, "open") == 0 && sec->floorheight == sec->ceilingheight) ||
+             (strcmp(state->valuestring, "closed") == 0 && sec->floorheight != sec->ceilingheight)))
+        {
+            if (players[consoleplayer].mo == NULL)
+            {
+                return API_CreateErrorResponse(409, "player has no active mobj");
+            }
             //EV_DoDoor(&lines[id], vld_open);
             EV_VerticalDoor(&lines[id], players[consoleplayer].mo);
         }

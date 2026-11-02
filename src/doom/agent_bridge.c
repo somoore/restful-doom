@@ -1,6 +1,7 @@
 #include "agent_bridge.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "d_player.h"
@@ -1231,8 +1232,15 @@ void AgentBridge_Init(int port)
     }
 
     agent_bridge_initialized = true;
-    printf("AgentBridge_Init: Listening for gRPC agent connections on 0.0.0.0:%d\n",
-           port == 0 ? 50051 : port);
+    {
+        const char *bind = getenv("DOOM_GRPC_BIND");
+        if (bind == NULL || *bind == '\0')
+        {
+            bind = "127.0.0.1";
+        }
+        printf("AgentBridge_Init: Listening for gRPC agent connections on %s:%d\n",
+               bind, port == 0 ? 50051 : port);
+    }
 }
 
 void AgentBridge_AfterTic(int completed_tic)
